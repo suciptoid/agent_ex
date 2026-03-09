@@ -11,7 +11,17 @@ defmodule AppWeb.DashboardLive do
 
   @impl true
   def handle_event("toggle_sidebar", _params, socket) do
-    {:noreply, assign(socket, :sidebar_collapsed, !socket.assigns.sidebar_collapsed)}
+    collapsed = !socket.assigns.sidebar_collapsed
+
+    {:noreply,
+     socket
+     |> assign(:sidebar_collapsed, collapsed)
+     |> push_event("sidebar_state_changed", %{collapsed: collapsed})}
+  end
+
+  @impl true
+  def handle_event("restore_sidebar_state", %{"collapsed" => collapsed}, socket) do
+    {:noreply, assign(socket, :sidebar_collapsed, collapsed)}
   end
 
   @impl true

@@ -51,6 +51,7 @@ defmodule AppWeb.UserLive.Login do
             spellcheck="false"
             required
             phx-mounted={JS.focus()}
+            id="login_magic_email"
           />
           <.button class="w-full mt-4">
             Log in with email <span aria-hidden="true">→</span>
@@ -74,6 +75,7 @@ defmodule AppWeb.UserLive.Login do
             autocomplete="username"
             spellcheck="false"
             required
+            id="login_password_email"
           />
           <.input
             field={@form[:password]}

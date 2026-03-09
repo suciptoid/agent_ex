@@ -1,71 +1,103 @@
 defmodule AppWeb.UserLive.Settings do
   use AppWeb, :live_view
 
-  on_mount {AppWeb.UserAuth, :require_sudo_mode}
-
   alias App.Users
 
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <div class="text-center">
-        <.header>
-          Account Settings
-          <:subtitle>Manage your account email address and password settings</:subtitle>
-        </.header>
+    <Layouts.dashboard
+      flash={@flash}
+      current_scope={@current_scope}
+      sidebar_collapsed={@sidebar_collapsed}
+    >
+      <div class="space-y-8">
+        <%!-- Page Header --%>
+        <div class="border-b border-gray-200 dark:border-gray-700 pb-6">
+          <h1 class="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
+            Account Settings
+          </h1>
+          <p class="mt-2 text-lg text-gray-600 dark:text-gray-300">
+            Manage your account email address and password settings
+          </p>
+        </div>
+
+        <%!-- Email Settings Card --%>
+        <.card>
+          <.card_header>
+            <.card_title>Email Address</.card_title>
+            <.card_description>Update your email address</.card_description>
+          </.card_header>
+          <.card_content>
+            <.form
+              for={@email_form}
+              id="email_form"
+              phx-submit="update_email"
+              phx-change="validate_email"
+            >
+              <.input
+                field={@email_form[:email]}
+                type="email"
+                label="Email"
+                autocomplete="username"
+                spellcheck="false"
+                required
+              />
+              <div class="mt-4">
+                <.button phx-disable-with="Changing...">Change Email</.button>
+              </div>
+            </.form>
+          </.card_content>
+        </.card>
+
+        <%!-- Password Settings Card --%>
+        <.card>
+          <.card_header>
+            <.card_title>Password</.card_title>
+            <.card_description>Update your password</.card_description>
+          </.card_header>
+          <.card_content>
+            <.form
+              for={@password_form}
+              id="password_form"
+              action={~p"/users/update-password"}
+              method="post"
+              phx-change="validate_password"
+              phx-submit="update_password"
+              phx-trigger-action={@trigger_submit}
+            >
+              <input
+                name={@password_form[:email].name}
+                type="hidden"
+                id="hidden_user_email"
+                spellcheck="false"
+                value={@current_email}
+              />
+              <.input
+                field={@password_form[:password]}
+                type="password"
+                label="New password"
+                autocomplete="new-password"
+                spellcheck="false"
+                required
+              />
+              <.input
+                field={@password_form[:password_confirmation]}
+                type="password"
+                label="Confirm new password"
+                autocomplete="new-password"
+                spellcheck="false"
+              />
+              <div class="mt-4">
+                <.button phx-disable-with="Saving...">
+                  Save Password
+                </.button>
+              </div>
+            </.form>
+          </.card_content>
+        </.card>
       </div>
-
-      <.form for={@email_form} id="email_form" phx-submit="update_email" phx-change="validate_email">
-        <.input
-          field={@email_form[:email]}
-          type="email"
-          label="Email"
-          autocomplete="username"
-          spellcheck="false"
-          required
-        />
-        <.button phx-disable-with="Changing...">Change Email</.button>
-      </.form>
-
-      <div class="my-6 border-t border-border"></div>
-
-      <.form
-        for={@password_form}
-        id="password_form"
-        action={~p"/users/update-password"}
-        method="post"
-        phx-change="validate_password"
-        phx-submit="update_password"
-        phx-trigger-action={@trigger_submit}
-      >
-        <input
-          name={@password_form[:email].name}
-          type="hidden"
-          id="hidden_user_email"
-          spellcheck="false"
-          value={@current_email}
-        />
-        <.input
-          field={@password_form[:password]}
-          type="password"
-          label="New password"
-          autocomplete="new-password"
-          spellcheck="false"
-          required
-        />
-        <.input
-          field={@password_form[:password_confirmation]}
-          type="password"
-          label="Confirm new password"
-          autocomplete="new-password"
-          spellcheck="false"
-        />
-        <.button phx-disable-with="Saving...">
-          Save Password
-        </.button>
-      </.form>
-    </Layouts.app>
+    </Layouts.dashboard>
     """
   end
 
@@ -94,6 +126,7 @@ defmodule AppWeb.UserLive.Settings do
       |> assign(:email_form, to_form(email_changeset))
       |> assign(:password_form, to_form(password_changeset))
       |> assign(:trigger_submit, false)
+      |> assign(:sidebar_collapsed, true)
 
     {:ok, socket}
   end
@@ -114,7 +147,6 @@ defmodule AppWeb.UserLive.Settings do
   def handle_event("update_email", params, socket) do
     %{"user" => user_params} = params
     user = socket.assigns.current_scope.user
-    true = Users.sudo_mode?(user)
 
     case Users.change_user_email(user, user_params) do
       %{valid?: true} = changeset ->
@@ -147,7 +179,6 @@ defmodule AppWeb.UserLive.Settings do
   def handle_event("update_password", params, socket) do
     %{"user" => user_params} = params
     user = socket.assigns.current_scope.user
-    true = Users.sudo_mode?(user)
 
     case Users.change_user_password(user, user_params) do
       %{valid?: true} = changeset ->
@@ -156,5 +187,9 @@ defmodule AppWeb.UserLive.Settings do
       changeset ->
         {:noreply, assign(socket, password_form: to_form(changeset, action: :insert))}
     end
+  end
+
+  def handle_event("toggle_sidebar", _params, socket) do
+    {:noreply, assign(socket, :sidebar_collapsed, !socket.assigns.sidebar_collapsed)}
   end
 end

@@ -48,7 +48,6 @@ defmodule AppWeb.UserSessionController do
 
   def update_password(conn, %{"user" => user_params} = params) do
     user = conn.assigns.current_scope.user
-    true = Users.sudo_mode?(user)
     {:ok, {_user, expired_tokens}} = Users.update_user_password(user, user_params)
 
     # disconnect all existing LiveViews with old sessions

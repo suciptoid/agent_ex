@@ -59,6 +59,7 @@ defmodule App.MixProject do
        app: false,
        compile: false,
        depth: 1},
+      {:pui, "~> 1.0.0-alpha"},
       {:swoosh, "~> 1.16"},
       {:req, "~> 0.5"},
       {:telemetry_metrics, "~> 1.0"},

@@ -17,7 +17,7 @@ defmodule AppWeb.UserLive.Login do
               <% else %>
                 Don't have an account? <.link
                   navigate={~p"/users/register"}
-                  class="font-semibold text-brand hover:underline"
+                  class="font-semibold text-primary hover:text-primary/80 hover:underline"
                   phx-no-format
                 >Sign up</.link> for an account now.
               <% end %>
@@ -25,26 +25,26 @@ defmodule AppWeb.UserLive.Login do
           </.header>
         </div>
 
-        <div :if={local_mail_adapter?()} class="alert alert-info">
-          <.icon name="hero-information-circle" class="size-6 shrink-0" />
-          <div>
-            <p>You are running the local mail adapter.</p>
-            <p>
-              To see sent emails, visit <.link href="/dev/mailbox" class="underline">the mailbox page</.link>.
+        <div
+          :if={local_mail_adapter?()}
+          class="rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4 flex items-start gap-3"
+        >
+          <.icon name="hero-information-circle" class="size-6 shrink-0 text-blue-600" />
+          <div class="text-sm text-blue-900 dark:text-blue-100">
+            <p class="font-medium">You are running the local mail adapter.</p>
+            <p class="mt-1">
+              To see sent emails, visit <.link
+                href="/dev/mailbox"
+                class="underline hover:text-blue-700"
+              >the mailbox page</.link>.
             </p>
           </div>
         </div>
 
-        <.form
-          :let={f}
-          for={@form}
-          id="login_form_magic"
-          action={~p"/users/log-in"}
-          phx-submit="submit_magic"
-        >
+        <.form for={@form} id="login_form_magic" action={~p"/users/log-in"} phx-submit="submit_magic">
           <.input
             readonly={!!@current_scope}
-            field={f[:email]}
+            field={@form[:email]}
             type="email"
             label="Email"
             autocomplete="username"
@@ -52,15 +52,14 @@ defmodule AppWeb.UserLive.Login do
             required
             phx-mounted={JS.focus()}
           />
-          <.button class="btn btn-primary w-full">
+          <.button class="w-full mt-4">
             Log in with email <span aria-hidden="true">→</span>
           </.button>
         </.form>
 
-        <div class="divider">or</div>
+        <div class="border-t border-gray-200 dark:border-gray-700 my-4"></div>
 
         <.form
-          :let={f}
           for={@form}
           id="login_form_password"
           action={~p"/users/log-in"}
@@ -69,7 +68,7 @@ defmodule AppWeb.UserLive.Login do
         >
           <.input
             readonly={!!@current_scope}
-            field={f[:email]}
+            field={@form[:email]}
             type="email"
             label="Email"
             autocomplete="username"
@@ -83,10 +82,10 @@ defmodule AppWeb.UserLive.Login do
             autocomplete="current-password"
             spellcheck="false"
           />
-          <.button class="btn btn-primary w-full" name={@form[:remember_me].name} value="true">
+          <.button class="w-full mt-4" name={@form[:remember_me].name} value="true">
             Log in and stay logged in <span aria-hidden="true">→</span>
           </.button>
-          <.button class="btn btn-primary btn-soft w-full mt-2">
+          <.button class="w-full mt-2" variant="outline">
             Log in only this time
           </.button>
         </.form>

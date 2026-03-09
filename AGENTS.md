@@ -8,15 +8,14 @@ This is a web application written using the Phoenix web framework.
 ### Phoenix v1.8 guidelines
 
 - **Always** begin your LiveView templates with `<Layouts.app flash={@flash} ...>` which wraps all inner content
-- The `MyAppWeb.Layouts` module is aliased in the `my_app_web.ex` file, so you can use it without needing to alias it again
+- The `AppWeb.Layouts` module is aliased in the `app_web.ex` file, so you can use it without needing to alias it again
 - Anytime you run into errors with no `current_scope` assign:
   - You failed to follow the Authenticated Routes guidelines, or you failed to pass `current_scope` to `<Layouts.app>`
   - **Always** fix the `current_scope` error by moving your routes to the proper `live_session` and ensure you pass `current_scope` as needed
 - Phoenix v1.8 moved the `<.flash_group>` component to the `Layouts` module. You are **forbidden** from calling `<.flash_group>` outside of the `layouts.ex` module
-- Out of the box, `core_components.ex` imports an `<.icon name="hero-x-mark" class="w-5 h-5"/>` component for hero icons. **Always** use the `<.icon>` component for icons, **never** use `Heroicons` modules or similar
-- **Always** use the imported `<.input>` component for form inputs from `core_components.ex` when available. `<.input>` is imported and using it will save steps and prevent errors
-- If you override the default input classes (`<.input class="myclass px-2 py-1 rounded-lg">)`) class with your own values, no default classes are inherited, so your
-custom classes must fully style the input
+- This project uses the PUI component library via `mix.exs`. `AppWeb` imports PUI helpers in `app_web.ex`, so prefer the already imported PUI components before creating custom primitives
+- In this codebase, `AppWeb` imports PUI modules directly. Use `PUI.Container` components such as `<.icon>` and `<.header>`, `PUI.Button` for `<.button>`, `PUI.Input` for `<.input>`, and `PUI.Flash` through `Layouts.flash_group/1`
+- When styling PUI components, the `class` attribute extends the default component classes. Use utility overrides intentionally, and when a component supports `variant="unstyled"`, use that for full visual control
 
 ### JS and CSS guidelines
 
@@ -26,11 +25,15 @@ custom classes must fully style the input
       @import "tailwindcss" source(none);
       @source "../css";
       @source "../js";
-      @source "../../lib/my_app_web";
+      @source "../../lib/app_web";
 
 - **Always use and maintain this import syntax** in the app.css file for projects generated with `phx.new`
+- Keep PUI wired through the existing Phoenix asset pipeline:
+  - declare the dependency in `mix.exs`
+  - keep `@source "../../deps/pui"` and `@import "../../deps/pui/assets/css/pui.css";` in `assets/css/app.css`
+  - keep `PUIHooks` merged into the LiveSocket hooks in `assets/js/app.js`
 - **Never** use `@apply` when writing raw css
-- **Always** manually write your own tailwind-based components instead of using daisyUI for a unique, world-class design
+- Prefer composing PUI components with Tailwind utility classes and small custom CSS rules instead of introducing a second UI component system
 - Out of the box **only the app.js and app.css bundles are supported**
   - You cannot reference an external vendor'd script `src` or link `href` in the layouts
   - You must import the vendor deps into app.js and app.css to use them
@@ -91,7 +94,7 @@ Controller routes must be placed in a scope that sets the `:require_authenticate
 
 LiveViews that can work with or without authentication, **always use the __existing__ `:current_user` scope**, ie:
 
-    scope "/", MyAppWeb do
+    scope "/", AppWeb do
       pipe_through [:browser]
 
       live_session :current_user,
@@ -143,12 +146,13 @@ Controllers automatically have the `current_scope` available if they use the `:b
 - Elixir's standard library has everything necessary for date and time manipulation. Familiarize yourself with the common `Time`, `Date`, `DateTime`, and `Calendar` interfaces by accessing their documentation as necessary. **Never** install additional dependencies unless asked or for date/time parsing (which you can use the `date_time_parser` package)
 - Don't use `String.to_atom/1` on user input (memory leak risk)
 - Predicate function names should not start with `is_` and should end in a question mark. Names like `is_thing` should be reserved for guards
-- Elixir's builtin OTP primitives like `DynamicSupervisor` and `Registry`, require names in the child spec, such as `{DynamicSupervisor, name: MyApp.MyDynamicSup}`, then you can use `DynamicSupervisor.start_child(MyApp.MyDynamicSup, child_spec)`
+- Elixir's builtin OTP primitives like `DynamicSupervisor` and `Registry`, require names in the child spec, such as `{DynamicSupervisor, name: App.MyDynamicSup}`, then you can use `DynamicSupervisor.start_child(App.MyDynamicSup, child_spec)`
 - Use `Task.async_stream(collection, callback, options)` for concurrent enumeration with back-pressure. The majority of times you will want to pass `timeout: :infinity` as option
 
 ## Mix guidelines
 
 - Read the docs and options before using tasks (by using `mix help task_name`)
+- To read module documentation from the shell in project context, use `mix run -e "require IEx.Helpers; IEx.Helpers.h(PUI.Dialog)"` and replace `PUI.Dialog` with the module you want to inspect
 - To debug test failures, run tests in a specific file with `mix test test/my_test.exs` or run all previously failed tests with `mix test --failed`
 - `mix deps.clean --all` is **almost never needed**. **Avoid** using it unless you have good reason
 
@@ -201,7 +205,7 @@ Controllers automatically have the `current_scope` available if they use the `:b
 - **Always** use the imported `Phoenix.Component.form/1` and `Phoenix.Component.inputs_for/1` function to build forms. **Never** use `Phoenix.HTML.form_for` or `Phoenix.HTML.inputs_for` as they are outdated
 - When building forms **always** use the already imported `Phoenix.Component.to_form/2` (`assign(socket, form: to_form(...))` and `<.form for={@form} id="msg-form">`), then access those forms in the template via `@form[:field]`
 - **Always** add unique DOM IDs to key elements (like forms, buttons, etc) when writing templates, these IDs can later be used in tests (`<.form for={@form} id="product-form">`)
-- For "app wide" template imports, you can import/alias into the `my_app_web.ex`'s `html_helpers` block, so they will be available to all LiveViews, LiveComponent's, and all modules that do `use MyAppWeb, :html` (replace "my_app" by the actual app name)
+- For "app wide" template imports, add them to `app_web.ex`'s `html_helpers` block so they are available to all LiveViews, LiveComponent's, and all modules that do `use AppWeb, :html`
 
 - Elixir supports `if/else` but **does NOT support `if/else if` or `if/elsif`**. **Never use `else if` or `elseif` in Elixir**, **always** use `cond` or `case` for multiple conditionals.
 
@@ -466,14 +470,14 @@ You can also specify a name to nest the params:
 
 When using changesets, the underlying data, form params, and errors are retrieved from it. The `:as` option is automatically computed too. E.g. if you have a user schema:
 
-    defmodule MyApp.Users.User do
+    defmodule App.Users.User do
       use Ecto.Schema
       ...
     end
 
 And then you create a changeset that you pass to `to_form`:
 
-    %MyApp.Users.User{}
+    %App.Users.User{}
     |> Ecto.Changeset.change()
     |> to_form()
 

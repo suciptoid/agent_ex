@@ -35,31 +35,25 @@ defmodule AppWeb.Layouts do
 
   def app(assigns) do
     ~H"""
-    <header class="navbar px-4 sm:px-6 lg:px-8">
+    <header class="flex items-center justify-between px-4 sm:px-6 lg:px-8 py-4 border-b border-gray-200 dark:border-gray-700">
       <div class="flex-1">
-        <a href="/" class="flex-1 flex w-fit items-center gap-2">
+        <a href="/" class="flex w-fit items-center gap-2">
           <img src={~p"/images/logo.svg"} width="36" />
           <span class="text-sm font-semibold">v{Application.spec(:phoenix, :vsn)}</span>
         </a>
       </div>
-      <div class="flex-none">
-        <ul class="flex flex-column px-1 space-x-4 items-center">
-          <li>
-            <a href="https://phoenixframework.org/" class="btn btn-ghost">Website</a>
-          </li>
-          <li>
-            <a href="https://github.com/phoenixframework/phoenix" class="btn btn-ghost">GitHub</a>
-          </li>
-          <li>
-            <.theme_toggle />
-          </li>
-          <li>
-            <a href="https://hexdocs.pm/phoenix/overview.html" class="btn btn-primary">
-              Get Started <span aria-hidden="true">&rarr;</span>
-            </a>
-          </li>
-        </ul>
-      </div>
+      <nav class="flex items-center gap-4">
+        <.link navigate={~p"/"} class="text-sm hover:text-gray-600 dark:hover:text-gray-300">
+          Website
+        </.link>
+        <.link navigate={~p"/"} class="text-sm hover:text-gray-600 dark:hover:text-gray-300">
+          GitHub
+        </.link>
+        <.theme_toggle />
+        <.button navigate={~p"/"}>
+          Get Started <span aria-hidden="true">&rarr;</span>
+        </.button>
+      </nav>
     </header>
 
     <main class="px-4 py-20 sm:px-6 lg:px-8">
@@ -85,32 +79,49 @@ defmodule AppWeb.Layouts do
   def flash_group(assigns) do
     ~H"""
     <div id={@id} aria-live="polite">
-      <.flash kind={:info} flash={@flash} />
-      <.flash kind={:error} flash={@flash} />
+      <PUI.Flash.flash_group flash={@flash} position="top-right" />
 
-      <.flash
+      <div
         id="client-error"
-        kind={:error}
-        title={gettext("We can't find the internet")}
-        phx-disconnected={show(".phx-client-error #client-error") |> JS.remove_attribute("hidden")}
-        phx-connected={hide("#client-error") |> JS.set_attribute({"hidden", ""})}
+        class="fixed top-4 right-4 z-50 hidden w-full max-w-sm"
+        phx-disconnected={JS.remove_class("hidden", to: "#client-error")}
+        phx-connected={JS.add_class("hidden", to: "#client-error")}
         hidden
       >
-        {gettext("Attempting to reconnect")}
-        <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
-      </.flash>
+        <.alert variant="destructive">
+          <:icon>
+            <.icon name="hero-exclamation-triangle" class="size-4" />
+          </:icon>
+          <:title>{gettext("We can't find the internet")}</:title>
+          <:description>
+            <span class="inline-flex items-center gap-1">
+              {gettext("Attempting to reconnect")}
+              <.icon name="hero-arrow-path" class="size-3 motion-safe:animate-spin" />
+            </span>
+          </:description>
+        </.alert>
+      </div>
 
-      <.flash
+      <div
         id="server-error"
-        kind={:error}
-        title={gettext("Something went wrong!")}
-        phx-disconnected={show(".phx-server-error #server-error") |> JS.remove_attribute("hidden")}
-        phx-connected={hide("#server-error") |> JS.set_attribute({"hidden", ""})}
+        class="fixed top-4 right-4 z-50 hidden w-full max-w-sm"
+        phx-disconnected={JS.remove_class("hidden", to: "#server-error")}
+        phx-connected={JS.add_class("hidden", to: "#server-error")}
         hidden
       >
-        {gettext("Attempting to reconnect")}
-        <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
-      </.flash>
+        <.alert variant="destructive">
+          <:icon>
+            <.icon name="hero-exclamation-circle" class="size-4" />
+          </:icon>
+          <:title>{gettext("Something went wrong!")}</:title>
+          <:description>
+            <span class="inline-flex items-center gap-1">
+              {gettext("Attempting to reconnect")}
+              <.icon name="hero-arrow-path" class="size-3 motion-safe:animate-spin" />
+            </span>
+          </:description>
+        </.alert>
+      </div>
     </div>
     """
   end
@@ -122,29 +133,32 @@ defmodule AppWeb.Layouts do
   """
   def theme_toggle(assigns) do
     ~H"""
-    <div class="card relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full">
-      <div class="absolute w-1/3 h-full rounded-full border-1 border-base-200 bg-base-100 brightness-200 left-0 [[data-theme=light]_&]:left-1/3 [[data-theme=dark]_&]:left-2/3 transition-[left]" />
+    <div class="relative flex flex-row items-center border-2 border-gray-300 dark:border-gray-600 bg-gray-200 dark:bg-gray-700 rounded-full p-1">
+      <div class="absolute w-6 h-6 rounded-full bg-white dark:bg-gray-800 shadow-sm left-1 [[data-theme=light]_&]:left-[calc(50%-12px)] [[data-theme=dark]_&]:left-[calc(100%-28px)] transition-[left]" />
 
       <button
-        class="flex p-2 cursor-pointer w-1/3"
+        class="relative flex items-center justify-center w-6 h-6 cursor-pointer z-10"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="system"
+        aria-label="System theme"
       >
         <.icon name="hero-computer-desktop-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>
 
       <button
-        class="flex p-2 cursor-pointer w-1/3"
+        class="relative flex items-center justify-center w-6 h-6 cursor-pointer z-10"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="light"
+        aria-label="Light theme"
       >
         <.icon name="hero-sun-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>
 
       <button
-        class="flex p-2 cursor-pointer w-1/3"
+        class="relative flex items-center justify-center w-6 h-6 cursor-pointer z-10"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="dark"
+        aria-label="Dark theme"
       >
         <.icon name="hero-moon-micro" class="size-4 opacity-75 hover:opacity-100" />
       </button>

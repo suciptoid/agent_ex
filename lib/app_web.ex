@@ -79,19 +79,23 @@ defmodule AppWeb do
 
   defp html_helpers do
     quote do
-      # Translation
       use Gettext, backend: AppWeb.Gettext
 
-      # HTML escaping functionality
       import Phoenix.HTML
-      # Core UI components
-      import AppWeb.CoreComponents
 
-      # Common modules used in templates
       alias Phoenix.LiveView.JS
       alias AppWeb.Layouts
 
-      # Routes generation with the ~p sigil
+      import PUI.Button
+      import PUI.Input
+      import PUI.Dropdown
+      import PUI.Alert
+      import PUI.Popover
+      import PUI.Select
+      import PUI.Dialog
+      import PUI.Components
+      import PUI.Container
+
       unquote(verified_routes())
     end
   end

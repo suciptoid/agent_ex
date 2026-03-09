@@ -26,11 +26,11 @@ defmodule AppWeb.UserLive.Confirmation do
             name={@form[:remember_me].name}
             value="true"
             phx-disable-with="Confirming..."
-            class="btn btn-primary w-full"
+            class="w-full"
           >
             Confirm and stay logged in
           </.button>
-          <.button phx-disable-with="Confirming..." class="btn btn-primary btn-soft w-full mt-2">
+          <.button phx-disable-with="Confirming..." variant="outline" class="mt-2 w-full">
             Confirm and log in only this time
           </.button>
         </.form>
@@ -46,7 +46,7 @@ defmodule AppWeb.UserLive.Confirmation do
         >
           <input type="hidden" name={@form[:token].name} value={@form[:token].value} />
           <%= if @current_scope do %>
-            <.button phx-disable-with="Logging in..." class="btn btn-primary w-full">
+            <.button phx-disable-with="Logging in..." class="w-full">
               Log in
             </.button>
           <% else %>
@@ -54,19 +54,25 @@ defmodule AppWeb.UserLive.Confirmation do
               name={@form[:remember_me].name}
               value="true"
               phx-disable-with="Logging in..."
-              class="btn btn-primary w-full"
+              class="w-full"
             >
               Keep me logged in on this device
             </.button>
-            <.button phx-disable-with="Logging in..." class="btn btn-primary btn-soft w-full mt-2">
+            <.button phx-disable-with="Logging in..." variant="outline" class="mt-2 w-full">
               Log me in only this time
             </.button>
           <% end %>
         </.form>
 
-        <p :if={!@user.confirmed_at} class="alert alert-outline mt-8">
-          Tip: If you prefer passwords, you can enable them in the user settings.
-        </p>
+        <.alert :if={!@user.confirmed_at} class="mt-8">
+          <:icon>
+            <.icon name="hero-information-circle" class="size-4" />
+          </:icon>
+          <:title>Tip</:title>
+          <:description>
+            If you prefer passwords, you can enable them in the user settings.
+          </:description>
+        </.alert>
       </div>
     </Layouts.app>
     """

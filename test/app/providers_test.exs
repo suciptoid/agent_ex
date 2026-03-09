@@ -58,10 +58,16 @@ defmodule App.ProvidersTest do
 
   defp provider_fixture(user, attrs \\ %{}) do
     {:ok, provider} =
-      Providers.create_provider(%Scope{user: user}, Map.merge(%{
-        "provider" => "openai",
-        "api_key" => "test-key"
-      }, attrs))
+      Providers.create_provider(
+        %Scope{user: user},
+        Map.merge(
+          %{
+            "provider" => "openai",
+            "api_key" => "test-key"
+          },
+          attrs
+        )
+      )
 
     provider
   end

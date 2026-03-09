@@ -189,7 +189,7 @@ defmodule AppWeb.Layouts do
     ~H"""
     <div
       id="dashboard-layout"
-      class="min-h-screen flex flex-col bg-background"
+      class="h-screen flex flex-col bg-background overflow-hidden"
       phx-hook=".SidebarState"
     >
       <%!-- Header --%>
@@ -247,7 +247,7 @@ defmodule AppWeb.Layouts do
       </header>
 
       <%!-- App Shell: Flex container for sidebar + content --%>
-      <div class="flex flex-1">
+      <div class="flex flex-1 min-h-0">
         <%!-- Sidebar Overlay (for mobile when expanded) --%>
         <div
           phx-click="toggle_sidebar"
@@ -260,9 +260,9 @@ defmodule AppWeb.Layouts do
 
         <%!-- Sidebar --%>
         <aside class={[
-          "fixed lg:relative z-30 h-[calc(100vh-60px)] bg-base border-r border-border transition-all duration-300 ease-in-out",
+          "h-full bg-base border-r border-border transition-all duration-300 ease-in-out flex flex-col",
           "w-64 flex-shrink-0",
-          @sidebar_collapsed && "-translate-x-full lg:w-0 lg:border-0",
+          @sidebar_collapsed && "-translate-x-full lg:w-0 lg:border-0 lg:overflow-hidden",
           !@sidebar_collapsed && "translate-x-0"
         ]}>
           <div class="flex flex-col h-full overflow-hidden">
@@ -299,8 +299,8 @@ defmodule AppWeb.Layouts do
         </aside>
 
         <%!-- Main Content --%>
-        <main class="flex-1 min-w-0">
-          <div class="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+        <main class="flex-1 min-w-0 h-full overflow-x-hidden overflow-y-auto">
+          <div class="p-4 sm:p-6 lg:p-8">
             {render_slot(@inner_block)}
           </div>
         </main>

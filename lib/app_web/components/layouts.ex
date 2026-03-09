@@ -49,6 +49,9 @@ defmodule AppWeb.Layouts do
         <.link navigate={~p"/"} class="text-sm hover:text-gray-600 dark:hover:text-gray-300">
           GitHub
         </.link>
+        <.link navigate={~p"/providers"} class="text-sm hover:text-gray-600 dark:hover:text-gray-300">
+          Providers
+        </.link>
         <.theme_toggle />
         <.button navigate={~p"/"}>
           Get Started <span aria-hidden="true">&rarr;</span>

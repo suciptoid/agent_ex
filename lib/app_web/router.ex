@@ -55,6 +55,9 @@ defmodule AppWeb.Router do
       live "/dashboard", DashboardLive, :index
       live "/users/settings", UserLive.Settings, :edit
       live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
+      live "/providers", ProviderLive.Index, :index
+      live "/providers/new", ProviderLive.Index, :new
+      live "/providers/:id/edit", ProviderLive.Index, :edit
     end
 
     post "/users/update-password", UserSessionController, :update_password

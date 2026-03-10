@@ -23,7 +23,7 @@ defmodule App.Providers do
   def create_provider(%Scope{} = scope, attrs) do
     attrs = Map.put(attrs, "user_id", scope.user.id)
 
-    struct(Provider, %{})
+    %Provider{}
     |> Provider.changeset(attrs)
     |> Repo.insert()
   end

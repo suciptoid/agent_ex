@@ -516,5 +516,6 @@ And **never** do this:
 - Always write plan into .agents/plans/<yymmdd>-<plan name>.md
 - Before end your turn, always write summary of changes into .agents/changelogs/<yymmdd>-<plan name>.md, append if file exists.
 - if you need to write some quick/temporary notes, write on .agents/
+- during debugging, find related plan / changelog entries or read latests.
 
 <!-- usage-rules-end -->

@@ -36,14 +36,15 @@
       </div>
 
       <div class="flex h-[calc(100vh-15rem)] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+        <%!-- Message list --%>
         <div
           id="chat-messages"
           phx-update="stream"
-          class="flex-1 space-y-4 overflow-y-auto p-4 sm:p-6"
+          class="flex-1 overflow-y-auto divide-y divide-border/50"
         >
           <div
             id="chat-messages-empty-state"
-            class="hidden only:block rounded-2xl border border-dashed border-border bg-muted/30 p-10 text-center text-sm text-muted-foreground"
+            class="hidden only:flex items-center justify-center h-full p-10 text-sm text-muted-foreground"
           >
             Send the first message to start the conversation.
           </div>
@@ -52,38 +53,122 @@
             :for={{dom_id, message} <- @streams.messages}
             id={dom_id}
             class={[
-              "flex w-full",
-              if(user_message?(message), do: "justify-end", else: "justify-start")
+              "flex gap-3 px-4 py-3 group hover:bg-accent/30 transition-colors",
+              if(user_message?(message), do: "flex-row-reverse", else: "flex-row")
             ]}
           >
+            <%!-- Avatar --%>
             <div class={[
-              "max-w-3xl rounded-2xl border px-4 py-3 shadow-sm transition",
+              "flex-shrink-0 flex size-8 items-center justify-center rounded-full text-xs font-semibold",
               if(user_message?(message),
-                do: "border-primary/20 bg-primary text-primary-foreground",
-                else: "border-border bg-background text-foreground"
+                do: "bg-primary text-primary-foreground",
+                else: "bg-muted text-muted-foreground"
               )
             ]}>
-              <div class="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em]">
-                <.icon name={message_icon(message)} class="size-4" />
-                {speaker_name(message)}
+              <.icon name={message_icon(message)} class="size-4" />
+            </div>
+
+            <%!-- Content --%>
+            <div class={[
+              "flex-1 min-w-0 space-y-1",
+              if(user_message?(message), do: "items-end", else: "items-start"),
+              "flex flex-col"
+            ]}>
+              <div class={[
+                "flex items-center gap-2 text-xs",
+                if(user_message?(message), do: "flex-row-reverse", else: "flex-row")
+              ]}>
+                <span class="font-semibold text-foreground">{speaker_name(message)}</span>
+                <span class="text-muted-foreground/60">
+                  {Calendar.strftime(message.inserted_at, "%H:%M")}
+                </span>
+                <%= if tool_message?(message) do %>
+                  <span class="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                    <.icon name="hero-wrench-screwdriver" class="size-3" /> tool
+                  </span>
+                <% end %>
               </div>
-              <p class="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
+
+              <%!-- Message body with tool-call truncation --%>
+              <%= if tool_message?(message) do %>
+                <div
+                  class="w-full max-w-2xl"
+                  id={"tool-msg-#{dom_id}"}
+                  phx-hook=".ToolCallMessage"
+                >
+                  <div
+                    data-truncated
+                    class="rounded-lg bg-amber-500/5 border border-amber-500/20 px-3 py-2 font-mono text-xs text-foreground leading-5 overflow-hidden"
+                    style="max-height: 5rem;"
+                  >
+                    <span class="whitespace-pre-wrap">{message.content}</span>
+                  </div>
+                  <button
+                    data-toggle-btn
+                    class="mt-1 text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1"
+                  >
+                    <.icon
+                      name="hero-chevron-down"
+                      class="size-3 transition-transform duration-200 data-[expanded=true]:rotate-180"
+                    />
+                    <span data-label>Show more</span>
+                  </button>
+                </div>
+              <% else %>
+                <p class={[
+                  "whitespace-pre-wrap text-sm leading-6 text-foreground max-w-2xl",
+                  if(user_message?(message),
+                    do: "rounded-2xl rounded-tr-sm bg-primary text-primary-foreground px-4 py-2",
+                    else: ""
+                  )
+                ]}>
+                  {message.content}
+                </p>
+              <% end %>
             </div>
           </div>
+
+          <%!-- Streaming message (live token updates) --%>
+          <%= if @streaming_content != nil do %>
+            <div
+              id="streaming-message"
+              class="flex gap-3 px-4 py-3 bg-muted/20"
+            >
+              <div class="flex-shrink-0 flex size-8 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                <.icon name="hero-cpu-chip" class="size-4 animate-pulse" />
+              </div>
+              <div class="flex flex-col space-y-1 flex-1 min-w-0">
+                <div class="flex items-center gap-2 text-xs">
+                  <span class="font-semibold text-foreground">
+                    {@streaming_agent_name || "Assistant"}
+                  </span>
+                  <%= if @streaming_content == "" do %>
+                    <span class="text-[10px] text-muted-foreground">thinking...</span>
+                  <% end %>
+                </div>
+                <p class="whitespace-pre-wrap text-sm leading-6 text-foreground max-w-2xl">
+                  {@streaming_content}<span class="inline-block w-0.5 h-4 bg-foreground/60 ml-0.5 animate-pulse" />
+                </p>
+              </div>
+            </div>
+          <% end %>
         </div>
 
+        <%!-- Message input --%>
         <div class="border-t border-border bg-background/80 p-4 sm:p-6">
           <.form
             for={@message_form}
             id="chat-message-form"
             phx-change="validate"
             phx-submit="send"
-            class="space-y-4"
+            class="space-y-3"
           >
             <.textarea
               field={@message_form[:content]}
-              rows="4"
-              placeholder="Ask the room a question or give it a task..."
+              id="chat-message-input"
+              rows="3"
+              placeholder="Ask the room a question or give it a task... (Enter to send, Shift+Enter for new line)"
+              phx-hook=".ChatInput"
             />
 
             <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -97,4 +182,53 @@
       </div>
     </div>
   <% end %>
+
+  <%!-- Enter-to-send hook --%>
+  <script :type={Phoenix.LiveView.ColocatedHook} name=".ChatInput">
+    export default {
+      mounted() {
+        this.el.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            const form = this.el.closest("form");
+            if (form) form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+          }
+        });
+      }
+    }
+  </script>
+
+  <%!-- Tool call expand/collapse hook --%>
+  <script :type={Phoenix.LiveView.ColocatedHook} name=".ToolCallMessage">
+    export default {
+      mounted() { this.init(); },
+      updated() { this.init(); },
+      init() {
+        const el = this.el;
+        const body = el.querySelector("[data-truncated]");
+        const btn = el.querySelector("[data-toggle-btn]");
+        const icon = btn && btn.querySelector("svg");
+        const label = btn && btn.querySelector("[data-label]");
+        if (!body || !btn) return;
+
+        let expanded = false;
+
+        const update = () => {
+          if (expanded) {
+            body.style.maxHeight = "none";
+            if (label) label.textContent = "Show less";
+            if (icon) icon.dataset.expanded = "true";
+          } else {
+            body.style.maxHeight = "5rem";
+            if (label) label.textContent = "Show more";
+            if (icon) icon.dataset.expanded = "false";
+          }
+          btn.style.display = body.scrollHeight <= 80 && !expanded ? "none" : "";
+        };
+
+        btn.addEventListener("click", () => { expanded = !expanded; update(); });
+        update();
+      }
+    }
+  </script>
 </Layouts.dashboard>

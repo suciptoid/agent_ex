@@ -3,6 +3,8 @@ defmodule App.Agents.Tools do
   Registry of builtin agent tools.
   """
 
+  require Logger
+
   @builtin_tool_names ["web_fetch"]
 
   def available_tools, do: @builtin_tool_names
@@ -14,6 +16,49 @@ defmodule App.Agents.Tools do
       "web_fetch" -> [web_fetch_tool()]
       _tool_name -> []
     end)
+  end
+
+  @doc """
+  Executes a list of tool calls against the resolved tools.
+
+  Returns `{:ok, [tool_result_message]}` or `{:error, reason}`.
+  Each `tool_call` is a map with `:id`, `:name`, and `:arguments` (map).
+  """
+  def execute_all(tool_calls, tools) when is_list(tool_calls) and is_list(tools) do
+    tool_map = Map.new(tools, fn t -> {t.name, t} end)
+
+    results =
+      Enum.map(tool_calls, fn %{id: id, name: name, arguments: args} ->
+        Logger.debug("[Tools] Executing tool #{name} with args: #{inspect(args)}")
+
+        result =
+          case Map.get(tool_map, name) do
+            nil ->
+              {:ok, "Error: unknown tool '#{name}'"}
+
+            tool ->
+              case ReqLLM.Tool.execute(tool, args) do
+                {:ok, output} ->
+                  text = result_to_text(output)
+                  Logger.debug("[Tools] Tool #{name} result: #{String.slice(text, 0, 200)}")
+                  {:ok, text}
+
+                {:error, reason} ->
+                  error_text = "Error: #{inspect(reason)}"
+                  Logger.warning("[Tools] Tool #{name} error: #{error_text}")
+                  {:ok, error_text}
+              end
+          end
+
+        {id, name, result}
+      end)
+
+    tool_messages =
+      Enum.map(results, fn {id, name, {:ok, text}} ->
+        ReqLLM.Context.tool_result(id, name, text)
+      end)
+
+    {:ok, tool_messages}
   end
 
   def do_web_fetch(%{url: url}) when is_binary(url) do
@@ -48,6 +93,10 @@ defmodule App.Agents.Tools do
       callback: &__MODULE__.do_web_fetch/1
     )
   end
+
+  defp result_to_text(body) when is_binary(body), do: body
+  defp result_to_text(body) when is_map(body) or is_list(body), do: Jason.encode!(body)
+  defp result_to_text(body), do: inspect(body)
 
   defp body_to_text(body) when is_binary(body), do: body
   defp body_to_text(body) when is_map(body) or is_list(body), do: Jason.encode!(body)

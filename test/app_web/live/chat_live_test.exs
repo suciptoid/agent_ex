@@ -93,8 +93,15 @@ defmodule AppWeb.ChatLiveTest do
       })
       |> render_submit()
 
-      reloaded_room = Chat.get_chat_room!(scope, room.id)
-      [user_message, assistant_message] = Chat.list_messages(reloaded_room)
+      # The streaming response is handled asynchronously via Task.async.
+      # Use :sys.get_state to flush the LV mailbox and wait for the task to complete.
+      [user_message, assistant_message] =
+        Enum.reduce_while(1..20, [], fn _, _ ->
+          _ = :sys.get_state(live_view.pid)
+          reloaded_room = Chat.get_chat_room!(scope, room.id)
+          messages = Chat.list_messages(reloaded_room)
+          if length(messages) >= 2, do: {:halt, messages}, else: {:cont, []}
+        end)
 
       assert user_message.content == "Plan next week"
       assert assistant_message.content == "Lead Agent: Plan next week"

@@ -90,8 +90,3 @@ config :phoenix_live_view,
 
 # Disable swoosh api client as it is only required for production adapters.
 config :swoosh, :api_client, false
-
-config :app, App.Vault,
-  ciphers: [
-    default: {Cloak.Ciphers.AES.GCM, tag: "AES.GCM.V1", key: :crypto.strong_rand_bytes(32)}
-  ]

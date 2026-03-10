@@ -240,7 +240,7 @@ defmodule AppWeb.Layouts do
           "[[data-sidebar-collapsed=true]_&]:lg:border-0",
           "[[data-sidebar-collapsed=true]_&]:lg:overflow-hidden"
         ]}>
-          <div class="flex flex-col h-full overflow-hidden">
+          <div class="flex flex-col h-full">
             <%!-- Navigation Links --%>
             <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
               <.link
@@ -270,21 +270,15 @@ defmodule AppWeb.Layouts do
               >
                 <.icon name="hero-chat-bubble-left-right" class="size-5" /> Chat
               </.link>
-
-              <.link
-                navigate={~p"/users/settings"}
-                class="flex items-center gap-3 px-3 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
-              >
-                <.icon name="hero-cog-6-tooth" class="size-5" /> Settings
-              </.link>
             </nav>
 
             <%!-- User Section (Bottom) --%>
             <div class="p-4 border-t border-border">
               <div class="w-full [&>div]:w-full">
                 <.menu_button
+                  id="sidebar-user-menu"
                   variant="unstyled"
-                  content_class="w-56"
+                  content_class="w-56 z-50 bg-popover text-popover-foreground rounded-md border border-border p-1 shadow-md mb-2 aria-hidden:hidden not-aria-hidden:animate-in not-aria-hidden:fade-in-0 not-aria-hidden:zoom-in-95 aria-hidden:animate-out aria-hidden:fade-out-0 aria-hidden:zoom-out-95"
                   class="flex w-full items-center gap-3 rounded-xl border border-border bg-card px-3 py-3 text-left transition hover:bg-accent/60"
                 >
                   <.icon name="hero-user-circle" class="size-9 text-muted-foreground shrink-0" />

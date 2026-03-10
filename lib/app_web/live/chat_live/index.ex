@@ -86,8 +86,8 @@ defmodule AppWeb.ChatLive.Index do
 
   def agent_count(%ChatRoom{agents: agents}), do: length(agents || [])
 
-  def commander_name(%ChatRoom{chat_room_agents: chat_room_agents}) do
-    case Enum.find(chat_room_agents, & &1.is_commander) || List.first(chat_room_agents) do
+  def active_agent_name(%ChatRoom{chat_room_agents: chat_room_agents}) do
+    case Enum.find(chat_room_agents, & &1.is_active) || List.first(chat_room_agents) do
       nil -> nil
       chat_room_agent -> chat_room_agent.agent.name
     end

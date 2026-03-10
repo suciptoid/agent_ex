@@ -2,6 +2,7 @@ defmodule App.ChatTest do
   use App.DataCase, async: false
 
   alias App.Chat
+  alias App.Chat.Orchestrator
 
   import App.AgentsFixtures
   import App.ChatFixtures
@@ -56,7 +57,7 @@ defmodule App.ChatTest do
                Chat.create_chat_room(scope, %{
                  "title" => "Strategy Room",
                  "agent_ids" => [first_agent.id, second_agent.id],
-                 "commander_agent_id" => second_agent.id
+                 "active_agent_id" => second_agent.id
                })
 
       assert chat_room.title == "Strategy Room"
@@ -64,7 +65,7 @@ defmodule App.ChatTest do
       assert Enum.sort(Enum.map(chat_room.agents, & &1.id)) ==
                Enum.sort([first_agent.id, second_agent.id])
 
-      commander = Enum.find(chat_room.chat_room_agents, & &1.is_commander)
+      commander = Enum.find(chat_room.chat_room_agents, & &1.is_active)
       assert commander.agent_id == second_agent.id
     end
 
@@ -77,7 +78,7 @@ defmodule App.ChatTest do
                Chat.create_chat_room(scope, %{
                  "title" => "Invalid Room",
                  "agent_ids" => [agent.id, other_agent.id],
-                 "commander_agent_id" => agent.id
+                 "active_agent_id" => agent.id
                })
 
       assert "must belong to the current user" in errors_on(changeset).agent_ids
@@ -95,16 +96,16 @@ defmodule App.ChatTest do
         chat_room_fixture(user, %{
           title: "Ops",
           agents: [first_agent],
-          commander_agent_id: first_agent.id
+          active_agent_id: first_agent.id
         })
 
       second_agent = agent_fixture(user, %{provider: provider, name: "Closer"})
 
       assert {:ok, added_agent} =
-               Chat.add_agent_to_room(scope, room, second_agent.id, is_commander: true)
+               Chat.add_agent_to_room(scope, room, second_agent.id, is_active: true)
 
       reloaded_room = Chat.get_chat_room!(scope, room.id)
-      commander = Enum.find(reloaded_room.chat_room_agents, & &1.is_commander)
+      commander = Enum.find(reloaded_room.chat_room_agents, & &1.is_active)
 
       assert added_agent.agent_id == second_agent.id
       assert commander.agent_id == second_agent.id
@@ -131,7 +132,7 @@ defmodule App.ChatTest do
         chat_room_fixture(user, %{
           title: "Delivery",
           agents: [agent],
-          commander_agent_id: agent.id
+          active_agent_id: agent.id
         })
 
       assert {:ok, assistant_message} = Chat.send_message(scope, room, "Plan next week")
@@ -144,4 +145,76 @@ defmodule App.ChatTest do
       assert assistant_message.agent_id == agent.id
     end
   end
+
+  describe "stream_message/3" do
+    test "delegates ask_agent asynchronously so the delegated reply finishes later", %{
+      user: user,
+      provider: provider
+    } do
+      previous_runner = Application.get_env(:app, :agent_runner)
+      previous_test_pid = Application.get_env(:app, :delegating_agent_test_pid)
+
+      Application.put_env(:app, :agent_runner, App.TestSupport.DelegatingAgentRunnerStub)
+      Application.put_env(:app, :delegating_agent_test_pid, self())
+
+      on_exit(fn ->
+        restore_app_env(:agent_runner, previous_runner)
+        restore_app_env(:delegating_agent_test_pid, previous_test_pid)
+      end)
+
+      lead_agent = agent_fixture(user, %{provider: provider, name: "Lead Agent"})
+      research_agent = agent_fixture(user, %{provider: provider, name: "Research Agent"})
+      research_agent_id = research_agent.id
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Delegation",
+          agents: [lead_agent, research_agent],
+          active_agent_id: lead_agent.id
+        })
+
+      assert {:ok, _user_message} =
+               Chat.create_message(room, %{role: "user", content: "Delegate the research task"})
+
+      messages = Chat.list_messages(room)
+
+      assert {:ok, %{content: content, agent_id: agent_id}} =
+               Orchestrator.stream_message(room, messages, self())
+
+      assert content == "I'll ask the delegated agent to handle that."
+      assert agent_id == lead_agent.id
+
+      assert_receive {:agent_message_created, placeholder_message}
+      placeholder_message_id = placeholder_message.id
+      assert placeholder_message.chat_room_id == room.id
+      assert placeholder_message.agent_id == research_agent_id
+      assert placeholder_message.status == "requesting"
+      assert placeholder_message.content in [nil, ""]
+
+      refute_receive {:agent_message_updated,
+                      %{agent_id: ^research_agent_id, status: "completed"}},
+                     50
+
+      assert_receive {:delegated_agent_started, delegated_pid, ^research_agent_id}
+      send(delegated_pid, :continue_delegated_agent)
+
+      assert_receive {:agent_message_stream_chunk, ^placeholder_message_id, _token}
+      assert_receive {:agent_message_updated, delegated_message}
+
+      assert delegated_message.id == placeholder_message.id
+      assert delegated_message.agent_id == research_agent.id
+      assert delegated_message.status == "completed"
+      assert delegated_message.content == "Research Agent: fetched delegated payload"
+
+      persisted_messages = Chat.list_messages(room)
+
+      assert Enum.map(persisted_messages, & &1.id) == [
+               Enum.at(messages, 0).id,
+               delegated_message.id
+             ]
+    end
+  end
+
+  defp restore_app_env(key, nil), do: Application.delete_env(:app, key)
+  defp restore_app_env(key, value), do: Application.put_env(:app, key, value)
 end

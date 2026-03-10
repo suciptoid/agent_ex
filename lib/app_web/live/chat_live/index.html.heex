@@ -30,14 +30,14 @@
     <%= if @live_action == :new and @form do %>
       <% selected_agent_ids =
         @form[:agent_ids].value |> List.wrap() |> Enum.reject(&(&1 in [nil, ""])) %>
-      <% selected_commander_id = @form[:commander_agent_id].value %>
+      <% selected_active_id = @form[:active_agent_id].value %>
 
       <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
         <div class="w-full max-w-3xl rounded-2xl border border-border bg-background p-6 shadow-2xl">
           <div class="mb-6 space-y-2">
             <h2 class="text-2xl font-semibold text-foreground">{@page_title}</h2>
             <p class="text-sm text-muted-foreground">
-              Give the room a title, choose the participating agents, and optionally mark a commander.
+              Give the room a title, choose the participating agents, and optionally mark which agent is active.
             </p>
           </div>
 
@@ -59,7 +59,7 @@
               <div class="space-y-1">
                 <p class="text-sm font-medium text-foreground">Agents</p>
                 <p class="text-xs text-muted-foreground">
-                  Pick one or more agents. If you do not choose a commander, the first selected agent is used.
+                  Pick one or more agents. If no active agent is chosen, the first selected agent will be active.
                 </p>
               </div>
 
@@ -93,11 +93,11 @@
 
                     <label class="flex items-center gap-2 text-xs text-muted-foreground">
                       <.radio
-                        id={"chat-room-commander-#{agent.id}"}
-                        name="chat_room[commander_agent_id]"
+                        id={"chat-room-active-#{agent.id}"}
+                        name="chat_room[active_agent_id]"
                         value={agent.id}
-                        checked={selected_commander_id == agent.id}
-                      /> Commander
+                        checked={selected_active_id == agent.id}
+                      /> Active
                     </label>
                   </div>
                 </div>
@@ -110,7 +110,7 @@
                 {message}
               </p>
               <p
-                :for={{message, _opts} <- @form[:commander_agent_id].errors}
+                :for={{message, _opts} <- @form[:active_agent_id].errors}
                 class="text-sm font-medium text-destructive"
               >
                 {message}
@@ -152,10 +152,10 @@
                 {agent_count(chat_room)} agents
               </span>
               <span
-                :if={commander_name(chat_room)}
+                :if={active_agent_name(chat_room)}
                 class="inline-flex items-center rounded-full bg-primary/10 px-2.5 py-1 font-medium text-primary"
               >
-                Commander: {commander_name(chat_room)}
+                Active: {active_agent_name(chat_room)}
               </span>
             </div>
 

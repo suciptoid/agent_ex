@@ -33,13 +33,13 @@ defmodule App.Chat do
 
     with %{valid?: true} <- changeset,
          agent_ids <- Ecto.Changeset.get_field(changeset, :agent_ids, []),
-         commander_id <-
-           Ecto.Changeset.get_field(changeset, :commander_agent_id) || List.first(agent_ids),
+         active_id <-
+           Ecto.Changeset.get_field(changeset, :active_agent_id) || List.first(agent_ids),
          {:ok, agents} <- fetch_agents(scope, agent_ids, changeset) do
       Multi.new()
       |> Multi.insert(:chat_room, changeset)
       |> Multi.run(:chat_room_agents, fn repo, %{chat_room: chat_room} ->
-        insert_chat_room_agents(repo, chat_room, agents, commander_id)
+        insert_chat_room_agents(repo, chat_room, agents, active_id)
       end)
       |> Repo.transaction()
       |> case do
@@ -67,16 +67,16 @@ defmodule App.Chat do
   def add_agent_to_room(%Scope{} = scope, %ChatRoom{} = chat_room, agent_id, opts \\ []) do
     chat_room = ensure_loaded_chat_room(scope, chat_room)
     agent = get_agent_for_room!(scope, agent_id)
-    is_commander = Keyword.get(opts, :is_commander, false)
+    is_active = Keyword.get(opts, :is_active, false)
 
     Multi.new()
-    |> maybe_clear_commander(chat_room, is_commander)
+    |> maybe_clear_active(chat_room, is_active)
     |> Multi.insert(
       :chat_room_agent,
       ChatRoomAgent.changeset(%ChatRoomAgent{}, %{
         chat_room_id: chat_room.id,
         agent_id: agent.id,
-        is_commander: is_commander
+        is_active: is_active
       })
     )
     |> Repo.transaction()
@@ -106,6 +106,12 @@ defmodule App.Chat do
     |> Repo.all()
   end
 
+  def get_message_by_id(id) do
+    Message
+    |> preload([:agent])
+    |> Repo.get(id)
+  end
+
   def create_message(%ChatRoom{} = chat_room, attrs) do
     %Message{chat_room_id: chat_room.id, position: next_message_position(chat_room)}
     |> Message.changeset(attrs)
@@ -117,6 +123,40 @@ defmodule App.Chat do
 
       {:error, _} = error ->
         error
+    end
+  end
+
+  def update_message(%Message{} = message, attrs) do
+    message
+    |> Message.changeset(attrs)
+    |> Repo.update()
+    |> case do
+      {:ok, message} -> {:ok, Repo.preload(message, [:agent])}
+      {:error, _} = error -> error
+    end
+  end
+
+  @doc """
+  Sets the active agent for a chat room, clearing the active flag from all others.
+  """
+  def set_active_agent(%ChatRoom{id: chat_room_id} = _chat_room, agent_id) do
+    Multi.new()
+    |> Multi.update_all(
+      :clear_active,
+      from(cra in ChatRoomAgent, where: cra.chat_room_id == ^chat_room_id),
+      set: [is_active: false]
+    )
+    |> Multi.update_all(
+      :set_active,
+      from(cra in ChatRoomAgent,
+        where: cra.chat_room_id == ^chat_room_id and cra.agent_id == ^agent_id
+      ),
+      set: [is_active: true]
+    )
+    |> Repo.transaction()
+    |> case do
+      {:ok, _} -> :ok
+      {:error, _, reason, _} -> {:error, reason}
     end
   end
 
@@ -154,12 +194,12 @@ defmodule App.Chat do
     end
   end
 
-  defp insert_chat_room_agents(repo, chat_room, agents, commander_id) do
+  defp insert_chat_room_agents(repo, chat_room, agents, active_id) do
     Enum.reduce_while(agents, {:ok, []}, fn agent, {:ok, memberships} ->
       params = %{
         chat_room_id: chat_room.id,
         agent_id: agent.id,
-        is_commander: agent.id == commander_id
+        is_active: agent.id == active_id
       }
 
       case %ChatRoomAgent{} |> ChatRoomAgent.changeset(params) |> repo.insert() do
@@ -176,16 +216,16 @@ defmodule App.Chat do
     end
   end
 
-  defp maybe_clear_commander(multi, _chat_room, false), do: multi
+  defp maybe_clear_active(multi, _chat_room, false), do: multi
 
-  defp maybe_clear_commander(multi, %ChatRoom{id: chat_room_id}, true) do
+  defp maybe_clear_active(multi, %ChatRoom{id: chat_room_id}, true) do
     Multi.update_all(
       multi,
-      :clear_existing_commander,
+      :clear_existing_active,
       from(chat_room_agent in ChatRoomAgent,
         where: chat_room_agent.chat_room_id == ^chat_room_id
       ),
-      set: [is_commander: false]
+      set: [is_active: false]
     )
   end
 
@@ -209,8 +249,8 @@ defmodule App.Chat do
 
   defp prepare_chat_room_for_form(%ChatRoom{} = chat_room) do
     if Ecto.assoc_loaded?(chat_room.chat_room_agents) do
-      commander_agent_id =
-        case Enum.find(chat_room.chat_room_agents, & &1.is_commander) ||
+      active_agent_id =
+        case Enum.find(chat_room.chat_room_agents, & &1.is_active) ||
                List.first(chat_room.chat_room_agents) do
           nil -> nil
           chat_room_agent -> chat_room_agent.agent_id
@@ -219,7 +259,7 @@ defmodule App.Chat do
       %{
         chat_room
         | agent_ids: Enum.map(chat_room.chat_room_agents, & &1.agent_id),
-          commander_agent_id: commander_agent_id
+          active_agent_id: active_agent_id
       }
     else
       chat_room

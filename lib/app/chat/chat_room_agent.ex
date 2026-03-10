@@ -7,7 +7,7 @@ defmodule App.Chat.ChatRoomAgent do
   @foreign_key_type :binary_id
 
   schema "chat_room_agents" do
-    field :is_commander, :boolean, default: false
+    field :is_active, :boolean, default: false
 
     belongs_to :chat_room, App.Chat.ChatRoom
     belongs_to :agent, App.Agents.Agent
@@ -17,7 +17,7 @@ defmodule App.Chat.ChatRoomAgent do
 
   def changeset(chat_room_agent, attrs) do
     chat_room_agent
-    |> cast(attrs, [:chat_room_id, :agent_id, :is_commander])
+    |> cast(attrs, [:chat_room_id, :agent_id, :is_active])
     |> validate_required([:chat_room_id, :agent_id])
     |> foreign_key_constraint(:chat_room_id)
     |> foreign_key_constraint(:agent_id)

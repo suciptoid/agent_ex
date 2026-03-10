@@ -25,8 +25,8 @@ defmodule App.ChatFixtures do
       |> chat_room_attrs()
       |> Map.put(:agent_ids, agent_ids)
       |> Map.put(
-        :commander_agent_id,
-        Map.get(attrs, :commander_agent_id) || Map.get(attrs, "commander_agent_id") ||
+        :active_agent_id,
+        Map.get(attrs, :active_agent_id) || Map.get(attrs, "active_agent_id") ||
           List.first(agent_ids)
       )
 

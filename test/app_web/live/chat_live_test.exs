@@ -34,7 +34,7 @@ defmodule AppWeb.ChatLiveTest do
         chat_room_fixture(user, %{
           title: "Strategy Room",
           agents: [agent],
-          commander_agent_id: agent.id
+          active_agent_id: agent.id
         })
 
       {:ok, live_view, _html} = live(conn, ~p"/chat")
@@ -59,7 +59,7 @@ defmodule AppWeb.ChatLiveTest do
         "chat_room" => %{
           "title" => "Planning Room",
           "agent_ids" => ["", agent.id],
-          "commander_agent_id" => agent.id
+          "active_agent_id" => agent.id
         }
       })
       |> render_submit()
@@ -82,7 +82,7 @@ defmodule AppWeb.ChatLiveTest do
         chat_room_fixture(user, %{
           title: "Delivery Room",
           agents: [agent],
-          commander_agent_id: agent.id
+          active_agent_id: agent.id
         })
 
       {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
@@ -95,18 +95,69 @@ defmodule AppWeb.ChatLiveTest do
 
       # The streaming response is handled asynchronously via Task.async.
       # Use :sys.get_state to flush the LV mailbox and wait for the task to complete.
+      # We wait until the assistant message has "completed" status (after streaming finishes).
       [user_message, assistant_message] =
-        Enum.reduce_while(1..20, [], fn _, _ ->
+        Enum.reduce_while(1..30, [], fn _, _ ->
           _ = :sys.get_state(live_view.pid)
           reloaded_room = Chat.get_chat_room!(scope, room.id)
           messages = Chat.list_messages(reloaded_room)
-          if length(messages) >= 2, do: {:halt, messages}, else: {:cont, []}
+
+          completed_assistant =
+            Enum.find(messages, &(&1.role == "assistant" && &1.status == "completed"))
+
+          if completed_assistant, do: {:halt, messages}, else: {:cont, []}
         end)
 
       assert user_message.content == "Plan next week"
       assert assistant_message.content == "Lead Agent: Plan next week"
       assert has_element?(live_view, "#message-#{user_message.id}")
       assert has_element?(live_view, "#message-#{assistant_message.id}")
+    end
+
+    test "renders delegated agent streaming updates", %{conn: conn, user: user} do
+      provider = provider_fixture(user)
+      lead_agent = agent_fixture(user, %{provider: provider, name: "Lead Agent"})
+      delegated_agent = agent_fixture(user, %{provider: provider, name: "Research Agent"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Delegation Room",
+          agents: [lead_agent, delegated_agent],
+          active_agent_id: lead_agent.id
+        })
+
+      {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
+
+      assert {:ok, placeholder_message} =
+               Chat.create_message(room, %{
+                 role: "assistant",
+                 content: nil,
+                 status: "requesting",
+                 agent_id: delegated_agent.id,
+                 metadata: %{"delegated" => true, "tool_name" => "ask_agent"}
+               })
+
+      send(live_view.pid, {:agent_message_created, placeholder_message})
+      _ = :sys.get_state(live_view.pid)
+
+      assert has_element?(live_view, "#message-#{placeholder_message.id}")
+
+      send(live_view.pid, {:agent_message_stream_chunk, placeholder_message.id, "Hello"})
+      send(live_view.pid, {:agent_message_stream_chunk, placeholder_message.id, " world"})
+      _ = :sys.get_state(live_view.pid)
+
+      assert has_element?(live_view, "#message-#{placeholder_message.id}", "Hello world")
+
+      assert {:ok, completed_message} =
+               Chat.update_message(placeholder_message, %{
+                 content: "Hello world",
+                 status: "completed"
+               })
+
+      send(live_view.pid, {:agent_message_updated, completed_message})
+      _ = :sys.get_state(live_view.pid)
+
+      assert has_element?(live_view, "#message-#{completed_message.id}", "Hello world")
     end
   end
 end

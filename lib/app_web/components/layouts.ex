@@ -171,20 +171,21 @@ defmodule AppWeb.Layouts do
 
   @doc """
   Renders the dashboard layout with collapsible sidebar.
+  The sidebar contains the hamburger toggle, logo, nav links, and user menu.
+  No top header — layout is [sidebar | content].
 
   ## Examples
 
-      <Layouts.dashboard flash={@flash} current_scope={@current_scope} sidebar_collapsed={@sidebar_collapsed}>
+      <Layouts.dashboard flash={@flash} current_scope={@current_scope}>
         <h1>Dashboard Content</h1>
       </Layouts.dashboard>
+
   """
   attr :flash, :map, required: true, doc: "the map of flash messages"
 
   attr :current_scope, :map,
     default: nil,
-    doc: "the current [scope](https://hexdocs.pm/phoenix/scopes.html)"
-
-  attr :sidebar_collapsed, :boolean, default: true, doc: "whether sidebar is collapsed"
+    doc: "the current [scope](https://hexdocs.html.pm/phoenix/scopes.html)"
 
   slot :inner_block, required: true
 
@@ -192,125 +193,129 @@ defmodule AppWeb.Layouts do
     ~H"""
     <div
       id="dashboard-layout"
-      class="h-screen flex flex-col bg-background overflow-hidden"
+      class="h-screen flex bg-background overflow-hidden"
       phx-hook=".SidebarState"
       data-sidebar-collapsed="false"
     >
-      <%!-- Header --%>
-      <header class="sticky top-0 z-30 flex items-center justify-between px-4 py-3 bg-card border-b border-border">
-        <div class="flex items-center gap-4">
+      <%!-- Mobile overlay (tap to close sidebar) --%>
+      <div
+        data-sidebar-toggle
+        class={[
+          "fixed inset-0 bg-black/50 z-20 transition-opacity duration-300 lg:hidden pointer-events-auto opacity-100",
+          "[[data-sidebar-collapsed=true]_&]:opacity-0",
+          "[[data-sidebar-collapsed=true]_&]:pointer-events-none"
+        ]}
+      />
+
+      <%!-- Sidebar --%>
+      <aside class={[
+        "relative z-30 h-full bg-card border-r border-border transition-all duration-300 ease-in-out flex flex-col flex-shrink-0",
+        "w-56",
+        "[[data-sidebar-collapsed=true]_&]:-translate-x-full lg:[[data-sidebar-collapsed=true]_&]:translate-x-0",
+        "lg:[[data-sidebar-collapsed=true]_&]:w-14"
+      ]}>
+        <%!-- Sidebar top: hamburger + logo --%>
+        <div class="flex items-center gap-2 px-3 py-3 border-b border-border">
           <button
             type="button"
-            class="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent"
+            class="flex-shrink-0 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
             aria-label="Toggle sidebar"
             data-sidebar-toggle
             aria-expanded="true"
           >
-            <.icon name="hero-bars-3" class="size-6" />
+            <.icon name="hero-bars-3" class="size-5" />
           </button>
-          <a href={~p"/dashboard"} class="flex items-center gap-2">
-            <img src={~p"/images/logo.svg"} width="32" />
-            <span class="text-lg font-semibold text-foreground hidden sm:block">
-              App
-            </span>
+          <a
+            href={~p"/dashboard"}
+            class="flex items-center gap-2 overflow-hidden [[data-sidebar-collapsed=true]_&]:hidden"
+          >
+            <img src={~p"/images/logo.svg"} width="24" />
+            <span class="text-base font-semibold text-foreground whitespace-nowrap">AgentEx</span>
           </a>
         </div>
 
-        <.theme_toggle />
-      </header>
+        <%!-- Navigation Links --%>
+        <nav class="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
+          <.link
+            navigate={~p"/dashboard"}
+            class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+          >
+            <.icon name="hero-home" class="size-5 flex-shrink-0" />
+            <span class="[[data-sidebar-collapsed=true]_&]:hidden">Dashboard</span>
+          </.link>
 
-      <%!-- App Shell: Flex container for sidebar + content --%>
-      <div class="flex flex-1 min-h-0">
-        <%!-- Sidebar Overlay (for mobile when expanded) --%>
-        <div
-          data-sidebar-toggle
-          class={[
-            "fixed inset-0 bg-black/50 z-20 transition-opacity duration-300 lg:hidden pointer-events-auto opacity-100",
-            "[[data-sidebar-collapsed=true]_&]:opacity-0",
-            "[[data-sidebar-collapsed=true]_&]:pointer-events-none"
-          ]}
-        />
+          <.link
+            navigate={~p"/providers"}
+            class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+          >
+            <.icon name="hero-server-stack" class="size-5 flex-shrink-0" />
+            <span class="[[data-sidebar-collapsed=true]_&]:hidden">Providers</span>
+          </.link>
 
-        <%!-- Sidebar --%>
-        <aside class={[
-          "h-full bg-base border-r border-border transition-all duration-300 ease-in-out flex flex-col",
-          "w-64 flex-shrink-0 translate-x-0",
-          "[[data-sidebar-collapsed=true]_&]:-translate-x-full",
-          "[[data-sidebar-collapsed=true]_&]:lg:w-0",
-          "[[data-sidebar-collapsed=true]_&]:lg:border-0",
-          "[[data-sidebar-collapsed=true]_&]:lg:overflow-hidden"
-        ]}>
-          <div class="flex flex-col h-full">
-            <%!-- Navigation Links --%>
-            <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-              <.link
-                navigate={~p"/dashboard"}
-                class="flex items-center gap-3 px-3 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
-              >
-                <.icon name="hero-home" class="size-5" /> Dashboard
-              </.link>
+          <.link
+            navigate={~p"/agents"}
+            class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+          >
+            <.icon name="hero-cpu-chip" class="size-5 flex-shrink-0" />
+            <span class="[[data-sidebar-collapsed=true]_&]:hidden">Agents</span>
+          </.link>
 
-              <.link
-                navigate={~p"/providers"}
-                class="flex items-center gap-3 px-3 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
-              >
-                <.icon name="hero-server-stack" class="size-5" /> Providers
-              </.link>
+          <.link
+            navigate={~p"/chat"}
+            class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+          >
+            <.icon name="hero-chat-bubble-left-right" class="size-5 flex-shrink-0" />
+            <span class="[[data-sidebar-collapsed=true]_&]:hidden">Chat</span>
+          </.link>
+        </nav>
 
-              <.link
-                navigate={~p"/agents"}
-                class="flex items-center gap-3 px-3 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
-              >
-                <.icon name="hero-cpu-chip" class="size-5" /> Agents
-              </.link>
-
-              <.link
-                navigate={~p"/chat"}
-                class="flex items-center gap-3 px-3 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
-              >
-                <.icon name="hero-chat-bubble-left-right" class="size-5" /> Chat
-              </.link>
-            </nav>
-
-            <%!-- User Section (Bottom) --%>
-            <div class="p-4 border-t border-border">
-              <div class="w-full [&>div]:w-full">
-                <.menu_button
-                  id="sidebar-user-menu"
-                  variant="unstyled"
-                  content_class="w-56 z-50 bg-popover text-popover-foreground rounded-md border border-border p-1 shadow-md mb-2 aria-hidden:hidden not-aria-hidden:animate-in not-aria-hidden:fade-in-0 not-aria-hidden:zoom-in-95 aria-hidden:animate-out aria-hidden:fade-out-0 aria-hidden:zoom-out-95"
-                  class="flex w-full items-center gap-3 rounded-xl border border-border bg-card px-3 py-3 text-left transition hover:bg-accent/60"
-                >
-                  <.icon name="hero-user-circle" class="size-9 text-muted-foreground shrink-0" />
-                  <div class="min-w-0 flex-1">
-                    <p class="truncate text-sm font-medium text-foreground">
-                      {@current_scope.user.email}
-                    </p>
-                    <p class="truncate text-xs text-muted-foreground">Account</p>
-                  </div>
-                  <.icon name="hero-chevron-up-down" class="size-4 text-muted-foreground shrink-0" />
-                  <:items>
-                    <.menu_item navigate={~p"/users/settings"}>
-                      <.icon name="hero-cog-6-tooth" class="size-4" /> Settings
-                    </.menu_item>
-                    <.menu_separator />
-                    <.menu_item href={~p"/users/log-out"} method="delete" variant="destructive">
-                      <.icon name="hero-arrow-right-on-rectangle" class="size-4" /> Log out
-                    </.menu_item>
-                  </:items>
-                </.menu_button>
+        <%!-- User Section (Bottom) — theme toggle hidden inside menu --%>
+        <div class="p-3 border-t border-border">
+          <div class="[[data-sidebar-collapsed=true]_&]:hidden">
+            <.menu_button
+              id="sidebar-user-menu"
+              variant="unstyled"
+              content_class="w-56 z-50 bg-popover text-popover-foreground rounded-md border border-border p-1 shadow-md mb-2 aria-hidden:hidden not-aria-hidden:animate-in not-aria-hidden:fade-in-0 not-aria-hidden:zoom-in-95 aria-hidden:animate-out aria-hidden:fade-out-0 aria-hidden:zoom-out-95"
+              class="flex w-full items-center gap-2.5 rounded-xl border border-border bg-background px-2.5 py-2 text-left transition hover:bg-accent/60"
+            >
+              <.icon name="hero-user-circle" class="size-7 text-muted-foreground shrink-0" />
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-medium text-foreground">
+                  {@current_scope.user.email}
+                </p>
               </div>
-            </div>
+              <.icon name="hero-chevron-up-down" class="size-4 text-muted-foreground shrink-0" />
+              <:items>
+                <.menu_item navigate={~p"/users/settings"}>
+                  <.icon name="hero-cog-6-tooth" class="size-4" /> Settings
+                </.menu_item>
+                <.menu_separator />
+                <div class="px-2 py-2">
+                  <p class="text-xs text-muted-foreground mb-2">Theme</p>
+                  <.theme_toggle />
+                </div>
+                <.menu_separator />
+                <.menu_item href={~p"/users/log-out"} method="delete" variant="destructive">
+                  <.icon name="hero-arrow-right-on-rectangle" class="size-4" /> Log out
+                </.menu_item>
+              </:items>
+            </.menu_button>
           </div>
-        </aside>
+          <%!-- Icon-only user icon when collapsed --%>
+          <div class="hidden [[data-sidebar-collapsed=true]_&]:flex justify-center">
+            <span class="p-1.5 text-muted-foreground">
+              <.icon name="hero-user-circle" class="size-6" />
+            </span>
+          </div>
+        </div>
+      </aside>
 
-        <%!-- Main Content --%>
-        <main class="flex-1 min-w-0 h-full overflow-x-hidden overflow-y-auto">
-          <div class="p-4 sm:p-6 lg:p-8">
-            {render_slot(@inner_block)}
-          </div>
-        </main>
-      </div>
+      <%!-- Main Content --%>
+      <main class="flex-1 min-w-0 h-full overflow-hidden flex flex-col">
+        <div class="flex-1 overflow-y-auto p-4 sm:p-5 lg:p-6 h-full flex flex-col">
+          {render_slot(@inner_block)}
+        </div>
+      </main>
 
       <.flash_group flash={@flash} />
 

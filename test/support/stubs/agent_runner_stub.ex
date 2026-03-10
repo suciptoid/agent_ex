@@ -24,11 +24,28 @@ defmodule App.TestSupport.AgentRunnerStub do
      }}
   end
 
-  def run_streaming(agent, messages, lv_pid, _opts \\ []) do
+  def run_streaming(agent, messages, recipient, opts \\ []) do
     content = stub_content(agent, messages)
-    send(lv_pid, {:stream_chunk, content})
+    emit_chunk = stream_callback(recipient, opts)
+
+    content
+    |> String.graphemes()
+    |> Enum.each(emit_chunk)
 
     {:ok,
      %{content: content, usage: %{"input_tokens" => 1, "output_tokens" => 1, "total_tokens" => 2}}}
+  end
+
+  defp stream_callback(recipient, opts) do
+    case Keyword.get(opts, :on_result) do
+      callback when is_function(callback, 1) ->
+        callback
+
+      _ when is_pid(recipient) ->
+        fn token -> send(recipient, {:stream_chunk, token}) end
+
+      _ ->
+        fn _token -> :ok end
+    end
   end
 end

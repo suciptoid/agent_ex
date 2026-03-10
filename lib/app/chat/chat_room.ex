@@ -9,7 +9,7 @@ defmodule App.Chat.ChatRoom do
   schema "chat_rooms" do
     field :title, :string
     field :agent_ids, {:array, :binary_id}, virtual: true, default: []
-    field :commander_agent_id, :binary_id, virtual: true
+    field :active_agent_id, :binary_id, virtual: true
 
     belongs_to :user, App.Users.User
 
@@ -22,13 +22,13 @@ defmodule App.Chat.ChatRoom do
 
   def changeset(chat_room, attrs) do
     chat_room
-    |> cast(attrs, [:title, :agent_ids, :commander_agent_id])
+    |> cast(attrs, [:title, :agent_ids, :active_agent_id])
     |> update_change(:title, &trim_text/1)
     |> update_change(:agent_ids, &normalize_agent_ids/1)
     |> validate_required([:title])
     |> validate_length(:title, max: 160)
     |> validate_agent_ids()
-    |> validate_commander_agent()
+    |> validate_active_agent()
     |> foreign_key_constraint(:user_id)
   end
 
@@ -39,19 +39,19 @@ defmodule App.Chat.ChatRoom do
     end
   end
 
-  defp validate_commander_agent(changeset) do
-    commander_agent_id = get_field(changeset, :commander_agent_id)
+  defp validate_active_agent(changeset) do
+    active_agent_id = get_field(changeset, :active_agent_id)
     agent_ids = get_field(changeset, :agent_ids, [])
 
     cond do
-      is_nil(commander_agent_id) ->
+      is_nil(active_agent_id) ->
         changeset
 
-      commander_agent_id in agent_ids ->
+      active_agent_id in agent_ids ->
         changeset
 
       true ->
-        add_error(changeset, :commander_agent_id, "must be one of the selected agents")
+        add_error(changeset, :active_agent_id, "must be one of the selected agents")
     end
   end
 

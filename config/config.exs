@@ -24,9 +24,7 @@ config :app,
   ecto_repos: [App.Repo],
   generators: [timestamp_type: :utc_datetime, binary_id: true]
 
-config :app, App.Jido,
-  max_tasks: 1000,
-  agent_pools: []
+config :req_llm, load_dotenv: false
 
 # Configure the endpoint
 config :app, AppWeb.Endpoint,

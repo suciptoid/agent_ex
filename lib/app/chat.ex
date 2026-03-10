@@ -1,0 +1,247 @@
+defmodule App.Chat do
+  @moduledoc """
+  The Chat context.
+  """
+
+  import Ecto.Query, warn: false
+
+  alias Ecto.Multi
+  alias App.Agents.Agent
+  alias App.Chat.{ChatRoom, ChatRoomAgent, Message}
+  alias App.Repo
+  alias App.Users.Scope
+
+  def list_chat_rooms(%Scope{} = scope) do
+    ChatRoom
+    |> where([chat_room], chat_room.user_id == ^scope.user.id)
+    |> order_by([chat_room], desc: chat_room.updated_at, desc: chat_room.inserted_at)
+    |> preload(^chat_room_preloads())
+    |> Repo.all()
+  end
+
+  def get_chat_room!(%Scope{} = scope, id) do
+    ChatRoom
+    |> where([chat_room], chat_room.user_id == ^scope.user.id and chat_room.id == ^id)
+    |> preload(^chat_room_preloads())
+    |> Repo.one!()
+  end
+
+  def create_chat_room(%Scope{} = scope, attrs) do
+    changeset =
+      %ChatRoom{user_id: scope.user.id}
+      |> ChatRoom.changeset(attrs)
+
+    with %{valid?: true} <- changeset,
+         agent_ids <- Ecto.Changeset.get_field(changeset, :agent_ids, []),
+         commander_id <-
+           Ecto.Changeset.get_field(changeset, :commander_agent_id) || List.first(agent_ids),
+         {:ok, agents} <- fetch_agents(scope, agent_ids, changeset) do
+      Multi.new()
+      |> Multi.insert(:chat_room, changeset)
+      |> Multi.run(:chat_room_agents, fn repo, %{chat_room: chat_room} ->
+        insert_chat_room_agents(repo, chat_room, agents, commander_id)
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{chat_room: chat_room}} -> {:ok, get_chat_room!(scope, chat_room.id)}
+        {:error, :chat_room, changeset, _changes} -> {:error, changeset}
+        {:error, :chat_room_agents, changeset, _changes} -> {:error, changeset}
+      end
+    else
+      %{valid?: false} -> {:error, changeset}
+      {:error, %Ecto.Changeset{} = changeset} -> {:error, changeset}
+    end
+  end
+
+  def change_chat_room(%ChatRoom{} = chat_room, attrs \\ %{}) do
+    chat_room
+    |> prepare_chat_room_for_form()
+    |> ChatRoom.changeset(attrs)
+  end
+
+  def delete_chat_room(%Scope{} = scope, %ChatRoom{} = chat_room) do
+    ensure_user_owns_chat_room!(scope, chat_room)
+    Repo.delete(chat_room)
+  end
+
+  def add_agent_to_room(%Scope{} = scope, %ChatRoom{} = chat_room, agent_id, opts \\ []) do
+    chat_room = ensure_loaded_chat_room(scope, chat_room)
+    agent = get_agent_for_room!(scope, agent_id)
+    is_commander = Keyword.get(opts, :is_commander, false)
+
+    Multi.new()
+    |> maybe_clear_commander(chat_room, is_commander)
+    |> Multi.insert(
+      :chat_room_agent,
+      ChatRoomAgent.changeset(%ChatRoomAgent{}, %{
+        chat_room_id: chat_room.id,
+        agent_id: agent.id,
+        is_commander: is_commander
+      })
+    )
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{chat_room_agent: chat_room_agent}} ->
+        {:ok, Repo.preload(chat_room_agent, agent: :provider)}
+
+      {:error, :chat_room_agent, changeset, _changes} ->
+        {:error, changeset}
+    end
+  end
+
+  def remove_agent_from_room(%Scope{} = scope, %ChatRoom{} = chat_room, agent_id) do
+    ensure_user_owns_chat_room!(scope, chat_room)
+
+    chat_room_agent =
+      Repo.get_by!(ChatRoomAgent, chat_room_id: chat_room.id, agent_id: agent_id)
+
+    Repo.delete(chat_room_agent)
+  end
+
+  def list_messages(%ChatRoom{} = chat_room) do
+    Message
+    |> where([message], message.chat_room_id == ^chat_room.id)
+    |> order_by([message], asc: message.position)
+    |> preload([:agent])
+    |> Repo.all()
+  end
+
+  def create_message(%ChatRoom{} = chat_room, attrs) do
+    %Message{chat_room_id: chat_room.id, position: next_message_position(chat_room)}
+    |> Message.changeset(attrs)
+    |> Repo.insert()
+    |> case do
+      {:ok, message} ->
+        touch_chat_room(chat_room)
+        {:ok, Repo.preload(message, [:agent])}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  def send_message(%Scope{} = scope, %ChatRoom{} = chat_room, content) do
+    chat_room = ensure_loaded_chat_room(scope, chat_room)
+    chat_orchestrator().send_message(scope, chat_room, content)
+  end
+
+  defp chat_room_preloads do
+    message_query =
+      from message in Message,
+        order_by: [asc: message.position],
+        preload: [:agent]
+
+    [chat_room_agents: [agent: :provider], agents: [:provider], messages: message_query]
+  end
+
+  defp fetch_agents(%Scope{} = scope, agent_ids, %Ecto.Changeset{} = changeset) do
+    agents =
+      Repo.all(
+        from agent in Agent,
+          where: agent.user_id == ^scope.user.id and agent.id in ^agent_ids,
+          preload: [:provider]
+      )
+
+    if length(agents) == length(agent_ids) do
+      ordered_agents =
+        Enum.sort_by(agents, fn agent ->
+          Enum.find_index(agent_ids, &(&1 == agent.id))
+        end)
+
+      {:ok, ordered_agents}
+    else
+      {:error, Ecto.Changeset.add_error(changeset, :agent_ids, "must belong to the current user")}
+    end
+  end
+
+  defp insert_chat_room_agents(repo, chat_room, agents, commander_id) do
+    Enum.reduce_while(agents, {:ok, []}, fn agent, {:ok, memberships} ->
+      params = %{
+        chat_room_id: chat_room.id,
+        agent_id: agent.id,
+        is_commander: agent.id == commander_id
+      }
+
+      case %ChatRoomAgent{} |> ChatRoomAgent.changeset(params) |> repo.insert() do
+        {:ok, chat_room_agent} ->
+          {:cont, {:ok, [chat_room_agent | memberships]}}
+
+        {:error, changeset} ->
+          {:halt, {:error, changeset}}
+      end
+    end)
+    |> case do
+      {:ok, memberships} -> {:ok, Enum.reverse(memberships)}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp maybe_clear_commander(multi, _chat_room, false), do: multi
+
+  defp maybe_clear_commander(multi, %ChatRoom{id: chat_room_id}, true) do
+    Multi.update_all(
+      multi,
+      :clear_existing_commander,
+      from(chat_room_agent in ChatRoomAgent,
+        where: chat_room_agent.chat_room_id == ^chat_room_id
+      ),
+      set: [is_commander: false]
+    )
+  end
+
+  defp touch_chat_room(%ChatRoom{id: chat_room_id}) do
+    now = DateTime.utc_now()
+
+    Repo.update_all(
+      from(chat_room in ChatRoom, where: chat_room.id == ^chat_room_id),
+      set: [updated_at: now]
+    )
+  end
+
+  defp next_message_position(%ChatRoom{id: chat_room_id}) do
+    from(
+      message in Message,
+      where: message.chat_room_id == ^chat_room_id,
+      select: coalesce(max(message.position), 0) + 1
+    )
+    |> Repo.one()
+  end
+
+  defp prepare_chat_room_for_form(%ChatRoom{} = chat_room) do
+    if Ecto.assoc_loaded?(chat_room.chat_room_agents) do
+      commander_agent_id =
+        case Enum.find(chat_room.chat_room_agents, & &1.is_commander) ||
+               List.first(chat_room.chat_room_agents) do
+          nil -> nil
+          chat_room_agent -> chat_room_agent.agent_id
+        end
+
+      %{
+        chat_room
+        | agent_ids: Enum.map(chat_room.chat_room_agents, & &1.agent_id),
+          commander_agent_id: commander_agent_id
+      }
+    else
+      chat_room
+    end
+  end
+
+  defp ensure_loaded_chat_room(%Scope{} = scope, %ChatRoom{} = chat_room),
+    do: get_chat_room!(scope, chat_room.id)
+
+  defp ensure_user_owns_chat_room!(%Scope{} = scope, %ChatRoom{user_id: user_id}) do
+    if user_id != scope.user.id do
+      raise Ecto.NoResultsError, query: ChatRoom
+    end
+  end
+
+  defp get_agent_for_room!(%Scope{} = scope, agent_id) do
+    Repo.one!(
+      from agent in Agent,
+        where: agent.user_id == ^scope.user.id and agent.id == ^agent_id,
+        preload: [:provider]
+    )
+  end
+
+  defp chat_orchestrator, do: Application.get_env(:app, :chat_orchestrator, App.Chat.Orchestrator)
+end

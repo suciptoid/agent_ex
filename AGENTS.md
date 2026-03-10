@@ -514,6 +514,7 @@ And **never** do this:
 # Agents Plan & Task Tracking
 
 - Always write plan into .agents/plans/<yymmdd>-<plan name>.md
-- Before end your turn, always write summary of changes into .agents/changelogs/<yymmdd>.md, append if file exists.
+- Before end your turn, always write summary of changes into .agents/changelogs/<yymmdd>-<plan name>.md, append if file exists.
+- if you need to write some quick/temporary notes, write on .agents/
 
 <!-- usage-rules-end -->

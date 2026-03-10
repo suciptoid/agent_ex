@@ -58,6 +58,12 @@ defmodule AppWeb.Router do
       live "/providers", ProviderLive.Index, :index
       live "/providers/new", ProviderLive.Index, :new
       live "/providers/:id/edit", ProviderLive.Index, :edit
+      live "/agents", AgentLive.Index, :index
+      live "/agents/new", AgentLive.Index, :new
+      live "/agents/:id/edit", AgentLive.Index, :edit
+      live "/chat", ChatLive.Index, :index
+      live "/chat/new", ChatLive.Index, :new
+      live "/chat/:id", ChatLive.Show, :show
     end
 
     post "/users/update-password", UserSessionController, :update_password

@@ -208,7 +208,7 @@ defmodule AppWeb.Layouts do
           >
             <.icon name="hero-bars-3" class="size-6" />
           </button>
-          <a href="/" class="flex items-center gap-2">
+          <a href={~p"/dashboard"} class="flex items-center gap-2">
             <img src={~p"/images/logo.svg"} width="32" />
             <span class="text-lg font-semibold text-foreground hidden sm:block">
               App
@@ -216,39 +216,7 @@ defmodule AppWeb.Layouts do
           </a>
         </div>
 
-        <div class="flex items-center gap-4">
-          <.theme_toggle />
-          <div class="relative group">
-            <button
-              type="button"
-              class="flex items-center gap-2 p-2 rounded-lg hover:bg-accent"
-              aria-haspopup="true"
-            >
-              <.icon name="hero-user-circle" class="size-6 text-muted-foreground" />
-              <span class="hidden sm:block text-sm text-foreground max-w-[150px] truncate">
-                {@current_scope.user.email}
-              </span>
-              <.icon name="hero-chevron-down" class="size-4 text-muted-foreground" />
-            </button>
-
-            <%!-- Dropdown Menu --%>
-            <div class="absolute right-0 mt-1 w-48 py-1 bg-popover rounded-lg shadow-lg border border-border opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
-              <.link
-                navigate={~p"/users/settings"}
-                class="flex items-center gap-2 px-4 py-2 text-sm text-popover-foreground hover:bg-accent"
-              >
-                <.icon name="hero-cog-6-tooth" class="size-4" /> Settings
-              </.link>
-              <.link
-                href={~p"/users/log-out"}
-                method="delete"
-                class="flex items-center gap-2 px-4 py-2 text-sm text-destructive hover:bg-destructive/10"
-              >
-                <.icon name="hero-arrow-right-on-rectangle" class="size-4" /> Log out
-              </.link>
-            </div>
-          </div>
-        </div>
+        <.theme_toggle />
       </header>
 
       <%!-- App Shell: Flex container for sidebar + content --%>
@@ -277,14 +245,35 @@ defmodule AppWeb.Layouts do
             <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
               <.link
                 navigate={~p"/dashboard"}
-                class="flex items-center gap-3 px-3 py-2 text-sm font-medium text-primary rounded-lg hover:bg-primary/10"
+                class="flex items-center gap-3 px-3 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
               >
                 <.icon name="hero-home" class="size-5" /> Dashboard
               </.link>
 
               <.link
+                navigate={~p"/providers"}
+                class="flex items-center gap-3 px-3 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+              >
+                <.icon name="hero-server-stack" class="size-5" /> Providers
+              </.link>
+
+              <.link
+                navigate={~p"/agents"}
+                class="flex items-center gap-3 px-3 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+              >
+                <.icon name="hero-cpu-chip" class="size-5" /> Agents
+              </.link>
+
+              <.link
+                navigate={~p"/chat"}
+                class="flex items-center gap-3 px-3 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+              >
+                <.icon name="hero-chat-bubble-left-right" class="size-5" /> Chat
+              </.link>
+
+              <.link
                 navigate={~p"/users/settings"}
-                class="flex items-center gap-3 px-3 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground"
+                class="flex items-center gap-3 px-3 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
               >
                 <.icon name="hero-cog-6-tooth" class="size-5" /> Settings
               </.link>
@@ -292,14 +281,30 @@ defmodule AppWeb.Layouts do
 
             <%!-- User Section (Bottom) --%>
             <div class="p-4 border-t border-border">
-              <div class="flex items-center gap-3">
-                <.icon name="hero-user-circle" class="size-10 text-muted-foreground" />
-                <div class="flex-1 min-w-0">
-                  <p class="text-sm font-medium text-foreground truncate">
-                    {@current_scope.user.email}
-                  </p>
-                  <p class="text-xs text-muted-foreground truncate">User</p>
-                </div>
+              <div class="w-full [&>div]:w-full">
+                <.menu_button
+                  variant="unstyled"
+                  content_class="w-56"
+                  class="flex w-full items-center gap-3 rounded-xl border border-border bg-card px-3 py-3 text-left transition hover:bg-accent/60"
+                >
+                  <.icon name="hero-user-circle" class="size-9 text-muted-foreground shrink-0" />
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate text-sm font-medium text-foreground">
+                      {@current_scope.user.email}
+                    </p>
+                    <p class="truncate text-xs text-muted-foreground">Account</p>
+                  </div>
+                  <.icon name="hero-chevron-up-down" class="size-4 text-muted-foreground shrink-0" />
+                  <:items>
+                    <.menu_item navigate={~p"/users/settings"}>
+                      <.icon name="hero-cog-6-tooth" class="size-4" /> Settings
+                    </.menu_item>
+                    <.menu_separator />
+                    <.menu_item href={~p"/users/log-out"} method="delete" variant="destructive">
+                      <.icon name="hero-arrow-right-on-rectangle" class="size-4" /> Log out
+                    </.menu_item>
+                  </:items>
+                </.menu_button>
               </div>
             </div>
           </div>

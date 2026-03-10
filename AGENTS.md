@@ -511,4 +511,9 @@ And **never** do this:
 - **Never** use `<.form let={f} ...>` in the template, instead **always use `<.form for={@form} ...>`**, then drive all form references from the form assign as in `@form[:field]`. The UI should **always** be driven by a `to_form/2` assigned in the LiveView module that is derived from a changeset
 <!-- phoenix:liveview-end -->
 
+# Agents Plan & Task Tracking
+
+- Always write plan into .agents/plans/<yymmdd>-<plan name>.md
+- Before end your turn, always write summary of changes into .agents/changelogs/<yymmdd>.md, append if file exists.
+
 <!-- usage-rules-end -->

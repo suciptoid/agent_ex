@@ -18,8 +18,8 @@ defmodule App.Providers.Provider do
 
   def changeset(provider, attrs) do
     provider
-    |> cast(attrs, [:name, :provider, :api_key, :user_id])
-    |> validate_required([:provider, :api_key, :user_id])
+    |> cast(attrs, [:name, :provider, :api_key])
+    |> validate_required([:provider, :api_key])
     |> validate_inclusion(:provider, @valid_providers)
     |> foreign_key_constraint(:user_id)
   end

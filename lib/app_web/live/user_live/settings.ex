@@ -9,7 +9,6 @@ defmodule AppWeb.UserLive.Settings do
     <Layouts.dashboard
       flash={@flash}
       current_scope={@current_scope}
-      sidebar_collapsed={@sidebar_collapsed}
     >
       <div class="space-y-8">
         <%!-- Page Header --%>
@@ -126,7 +125,6 @@ defmodule AppWeb.UserLive.Settings do
       |> assign(:email_form, to_form(email_changeset))
       |> assign(:password_form, to_form(password_changeset))
       |> assign(:trigger_submit, false)
-      |> assign(:sidebar_collapsed, false)
 
     {:ok, socket}
   end
@@ -187,18 +185,5 @@ defmodule AppWeb.UserLive.Settings do
       changeset ->
         {:noreply, assign(socket, password_form: to_form(changeset, action: :insert))}
     end
-  end
-
-  def handle_event("toggle_sidebar", _params, socket) do
-    collapsed = !socket.assigns.sidebar_collapsed
-
-    {:noreply,
-     socket
-     |> assign(:sidebar_collapsed, collapsed)
-     |> push_event("sidebar_state_changed", %{collapsed: collapsed})}
-  end
-
-  def handle_event("restore_sidebar_state", %{"collapsed" => collapsed}, socket) do
-    {:noreply, assign(socket, :sidebar_collapsed, collapsed)}
   end
 end

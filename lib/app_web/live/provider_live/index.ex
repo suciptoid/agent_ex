@@ -6,7 +6,9 @@ defmodule AppWeb.ProviderLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, stream(socket, :providers, Providers.list_providers(socket.assigns.current_scope))}
+    {:ok,
+     socket
+     |> stream(:providers, Providers.list_providers(socket.assigns.current_scope))}
   end
 
   @impl true

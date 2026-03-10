@@ -22,17 +22,15 @@ defmodule AppWeb.ProviderLive.FormComponent do
           <.input field={@form[:name]} type="text" label="Name (optional)" />
 
           <.select
-            id="provider-select"
-            name={@form[:provider].name}
-            value={@form[:provider].value}
+            field={@form[:provider]}
             label="Provider"
             options={[
-              {"OpenAI", "openai"},
-              {"Anthropic", "anthropic"},
-              {"Google", "google"},
-              {"Gemini", "gemini"},
-              {"Mistral", "mistral"},
-              {"Cohere", "cohere"}
+              {"openai", "OpenAI"},
+              {"anthropic", "Anthropic"},
+              {"google", "Google"},
+              {"gemini", "Gemini"},
+              {"mistral", "Mistral"},
+              {"cohere", "Cohere"}
             ]}
             placeholder="Select a provider"
           />

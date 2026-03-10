@@ -5,23 +5,7 @@ defmodule AppWeb.DashboardLive do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(:page_title, "Dashboard")
-     |> assign(:sidebar_collapsed, false)}
-  end
-
-  @impl true
-  def handle_event("toggle_sidebar", _params, socket) do
-    collapsed = !socket.assigns.sidebar_collapsed
-
-    {:noreply,
-     socket
-     |> assign(:sidebar_collapsed, collapsed)
-     |> push_event("sidebar_state_changed", %{collapsed: collapsed})}
-  end
-
-  @impl true
-  def handle_event("restore_sidebar_state", %{"collapsed" => collapsed}, socket) do
-    {:noreply, assign(socket, :sidebar_collapsed, collapsed)}
+     |> assign(:page_title, "Dashboard")}
   end
 
   @impl true
@@ -30,7 +14,6 @@ defmodule AppWeb.DashboardLive do
     <Layouts.dashboard
       flash={@flash}
       current_scope={@current_scope}
-      sidebar_collapsed={@sidebar_collapsed}
     >
       <%!-- Dashboard Content --%>
       <div class="space-y-8">

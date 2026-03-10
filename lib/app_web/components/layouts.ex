@@ -194,15 +194,17 @@ defmodule AppWeb.Layouts do
       id="dashboard-layout"
       class="h-screen flex flex-col bg-background overflow-hidden"
       phx-hook=".SidebarState"
+      data-sidebar-collapsed="false"
     >
       <%!-- Header --%>
       <header class="sticky top-0 z-30 flex items-center justify-between px-4 py-3 bg-card border-b border-border">
         <div class="flex items-center gap-4">
           <button
             type="button"
-            phx-click="toggle_sidebar"
             class="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent"
-            aria-label={if @sidebar_collapsed, do: "Expand sidebar", else: "Collapse sidebar"}
+            aria-label="Toggle sidebar"
+            data-sidebar-toggle
+            aria-expanded="true"
           >
             <.icon name="hero-bars-3" class="size-6" />
           </button>
@@ -253,20 +255,22 @@ defmodule AppWeb.Layouts do
       <div class="flex flex-1 min-h-0">
         <%!-- Sidebar Overlay (for mobile when expanded) --%>
         <div
-          phx-click="toggle_sidebar"
+          data-sidebar-toggle
           class={[
-            "fixed inset-0 bg-black/50 z-20 transition-opacity duration-300 lg:hidden",
-            @sidebar_collapsed && "opacity-0 pointer-events-none",
-            !@sidebar_collapsed && "opacity-100"
+            "fixed inset-0 bg-black/50 z-20 transition-opacity duration-300 lg:hidden pointer-events-auto opacity-100",
+            "[[data-sidebar-collapsed=true]_&]:opacity-0",
+            "[[data-sidebar-collapsed=true]_&]:pointer-events-none"
           ]}
         />
 
         <%!-- Sidebar --%>
         <aside class={[
           "h-full bg-base border-r border-border transition-all duration-300 ease-in-out flex flex-col",
-          "w-64 flex-shrink-0",
-          @sidebar_collapsed && "-translate-x-full lg:w-0 lg:border-0 lg:overflow-hidden",
-          !@sidebar_collapsed && "translate-x-0"
+          "w-64 flex-shrink-0 translate-x-0",
+          "[[data-sidebar-collapsed=true]_&]:-translate-x-full",
+          "[[data-sidebar-collapsed=true]_&]:lg:w-0",
+          "[[data-sidebar-collapsed=true]_&]:lg:border-0",
+          "[[data-sidebar-collapsed=true]_&]:lg:overflow-hidden"
         ]}>
           <div class="flex flex-col h-full overflow-hidden">
             <%!-- Navigation Links --%>
@@ -314,14 +318,24 @@ defmodule AppWeb.Layouts do
       <script :type={Phoenix.LiveView.ColocatedHook} name=".SidebarState">
         export default {
           mounted() {
-            const stored = localStorage.getItem("sidebar_collapsed");
-            if (stored !== null) {
-              const collapsed = stored === "true";
-              this.pushEvent("restore_sidebar_state", { collapsed });
-            }
+            const root = this.el;
+            const toggles = root.querySelectorAll("[data-sidebar-toggle]");
+            const setState = (collapsed) => {
+              root.dataset.sidebarCollapsed = String(collapsed);
+              toggles.forEach((toggle) => {
+                toggle.setAttribute("aria-expanded", String(!collapsed));
+              });
+              localStorage.setItem("sidebar_collapsed", String(collapsed));
+            };
 
-            this.handleEvent("sidebar_state_changed", (payload) => {
-              localStorage.setItem("sidebar_collapsed", String(payload.collapsed));
+            const stored = localStorage.getItem("sidebar_collapsed");
+            setState(stored === "true");
+
+            toggles.forEach((toggle) => {
+              toggle.addEventListener("click", () => {
+                const next = root.dataset.sidebarCollapsed !== "true";
+                setState(next);
+              });
             });
           }
         }

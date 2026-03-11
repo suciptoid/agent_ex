@@ -120,9 +120,8 @@
                     <div
                       data-body
                       class="hidden mt-1 rounded-lg bg-amber-500/5 border border-amber-500/20 px-3 py-2 font-mono text-xs text-foreground leading-5"
-                    >
-                      <span class="whitespace-pre-line break-words" phx-no-format>{message.content || ""}</span>
-                    </div>
+                      phx-no-format
+                    ><span class="whitespace-pre-line break-words" phx-no-format>{message.content || ""}</span></div>
                   </div>
                 <% else %>
                   <p
@@ -135,11 +134,7 @@
                       )
                     ]}
                     phx-no-format
-                  >{message.content || ""}
-                    <%= if streaming_message?(message) do %>
-                      <span class="inline-block w-0.5 h-4 bg-foreground/40 ml-0.5 animate-pulse align-middle" />
-                    <% end %>
-                  </p>
+                  >{message.content || ""}</p>
                 <% end %>
               </div>
             </div>
@@ -172,14 +167,14 @@
               phx-hook=".ChatInput"
               class="pr-12 resize-none"
             />
-            <.button
+            <button
               type="submit"
               phx-disable-with=""
               class="absolute bottom-2 right-2 flex size-8 items-center justify-center rounded-lg bg-primary p-0 text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-60"
               aria-label="Send message"
             >
               <.icon name="hero-paper-airplane" class="size-4 text-current" />
-            </.button>
+            </button>
           </.form>
         </div>
       </div>

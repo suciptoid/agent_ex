@@ -25,12 +25,23 @@ defmodule App.Agents.Tools do
   or `{:error, reason}`.
   Each `tool_call` is a map with `:id`, `:name`, and `:arguments` (map).
   """
-  def execute_all(tool_calls, tools) when is_list(tool_calls) and is_list(tools) do
+  def execute_all(tool_calls, tools, opts \\ [])
+      when is_list(tool_calls) and is_list(tools) and is_list(opts) do
     tool_map = Map.new(tools, fn t -> {t.name, t} end)
+    on_tool_start = tool_start_callback(opts)
 
     results =
       Enum.map(tool_calls, fn %{id: id, name: name, arguments: args} ->
         Logger.debug("[Tools] Executing tool #{name} with args: #{inspect(args)}")
+        normalized_args = normalize_metadata(args)
+
+        on_tool_start.(%{
+          "id" => id,
+          "name" => name,
+          "arguments" => normalized_args,
+          "content" => nil,
+          "status" => "running"
+        })
 
         {status, text} =
           case Map.get(tool_map, name) do
@@ -51,8 +62,6 @@ defmodule App.Agents.Tools do
               end
           end
 
-        normalized_args = normalize_metadata(args)
-
         %{
           message: ReqLLM.Context.tool_result(id, name, text),
           result: %{
@@ -70,6 +79,13 @@ defmodule App.Agents.Tools do
        messages: Enum.map(results, & &1.message),
        results: Enum.map(results, & &1.result)
      }}
+  end
+
+  defp tool_start_callback(opts) do
+    case Keyword.get(opts, :on_tool_start) do
+      callback when is_function(callback, 1) -> callback
+      _ -> fn _tool_result -> :ok end
+    end
   end
 
   def do_web_fetch(%{url: url}) when is_binary(url) do

@@ -32,100 +32,113 @@
         @form[:agent_ids].value |> List.wrap() |> Enum.reject(&(&1 in [nil, ""])) %>
       <% selected_active_id = @form[:active_agent_id].value %>
 
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-        <div class="w-full max-w-3xl rounded-2xl border border-border bg-background p-6 shadow-2xl">
-          <div class="mb-6 space-y-2">
-            <h2 class="text-2xl font-semibold text-foreground">{@page_title}</h2>
-            <p class="text-sm text-muted-foreground">
-              Give the room a title, choose the participating agents, and optionally mark which agent is active.
-            </p>
-          </div>
-
-          <.form
-            for={@form}
-            id="chat-room-form"
-            phx-change="validate"
-            phx-submit="save"
-            class="space-y-6"
+      <.dialog
+        id="chat-room-dialog"
+        show={true}
+        variant="unstyled"
+        class="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm"
+        on_cancel={JS.patch(~p"/chat")}
+      >
+        <:content :let={{attrs, %{hide: hide}}}>
+          <div
+            {attrs}
+            role="dialog"
+            aria-modal="true"
+            class="fixed inset-0 z-50 flex items-center justify-center p-4"
           >
-            <.input
-              field={@form[:title]}
-              type="text"
-              label="Title"
-              placeholder="Quarterly planning room"
-            />
-
-            <div class="space-y-3">
-              <div class="space-y-1">
-                <p class="text-sm font-medium text-foreground">Agents</p>
-                <p class="text-xs text-muted-foreground">
-                  Pick one or more agents. If no active agent is chosen, the first selected agent will be active.
+            <div class="w-full max-w-3xl rounded-3xl border border-border/80 bg-background p-6 shadow-2xl shadow-black/20 sm:p-7">
+              <div class="mb-6 space-y-2">
+                <h2 class="text-2xl font-semibold text-foreground">{@page_title}</h2>
+                <p class="text-sm text-muted-foreground">
+                  Give the room a title, choose the participating agents, and optionally mark which agent is active.
                 </p>
               </div>
 
-              <input type="hidden" name="chat_room[agent_ids][]" value="" />
+              <.form
+                for={@form}
+                id="chat-room-form"
+                phx-change="validate"
+                phx-submit="save"
+                class="space-y-6"
+              >
+                <.input
+                  field={@form[:title]}
+                  type="text"
+                  label="Title"
+                  placeholder="Quarterly planning room"
+                />
 
-              <div class="grid gap-3 md:grid-cols-2">
-                <div
-                  :for={agent <- @available_agents}
-                  class={[
-                    "rounded-2xl border p-4 transition",
-                    if(agent.id in selected_agent_ids,
-                      do: "border-primary bg-primary/5",
-                      else: "border-border hover:border-primary/40"
-                    )
-                  ]}
-                >
-                  <div class="flex items-start gap-3">
-                    <.checkbox
-                      id={"chat-room-agent-#{agent.id}"}
-                      name="chat_room[agent_ids][]"
-                      value={agent.id}
-                      checked={agent.id in selected_agent_ids}
-                    />
-
-                    <div class="min-w-0 flex-1 space-y-1">
-                      <label for={"chat-room-agent-#{agent.id}"} class="block cursor-pointer">
-                        <p class="text-sm font-medium text-foreground">{agent.name}</p>
-                        <p class="text-xs text-muted-foreground">{agent.model}</p>
-                      </label>
-                    </div>
-
-                    <label class="flex items-center gap-2 text-xs text-muted-foreground">
-                      <.radio
-                        id={"chat-room-active-#{agent.id}"}
-                        name="chat_room[active_agent_id]"
-                        value={agent.id}
-                        checked={selected_active_id == agent.id}
-                      /> Active
-                    </label>
+                <div class="space-y-3">
+                  <div class="space-y-1">
+                    <p class="text-sm font-medium text-foreground">Agents</p>
+                    <p class="text-xs text-muted-foreground">
+                      Pick one or more agents. If no active agent is chosen, the first selected agent will be active.
+                    </p>
                   </div>
+
+                  <input type="hidden" name="chat_room[agent_ids][]" value="" />
+
+                  <div class="grid gap-3 md:grid-cols-2">
+                    <div
+                      :for={agent <- @available_agents}
+                      class={[
+                        "rounded-2xl border p-4 transition",
+                        if(agent.id in selected_agent_ids,
+                          do: "border-primary bg-primary/5",
+                          else: "border-border hover:border-primary/40"
+                        )
+                      ]}
+                    >
+                      <div class="flex items-start gap-3">
+                        <.checkbox
+                          id={"chat-room-agent-#{agent.id}"}
+                          name="chat_room[agent_ids][]"
+                          value={agent.id}
+                          checked={agent.id in selected_agent_ids}
+                        />
+
+                        <div class="min-w-0 flex-1 space-y-1">
+                          <label for={"chat-room-agent-#{agent.id}"} class="block cursor-pointer">
+                            <p class="text-sm font-medium text-foreground">{agent.name}</p>
+                            <p class="text-xs text-muted-foreground">{agent.model}</p>
+                          </label>
+                        </div>
+
+                        <label class="flex items-center gap-2 text-xs text-muted-foreground">
+                          <.radio
+                            id={"chat-room-active-#{agent.id}"}
+                            name="chat_room[active_agent_id]"
+                            value={agent.id}
+                            checked={selected_active_id == agent.id}
+                          /> Active
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <p
+                    :for={{message, _opts} <- @form[:agent_ids].errors}
+                    class="text-sm font-medium text-destructive"
+                  >
+                    {message}
+                  </p>
+                  <p
+                    :for={{message, _opts} <- @form[:active_agent_id].errors}
+                    class="text-sm font-medium text-destructive"
+                  >
+                    {message}
+                  </p>
                 </div>
-              </div>
 
-              <p
-                :for={{message, _opts} <- @form[:agent_ids].errors}
-                class="text-sm font-medium text-destructive"
-              >
-                {message}
-              </p>
-              <p
-                :for={{message, _opts} <- @form[:active_agent_id].errors}
-                class="text-sm font-medium text-destructive"
-              >
-                {message}
-              </p>
+                <div class="flex justify-end gap-3 pt-2">
+                  <.button type="button" variant="outline" phx-click={hide}>Cancel</.button>
+                  <.button type="submit" phx-disable-with="Creating...">Create Chat</.button>
+                </div>
+              </.form>
             </div>
-
-            <div class="flex justify-end gap-3 pt-2">
-              <.button type="button" variant="outline" phx-click={JS.patch(~p"/chat")}>
-                Cancel
-              </.button>
-              <.button type="submit" phx-disable-with="Creating...">Create Chat</.button>
-            </div>
-          </.form>
-        </div>
-      </div>
+          </div>
+        </:content>
+      </.dialog>
     <% end %>
 
     <div id="chat-rooms" phx-update="stream" class="grid gap-4">

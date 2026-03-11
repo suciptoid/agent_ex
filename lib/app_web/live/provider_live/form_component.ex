@@ -6,44 +6,65 @@ defmodule AppWeb.ProviderLive.FormComponent do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div class="w-full max-w-md p-6 bg-white rounded-lg shadow-xl dark:bg-gray-800">
-        <div class="mb-6">
-          <h2 class="text-xl font-semibold text-gray-900 dark:text-white">{@title}</h2>
-        </div>
+    <div>
+      <.dialog
+        id="provider-dialog"
+        show={true}
+        variant="unstyled"
+        class="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm"
+        on_cancel={@on_close}
+      >
+        <:content :let={{attrs, %{hide: hide}}}>
+          <div
+            {attrs}
+            role="dialog"
+            aria-modal="true"
+            class="fixed inset-0 z-50 flex items-center justify-center p-4"
+          >
+            <div class="w-full max-w-md rounded-3xl border border-border/80 bg-background p-6 shadow-2xl shadow-black/20 sm:p-7">
+              <div class="mb-6 space-y-2">
+                <h2 class="text-2xl font-semibold text-foreground">{@title}</h2>
+                <p class="text-sm text-muted-foreground">
+                  Save your provider details securely so agents can reuse them across rooms.
+                </p>
+              </div>
 
-        <.form
-          for={@form}
-          id="provider-form"
-          phx-change="validate"
-          phx-submit="save"
-          phx-target={@myself}
-        >
-          <.input field={@form[:name]} type="text" label="Name (optional)" />
+              <.form
+                for={@form}
+                id="provider-form"
+                phx-change="validate"
+                phx-submit="save"
+                phx-target={@myself}
+                class="space-y-5"
+              >
+                <.input field={@form[:name]} type="text" label="Name (optional)" />
 
-          <.select
-            field={@form[:provider]}
-            label="Provider"
-            options={[
-              {"openai", "OpenAI"},
-              {"anthropic", "Anthropic"},
-              {"google", "Google"},
-              {"gemini", "Gemini"},
-              {"mistral", "Mistral"},
-              {"cohere", "Cohere"},
-              {"openrouter", "OpenRouter"}
-            ]}
-            placeholder="Select a provider"
-          />
+                <.select
+                  field={@form[:provider]}
+                  label="Provider"
+                  options={[
+                    {"openai", "OpenAI"},
+                    {"anthropic", "Anthropic"},
+                    {"google", "Google"},
+                    {"gemini", "Gemini"},
+                    {"mistral", "Mistral"},
+                    {"cohere", "Cohere"},
+                    {"openrouter", "OpenRouter"}
+                  ]}
+                  placeholder="Select a provider"
+                />
 
-          <.input field={@form[:api_key]} type="password" label="API Key" />
+                <.input field={@form[:api_key]} type="password" label="API Key" />
 
-          <div class="flex justify-end gap-3 mt-6">
-            <.button type="button" variant="outline" phx-click={@on_close}>Cancel</.button>
-            <.button type="submit" phx-disable-with="Saving...">Save Provider</.button>
+                <div class="flex justify-end gap-3 pt-2">
+                  <.button type="button" variant="outline" phx-click={hide}>Cancel</.button>
+                  <.button type="submit" phx-disable-with="Saving...">Save Provider</.button>
+                </div>
+              </.form>
+            </div>
           </div>
-        </.form>
-      </div>
+        </:content>
+      </.dialog>
     </div>
     """
   end

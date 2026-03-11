@@ -16,6 +16,7 @@ defmodule AppWeb.ChatLive.Show do
      |> assign(:chat_room, nil)
      |> assign(:agent_message_streams, %{})
      |> assign(:latest_message_id, nil)
+     |> assign(:streaming_task, nil)
      |> assign(:streaming_message_id, nil)
      |> assign(:streaming_message_agent, nil)
      |> assign(:streaming_message_inserted_at, nil)
@@ -37,6 +38,11 @@ defmodule AppWeb.ChatLive.Show do
   @impl true
   def handle_event("validate", %{"message" => message_params}, socket) do
     {:noreply, assign_message_form(socket, message_params)}
+  end
+
+  def handle_event("send", _params, %{assigns: %{streaming_task_ref: ref}} = socket)
+      when not is_nil(ref) do
+    {:noreply, put_flash(socket, :error, "Wait for the current response to finish first")}
   end
 
   def handle_event("send", %{"message" => %{"content" => content} = message_params}, socket) do
@@ -149,6 +155,22 @@ defmodule AppWeb.ChatLive.Show do
     end
   end
 
+  def handle_event("cancel-stream", _params, %{assigns: %{streaming_task: nil}} = socket) do
+    {:noreply, socket}
+  end
+
+  def handle_event("cancel-stream", _params, socket) do
+    _ = Task.shutdown(socket.assigns.streaming_task, :brutal_kill)
+    chat_room = socket.assigns.chat_room
+
+    {:noreply,
+     socket
+     |> persist_main_stream_cancel(chat_room, socket.assigns.streaming_message_id)
+     |> load_chat_room(chat_room.id)
+     |> reset_main_stream()
+     |> put_flash(:info, "Stopped generating")}
+  end
+
   @impl true
   def handle_info({:stream_chunk, token}, socket) do
     new_content = append_text(socket.assigns.streaming_content, token)
@@ -181,25 +203,12 @@ defmodule AppWeb.ChatLive.Show do
      |> maybe_stream_main_placeholder()}
   end
 
+  def handle_info({:stream_tool_started, tool_result}, socket) do
+    {:noreply, put_main_stream_tool_response(socket, tool_result)}
+  end
+
   def handle_info({:stream_tool_result, tool_result}, socket) do
-    socket =
-      socket
-      |> assign(
-        :streaming_tool_responses,
-        socket.assigns.streaming_tool_responses ++ [tool_result]
-      )
-      |> maybe_stream_main_placeholder()
-
-    if socket.assigns.streaming_message_id do
-      maybe_update_streaming_message(
-        socket.assigns.streaming_message_id,
-        socket.assigns.streaming_content,
-        stream_placeholder_status(socket.assigns.streaming_content),
-        current_stream_metadata(socket)
-      )
-    end
-
-    {:noreply, socket}
+    {:noreply, put_main_stream_tool_response(socket, tool_result)}
   end
 
   def handle_info({:agent_message_created, message}, socket) do
@@ -208,7 +217,7 @@ defmodule AppWeb.ChatLive.Show do
        socket
        |> maybe_track_agent_stream(message)
        |> assign(:latest_message_id, message.id)
-       |> stream_insert(:messages, message)}
+       |> stream_insert_message(message)}
     else
       {:noreply, socket}
     end
@@ -222,8 +231,12 @@ defmodule AppWeb.ChatLive.Show do
     {:noreply, stream_agent_message_thinking_chunk(socket, message_id, token)}
   end
 
+  def handle_info({:agent_message_tool_started, message_id, tool_result}, socket) do
+    {:noreply, put_agent_stream_tool_response(socket, message_id, tool_result)}
+  end
+
   def handle_info({:agent_message_tool_result, message_id, tool_result}, socket) do
-    {:noreply, stream_agent_message_tool_result(socket, message_id, tool_result)}
+    {:noreply, put_agent_stream_tool_response(socket, message_id, tool_result)}
   end
 
   def handle_info({:agent_message_updated, message}, socket) do
@@ -232,7 +245,7 @@ defmodule AppWeb.ChatLive.Show do
        socket
        |> clear_agent_stream(message.id)
        |> assign(:latest_message_id, message.id)
-       |> stream_insert(:messages, message)}
+       |> stream_insert_message(message)}
     else
       {:noreply, socket}
     end
@@ -293,6 +306,7 @@ defmodule AppWeb.ChatLive.Show do
   def user_message?(message), do: message.role == "user"
   def assistant_message?(message), do: message.role == "assistant"
   def latest_message?(message, latest_message_id), do: message.id == latest_message_id
+  def message_has_content?(message), do: (Map.get(message, :content) || "") != ""
 
   def delegated_message?(message) do
     metadata_value(message, "delegated") == true
@@ -343,6 +357,21 @@ defmodule AppWeb.ChatLive.Show do
   end
 
   def tool_response_error?(tool_response), do: Map.get(tool_response, "status") == "error"
+  def tool_response_running?(tool_response), do: Map.get(tool_response, "status") == "running"
+
+  def tool_response_content(tool_response) do
+    case Map.get(tool_response, "content") do
+      nil ->
+        if tool_response_running?(tool_response), do: "Waiting for tool output…", else: ""
+
+      content ->
+        content
+    end
+  end
+
+  def thinking_default_expanded?(message) do
+    streaming_message?(message) and not message_has_content?(message)
+  end
 
   def estimated_cost_label(message) do
     with usage when is_map(usage) <- metadata_value(message, "usage"),
@@ -361,7 +390,7 @@ defmodule AppWeb.ChatLive.Show do
     |> assign(:chat_room, chat_room)
     |> assign(:page_title, chat_room.title)
     |> assign(:latest_message_id, latest_message_id(messages))
-    |> stream(:messages, messages, reset: true)
+    |> stream(:messages, Enum.reverse(messages), reset: true)
   end
 
   defp assign_message_form(socket, params) do
@@ -391,6 +420,7 @@ defmodule AppWeb.ChatLive.Show do
 
     socket
     |> load_chat_room(socket.assigns.chat_room.id)
+    |> assign(:streaming_task, task)
     |> assign(:streaming_message_id, streaming_message_id)
     |> assign(:streaming_message_agent, streaming_message_agent)
     |> assign(:streaming_message_inserted_at, streaming_message_inserted_at)
@@ -403,6 +433,7 @@ defmodule AppWeb.ChatLive.Show do
 
   defp reset_main_stream(socket) do
     socket
+    |> assign(:streaming_task, nil)
     |> assign(:streaming_message_id, nil)
     |> assign(:streaming_message_agent, nil)
     |> assign(:streaming_message_inserted_at, nil)
@@ -417,7 +448,7 @@ defmodule AppWeb.ChatLive.Show do
     do: socket
 
   defp maybe_stream_main_placeholder(socket) do
-    stream_insert(socket, :messages, build_main_stream_message(socket))
+    stream_insert_message(socket, build_main_stream_message(socket))
   end
 
   defp build_main_stream_message(socket) do
@@ -514,6 +545,66 @@ defmodule AppWeb.ChatLive.Show do
     end
   end
 
+  defp persist_main_stream_cancel(socket, chat_room, streaming_message_id) do
+    cancel_text = "Response cancelled."
+
+    metadata =
+      current_stream_metadata(socket)
+      |> Map.put("error", cancel_text)
+      |> Map.put("cancelled", true)
+
+    content = blank_to_nil(socket.assigns.streaming_content) || cancel_text
+
+    attrs = %{
+      content: content,
+      status: :error,
+      metadata: metadata
+    }
+
+    case streaming_message_id && Chat.get_message_by_id(streaming_message_id) do
+      nil ->
+        agent_id = current_stream_agent_id(socket, chat_room)
+
+        create_attrs =
+          %{
+            role: "assistant",
+            content: content,
+            status: :error,
+            metadata: metadata
+          }
+          |> maybe_put_agent_id(agent_id)
+
+        case Chat.create_message(chat_room, create_attrs) do
+          {:ok, _message} ->
+            socket
+
+          {:error, reason} ->
+            Logger.error("[ChatLive.Show] Failed to save cancelled stream: #{inspect(reason)}")
+
+            put_flash(
+              socket,
+              :error,
+              "Failed to save cancelled response: #{changeset_error(reason)}"
+            )
+        end
+
+      message ->
+        case Chat.update_message(message, attrs) do
+          {:ok, _message} ->
+            socket
+
+          {:error, reason} ->
+            Logger.error("[ChatLive.Show] Failed to update cancelled stream: #{inspect(reason)}")
+
+            put_flash(
+              socket,
+              :error,
+              "Failed to save cancelled response: #{changeset_error(reason)}"
+            )
+        end
+    end
+  end
+
   defp current_stream_agent_id(socket, chat_room) do
     case socket.assigns.streaming_message_agent do
       %{id: agent_id} ->
@@ -575,9 +666,8 @@ defmodule AppWeb.ChatLive.Show do
         socket = put_agent_stream_state(socket, message_id, stream_state)
 
         socket =
-          stream_insert(
+          stream_insert_message(
             socket,
-            :messages,
             build_agent_stream_message(socket, message_id, stream_state)
           )
 
@@ -608,11 +698,11 @@ defmodule AppWeb.ChatLive.Show do
 
         socket
         |> put_agent_stream_state(message_id, updated_state)
-        |> stream_insert(:messages, build_agent_stream_message(socket, message_id, updated_state))
+        |> stream_insert_message(build_agent_stream_message(socket, message_id, updated_state))
     end
   end
 
-  defp stream_agent_message_tool_result(socket, message_id, tool_result) do
+  defp put_agent_stream_tool_response(socket, message_id, tool_result) do
     case current_agent_stream(socket, message_id) do
       nil ->
         socket
@@ -620,15 +710,14 @@ defmodule AppWeb.ChatLive.Show do
       stream_state ->
         updated_state = %{
           stream_state
-          | tool_responses: stream_state.tool_responses ++ [tool_result]
+          | tool_responses: merge_tool_response(stream_state.tool_responses, tool_result)
         }
 
         socket = put_agent_stream_state(socket, message_id, updated_state)
 
         socket =
-          stream_insert(
+          stream_insert_message(
             socket,
-            :messages,
             build_agent_stream_message(socket, message_id, updated_state)
           )
 
@@ -788,6 +877,48 @@ defmodule AppWeb.ChatLive.Show do
 
   defp maybe_put_agent_id(attrs, nil), do: attrs
   defp maybe_put_agent_id(attrs, agent_id), do: Map.put(attrs, :agent_id, agent_id)
+
+  defp put_main_stream_tool_response(socket, tool_result) do
+    socket =
+      socket
+      |> update(:streaming_tool_responses, &merge_tool_response(&1, tool_result))
+      |> maybe_stream_main_placeholder()
+
+    if socket.assigns.streaming_message_id do
+      maybe_update_streaming_message(
+        socket.assigns.streaming_message_id,
+        socket.assigns.streaming_content,
+        stream_placeholder_status(socket.assigns.streaming_content),
+        current_stream_metadata(socket)
+      )
+    end
+
+    socket
+  end
+
+  defp merge_tool_response(tool_responses, tool_response) do
+    case Map.get(tool_response, "id") do
+      nil ->
+        tool_responses ++ [tool_response]
+
+      tool_response_id ->
+        case Enum.find_index(tool_responses, &(Map.get(&1, "id") == tool_response_id)) do
+          nil ->
+            tool_responses ++ [tool_response]
+
+          index ->
+            List.replace_at(
+              tool_responses,
+              index,
+              Map.merge(Enum.at(tool_responses, index), tool_response)
+            )
+        end
+    end
+  end
+
+  defp stream_insert_message(socket, message) do
+    stream_insert(socket, :messages, message, at: 0)
+  end
 
   defp append_text(current, token), do: (current || "") <> token
 

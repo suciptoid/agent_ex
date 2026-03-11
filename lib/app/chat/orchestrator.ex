@@ -286,6 +286,11 @@ defmodule App.Chat.Orchestrator do
           send(lv_pid, {:agent_message_thinking_chunk, placeholder_message.id, token})
         end
       end,
+      on_tool_start: fn tool_result ->
+        if is_pid(lv_pid) do
+          send(lv_pid, {:agent_message_tool_started, placeholder_message.id, tool_result})
+        end
+      end,
       on_tool_result: fn tool_result ->
         if is_pid(lv_pid) do
           send(lv_pid, {:agent_message_tool_result, placeholder_message.id, tool_result})

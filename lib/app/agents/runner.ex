@@ -109,7 +109,9 @@ defmodule App.Agents.Runner do
               )
 
               with {:ok, %{messages: tool_messages, results: tool_results}} <-
-                     App.Agents.Tools.execute_all(tool_calls, tools) do
+                     App.Agents.Tools.execute_all(tool_calls, tools,
+                       on_tool_start: callbacks.on_tool_start
+                     ) do
                 Enum.each(tool_results, callbacks.on_tool_result)
 
                 new_context =
@@ -228,6 +230,12 @@ defmodule App.Agents.Runner do
           Keyword.get(opts, :on_tool_result),
           recipient,
           fn tool_result -> {:stream_tool_result, tool_result} end
+        ),
+      on_tool_start:
+        resolve_callback(
+          Keyword.get(opts, :on_tool_start),
+          recipient,
+          fn tool_result -> {:stream_tool_started, tool_result} end
         )
     }
   end
@@ -236,6 +244,7 @@ defmodule App.Agents.Runner do
     %{
       on_result: fn _token -> :ok end,
       on_thinking: fn _token -> :ok end,
+      on_tool_start: fn _tool_result -> :ok end,
       on_tool_result: fn _tool_result -> :ok end
     }
   end
@@ -255,6 +264,7 @@ defmodule App.Agents.Runner do
       :extra_system_prompt,
       :on_result,
       :on_thinking,
+      :on_tool_start,
       :on_tool_result
     ])
   end

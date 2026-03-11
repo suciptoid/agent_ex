@@ -1,0 +1,6 @@
+- Replaced the custom full-screen overlays for new/edit agent, new/edit provider, and new chat creation with `PUI.Dialog` while keeping the existing route-driven open/close flow intact.
+- Reworked chat streaming UI behavior so thinking and tool sections render before assistant content, tool calls emit an immediate running placeholder, running tool calls show a spinner, and thinking defaults to expanded only while content has not started streaming.
+- Added cancel support for the active assistant stream from the send button, including a spinner-to-stop hover state and persisted cancelled responses for retry.
+- Switched chat message rendering to a bottom-anchored reversed stream order and updated the colocated hooks to preserve scroll position across streaming, tool/thinking updates, and collapsible toggles.
+- Added focused coverage for tool placeholder emission and cancelling an in-flight stream; `mix test test/app/agents/tools_test.exs test/app_web/live/agent_live_test.exs test/app_web/live/chat_live_test.exs` passes.
+- `mix precommit` still fails on the same pre-existing auth/homepage test baseline that was already failing before these UI changes.

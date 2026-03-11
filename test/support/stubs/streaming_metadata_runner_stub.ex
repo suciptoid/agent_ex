@@ -19,7 +19,19 @@ defmodule App.TestSupport.StreamingMetadataRunnerStub do
         {:stream_tool_result, tool_result}
       end)
 
+    emit_tool_start =
+      stream_callback(recipient, opts, :on_tool_start, fn tool_result ->
+        {:stream_tool_started, tool_result}
+      end)
+
+    running_tool =
+      response.tool_responses
+      |> List.first()
+      |> Map.put("content", nil)
+      |> Map.put("status", "running")
+
     emit_thinking.(response.thinking)
+    emit_tool_start.(running_tool)
     Enum.each(response.tool_responses, emit_tool_result)
 
     response.content

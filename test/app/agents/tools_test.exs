@@ -42,4 +42,30 @@ defmodule App.Agents.ToolsTest do
 
     assert {:error, "HTTP 404"} = Tools.do_web_fetch(%{url: "https://example.test/missing"})
   end
+
+  test "execute_all/3 emits a running placeholder before returning the final tool result" do
+    Req.Test.stub(__MODULE__, fn conn ->
+      Plug.Conn.send_resp(conn, 200, "hello from the stub")
+    end)
+
+    [tool] = Tools.resolve(["web_fetch"])
+
+    assert {:ok, %{results: [result]}} =
+             Tools.execute_all(
+               [%{id: "tool_1", name: "web_fetch", arguments: %{url: "https://example.test"}}],
+               [tool],
+               on_tool_start: fn tool_result -> send(self(), {:tool_started, tool_result}) end
+             )
+
+    assert_receive {:tool_started,
+                    %{
+                      "id" => "tool_1",
+                      "name" => "web_fetch",
+                      "content" => nil,
+                      "status" => "running"
+                    }}
+
+    assert result["content"] == "hello from the stub"
+    assert result["status"] == "ok"
+  end
 end

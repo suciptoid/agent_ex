@@ -11,7 +11,7 @@
             Manage your LLM providers and API keys.
           </p>
         </div>
-        <.link patch={~p"/providers/new"}>
+        <.link id="new-provider-button" patch={~p"/providers/new"}>
           <.button>New Provider</.button>
         </.link>
       </div>
@@ -40,7 +40,7 @@
           <p class="text-sm text-muted-foreground">{provider.provider}</p>
         </div>
         <div class="flex gap-2">
-          <.link navigate={~p"/providers/#{provider.id}/edit"}>
+          <.link id={"edit-provider-#{provider.id}"} patch={~p"/providers/#{provider.id}/edit"}>
             <.button variant="outline">Edit</.button>
           </.link>
           <.button phx-click="delete" phx-value-id={provider.id} data-confirm="Are you sure?">

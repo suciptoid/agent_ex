@@ -172,7 +172,9 @@ defmodule AppWeb.AgentLive.FormComponent do
       |> Agents.change_agent(agent_params)
       |> Map.put(:action, :validate)
 
+
     {:noreply, assign_form(socket, changeset)}
+    {:noreply, socket}
   end
 
   def handle_event("save", %{"agent" => agent_params}, socket) do

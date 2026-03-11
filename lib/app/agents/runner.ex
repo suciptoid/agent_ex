@@ -25,19 +25,13 @@ defmodule App.Agents.Runner do
     llm_opts =
       [api_key: api_key, tools: tools]
       |> merge_extra_params(agent.extra_params)
-      |> Keyword.merge(Keyword.drop(opts, [:extra_tools, :extra_system_prompt]))
+      |> Keyword.merge(keyword_stream_opts(opts))
 
     Logger.debug(
       "[Runner] Running agent #{agent.name} with model #{agent.model}, #{length(messages)} messages"
     )
 
-    case Keyword.get(llm_opts, :stream, false) do
-      true ->
-        ReqLLM.stream_text(agent.model, context, Keyword.delete(llm_opts, :stream))
-
-      false ->
-        run_with_tool_loop(agent.model, context, tools, llm_opts)
-    end
+    run_with_tool_loop(agent.model, context, tools, llm_opts, noop_callbacks())
   end
 
   def run(%Agent{}, _messages, _opts), do: {:error, "agent provider must be preloaded"}
@@ -56,45 +50,95 @@ defmodule App.Agents.Runner do
     llm_opts =
       [api_key: api_key, tools: tools]
       |> merge_extra_params(agent.extra_params)
-      |> Keyword.merge(Keyword.drop(opts, [:extra_tools, :extra_system_prompt]))
+      |> Keyword.merge(keyword_stream_opts(opts))
 
     Logger.debug("[Runner] Streaming agent #{agent.name}, tools: #{inspect(agent.tools)}")
-    on_result = build_stream_callback(recipient, opts)
+    callbacks = build_stream_callbacks(recipient, opts)
 
-    run_streaming_with_tool_loop(agent.model, context, tools, llm_opts, on_result)
+    run_with_tool_loop(agent.model, context, tools, llm_opts, callbacks)
   end
 
   def run_streaming(%Agent{}, _messages, _lv_pid, _opts),
     do: {:error, "agent provider must be preloaded"}
 
-  defp run_with_tool_loop(model, context, tools, llm_opts, iteration \\ 0) do
+  defp run_with_tool_loop(
+         model,
+         context,
+         tools,
+         llm_opts,
+         callbacks,
+         iteration \\ 0,
+         result_state \\ initial_result_state()
+       ) do
     if iteration >= @max_tool_iterations do
       Logger.warning("[Runner] Max tool iterations (#{@max_tool_iterations}) reached")
       {:error, "Maximum tool call iterations reached (#{@max_tool_iterations})"}
     else
-      case ReqLLM.generate_text(model, context, llm_opts) do
+      case stream_response(model, context, llm_opts, callbacks) do
         {:ok, response} ->
-          case ReqLLM.Response.classify(response) do
-            %{type: :tool_calls, tool_calls: tool_calls} ->
+          %{
+            type: type,
+            text: text,
+            thinking: thinking,
+            tool_calls: tool_calls,
+            finish_reason: finish_reason
+          } =
+            ReqLLM.Response.classify(response)
+
+          usage = normalize_metadata(ReqLLM.Response.usage(response))
+          provider_meta = normalize_metadata(response.provider_meta)
+
+          result_state =
+            result_state
+            |> append_text(text)
+            |> append_thinking(thinking)
+            |> merge_usage(usage)
+            |> put_provider_meta(provider_meta)
+            |> put_finish_reason(finish_reason)
+
+          case {type, tool_calls} do
+            {:tool_calls, []} ->
+              Logger.error("[Runner] Stream finished with tool_calls but no tool payload")
+              {:error, "The model requested a tool call without any tool data"}
+
+            {:tool_calls, tool_calls} ->
               names = Enum.map(tool_calls, & &1.name)
 
               Logger.info(
                 "[Runner] LLM requested tools (iteration #{iteration + 1}): #{inspect(names)}"
               )
 
-              {:ok, tool_messages} = App.Agents.Tools.execute_all(tool_calls, tools)
+              with {:ok, %{messages: tool_messages, results: tool_results}} <-
+                     App.Agents.Tools.execute_all(tool_calls, tools) do
+                Enum.each(tool_results, callbacks.on_tool_result)
 
-              new_context =
-                response.context
-                |> ReqLLM.Context.append(response.message)
-                |> ReqLLM.Context.append(tool_messages)
+                new_context =
+                  response.context
+                  |> ReqLLM.Context.append(response.message)
+                  |> ReqLLM.Context.append(tool_messages)
 
-              run_with_tool_loop(model, new_context, tools, llm_opts, iteration + 1)
+                run_with_tool_loop(
+                  model,
+                  new_context,
+                  tools,
+                  llm_opts,
+                  callbacks,
+                  iteration + 1,
+                  append_tool_responses(result_state, tool_results)
+                )
+              end
 
-            %{type: :final_answer} ->
-              text = ReqLLM.Response.text(response)
-              Logger.debug("[Runner] Final answer received, length: #{String.length(text || "")}")
-              {:ok, response}
+            {:final_answer, _tool_calls} ->
+              final_content =
+                if blank?(result_state.content),
+                  do: "The agent returned an empty response.",
+                  else: result_state.content
+
+              Logger.debug(
+                "[Runner] Final answer received, length: #{String.length(final_content)}"
+              )
+
+              {:ok, %{result_state | content: final_content}}
           end
 
         {:error, reason} ->
@@ -150,76 +194,14 @@ defmodule App.Agents.Runner do
 
   defp blank?(value), do: value in [nil, ""]
 
-  defp run_streaming_with_tool_loop(
-         model,
-         context,
-         tools,
-         llm_opts,
-         on_result,
-         iteration \\ 0,
-         accumulated_text \\ "",
-         accumulated_usage \\ nil
-       ) do
-    if iteration >= @max_tool_iterations do
-      Logger.warning("[Runner] Max tool iterations (#{@max_tool_iterations}) reached")
-      {:error, "Maximum tool call iterations reached (#{@max_tool_iterations})"}
-    else
-      with {:ok, response} <- stream_response(model, context, llm_opts, on_result) do
-        %{type: type, text: text, tool_calls: tool_calls} = ReqLLM.Response.classify(response)
-        usage = normalize_metadata(ReqLLM.Response.usage(response))
-        accumulated_text = accumulated_text <> (text || "")
-        accumulated_usage = merge_usage_maps(accumulated_usage, usage)
-
-        case {type, tool_calls} do
-          {:tool_calls, []} ->
-            Logger.error("[Runner] Stream finished with tool_calls but no tool payload")
-            {:error, "The model requested a tool call without any tool data"}
-
-          {:tool_calls, tool_calls} ->
-            names = Enum.map(tool_calls, & &1.name)
-
-            Logger.info(
-              "[Runner] Stream requested tools (iteration #{iteration + 1}): #{inspect(names)}"
-            )
-
-            with {:ok, tool_messages} <- App.Agents.Tools.execute_all(tool_calls, tools) do
-              new_context =
-                response.context
-                |> ReqLLM.Context.append(response.message)
-                |> ReqLLM.Context.append(tool_messages)
-
-              run_streaming_with_tool_loop(
-                model,
-                new_context,
-                tools,
-                llm_opts,
-                on_result,
-                iteration + 1,
-                accumulated_text,
-                accumulated_usage
-              )
-            end
-
-          {:final_answer, _tool_calls} ->
-            final_content =
-              if blank?(accumulated_text),
-                do: "The agent returned an empty response.",
-                else: accumulated_text
-
-            Logger.debug(
-              "[Runner] Streaming final answer complete, length: #{String.length(final_content)}"
-            )
-
-            {:ok, %{content: final_content, usage: accumulated_usage}}
-        end
-      end
-    end
-  end
-
-  defp stream_response(model, context, llm_opts, on_result) do
+  defp stream_response(model, context, llm_opts, callbacks) do
     case ReqLLM.stream_text(model, context, llm_opts) do
       {:ok, stream_response} ->
-        ReqLLM.StreamResponse.process_stream(stream_response, on_result: on_result)
+        ReqLLM.StreamResponse.process_stream(
+          stream_response,
+          on_result: callbacks.on_result,
+          on_thinking: callbacks.on_thinking
+        )
 
       {:error, reason} ->
         Logger.error("[Runner] Stream failed: #{inspect(reason)}")
@@ -227,17 +209,97 @@ defmodule App.Agents.Runner do
     end
   end
 
-  defp build_stream_callback(recipient, opts) do
-    case Keyword.get(opts, :on_result) do
-      callback when is_function(callback, 1) ->
-        callback
+  defp build_stream_callbacks(recipient, opts) do
+    %{
+      on_result:
+        resolve_callback(
+          Keyword.get(opts, :on_result),
+          recipient,
+          fn token -> {:stream_chunk, token} end
+        ),
+      on_thinking:
+        resolve_callback(
+          Keyword.get(opts, :on_thinking),
+          recipient,
+          fn token -> {:stream_thinking_chunk, token} end
+        ),
+      on_tool_result:
+        resolve_callback(
+          Keyword.get(opts, :on_tool_result),
+          recipient,
+          fn tool_result -> {:stream_tool_result, tool_result} end
+        )
+    }
+  end
 
-      _ when is_pid(recipient) ->
-        fn token -> send(recipient, {:stream_chunk, token}) end
+  defp noop_callbacks do
+    %{
+      on_result: fn _token -> :ok end,
+      on_thinking: fn _token -> :ok end,
+      on_tool_result: fn _tool_result -> :ok end
+    }
+  end
 
-      _ ->
-        fn _token -> :ok end
-    end
+  defp resolve_callback(callback, _recipient, _message_builder) when is_function(callback, 1),
+    do: callback
+
+  defp resolve_callback(_callback, recipient, message_builder) when is_pid(recipient) do
+    fn payload -> send(recipient, message_builder.(payload)) end
+  end
+
+  defp resolve_callback(_callback, _recipient, _message_builder), do: fn _payload -> :ok end
+
+  defp keyword_stream_opts(opts) do
+    Keyword.drop(opts, [
+      :extra_tools,
+      :extra_system_prompt,
+      :on_result,
+      :on_thinking,
+      :on_tool_result
+    ])
+  end
+
+  defp initial_result_state do
+    %{
+      content: "",
+      thinking: "",
+      tool_responses: [],
+      usage: nil,
+      finish_reason: nil,
+      provider_meta: %{}
+    }
+  end
+
+  defp append_text(result_state, text) when text in [nil, ""], do: result_state
+
+  defp append_text(result_state, text),
+    do: %{result_state | content: result_state.content <> text}
+
+  defp append_thinking(result_state, thinking) when thinking in [nil, ""], do: result_state
+
+  defp append_thinking(result_state, thinking) do
+    %{result_state | thinking: result_state.thinking <> thinking}
+  end
+
+  defp append_tool_responses(result_state, []), do: result_state
+
+  defp append_tool_responses(result_state, tool_responses) do
+    %{result_state | tool_responses: result_state.tool_responses ++ tool_responses}
+  end
+
+  defp merge_usage(result_state, usage) do
+    %{result_state | usage: merge_usage_maps(result_state.usage, usage)}
+  end
+
+  defp put_provider_meta(result_state, nil), do: result_state
+
+  defp put_provider_meta(result_state, provider_meta),
+    do: %{result_state | provider_meta: provider_meta}
+
+  defp put_finish_reason(result_state, nil), do: result_state
+
+  defp put_finish_reason(result_state, finish_reason) do
+    %{result_state | finish_reason: to_string(finish_reason)}
   end
 
   defp merge_usage_maps(nil, nil), do: nil

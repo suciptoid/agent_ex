@@ -62,18 +62,4 @@ defmodule AppWeb.AgentLive.Index do
 
   def tools_summary(%Agent{tools: []}), do: "No tools enabled"
   def tools_summary(%Agent{tools: tools}), do: Enum.join(tools, ", ")
-
-  def system_prompt_preview(%Agent{system_prompt: nil}),
-    do: "Using the default helpful assistant prompt."
-
-  def system_prompt_preview(%Agent{system_prompt: ""}),
-    do: "Using the default helpful assistant prompt."
-
-  def system_prompt_preview(%Agent{system_prompt: prompt}) do
-    if String.length(prompt) > 140 do
-      String.slice(prompt, 0, 140) <> "…"
-    else
-      prompt
-    end
-  end
 end

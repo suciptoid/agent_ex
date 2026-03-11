@@ -128,7 +128,7 @@
       </div>
     <% end %>
 
-    <div id="chat-rooms" phx-update="stream" class="grid gap-4 lg:grid-cols-2">
+    <div id="chat-rooms" phx-update="stream" class="grid gap-4">
       <div
         :for={{dom_id, chat_room} <- @streams.chat_rooms}
         id={dom_id}
@@ -169,14 +169,18 @@
             </div>
           </div>
 
-          <div class="flex gap-2">
+          <div class="flex shrink-0 gap-2">
             <.button
               id={"delete-chat-room-#{chat_room.id}"}
               phx-click="delete"
               phx-value-id={chat_room.id}
               data-confirm="Are you sure?"
+              variant="outline"
+              size="icon"
+              title="Delete chat room"
+              aria-label="Delete chat room"
             >
-              Delete
+              <.icon name="hero-trash" class="size-4" />
             </.button>
           </div>
         </div>
@@ -184,7 +188,7 @@
 
       <div
         id="chat-rooms-empty-state"
-        class="hidden only:block rounded-2xl border border-dashed border-border bg-muted/30 p-10 text-center text-sm text-muted-foreground"
+        class="hidden rounded-2xl border border-dashed border-border bg-muted/30 p-10 text-center text-sm text-muted-foreground only:block"
       >
         No chat rooms created yet.
       </div>

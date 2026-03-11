@@ -188,11 +188,11 @@ defmodule App.ChatTest do
       placeholder_message_id = placeholder_message.id
       assert placeholder_message.chat_room_id == room.id
       assert placeholder_message.agent_id == research_agent_id
-      assert placeholder_message.status == "requesting"
+      assert placeholder_message.status == :pending
       assert placeholder_message.content in [nil, ""]
 
       refute_receive {:agent_message_updated,
-                      %{agent_id: ^research_agent_id, status: "completed"}},
+                      %{agent_id: ^research_agent_id, status: :completed}},
                      50
 
       assert_receive {:delegated_agent_started, delegated_pid, ^research_agent_id}
@@ -203,7 +203,7 @@ defmodule App.ChatTest do
 
       assert delegated_message.id == placeholder_message.id
       assert delegated_message.agent_id == research_agent.id
-      assert delegated_message.status == "completed"
+      assert delegated_message.status == :completed
       assert delegated_message.content == "Research Agent: fetched delegated payload"
 
       persisted_messages = Chat.list_messages(room)

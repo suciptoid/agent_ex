@@ -16,6 +16,8 @@ defmodule AppWeb.AgentLiveTest do
 
       assert has_element?(live_view, "#agent-#{agent.id}")
       assert has_element?(live_view, "#new-agent-button")
+      assert has_element?(live_view, "#edit-agent-#{agent.id}")
+      refute has_element?(live_view, "p", "Prompt Preview")
     end
 
     test "creates an agent", %{conn: conn, user: user, scope: scope} do
@@ -46,6 +48,7 @@ defmodule AppWeb.AgentLiveTest do
       [created_agent] = App.Agents.list_agents(scope)
       assert created_agent.name == "Planner"
       assert has_element?(live_view, "#agent-#{created_agent.id}")
+      assert has_element?(live_view, "#edit-agent-#{created_agent.id}")
     end
 
     test "deletes an agent", %{conn: conn, user: user} do

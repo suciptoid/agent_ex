@@ -27,9 +27,8 @@ defmodule App.Chat.Orchestrator do
         run_opts = multi_agent_opts(chat_room, messages, nil)
 
         case agent_runner().run(agent, messages, run_opts) do
-          {:ok, response} ->
-            assistant_content =
-              ReqLLM.Response.text(response) || "The agent returned an empty response."
+          {:ok, result} ->
+            assistant_content = result.content || "The agent returned an empty response."
 
             Logger.info(
               "[Orchestrator] Got response, length: #{String.length(assistant_content)}"
@@ -39,7 +38,7 @@ defmodule App.Chat.Orchestrator do
               role: "assistant",
               content: assistant_content,
               agent_id: agent.id,
-              metadata: response_metadata(response)
+              metadata: response_metadata(result)
             })
 
           {:error, reason} ->
@@ -63,8 +62,13 @@ defmodule App.Chat.Orchestrator do
       run_opts = multi_agent_opts(chat_room, messages, lv_pid)
 
       case agent_runner().run_streaming(agent, messages, lv_pid, run_opts) do
-        {:ok, %{content: content, usage: usage}} ->
-          {:ok, %{content: content, agent_id: agent.id, metadata: %{"usage" => usage}}}
+        {:ok, result} ->
+          {:ok,
+           %{
+             content: result.content,
+             agent_id: agent.id,
+             metadata: response_metadata(result)
+           }}
 
         {:error, reason} ->
           Logger.error("[Orchestrator] Streaming failed: #{inspect(reason)}")
@@ -231,7 +235,7 @@ defmodule App.Chat.Orchestrator do
               role: "assistant",
               content: nil,
               agent_id: target_agent.id,
-              status: "requesting",
+              status: :pending,
               metadata: %{"delegated" => true, "tool_name" => "ask_agent"}
             }
 
@@ -276,19 +280,33 @@ defmodule App.Chat.Orchestrator do
         if is_pid(lv_pid) do
           send(lv_pid, {:agent_message_stream_chunk, placeholder_message.id, token})
         end
+      end,
+      on_thinking: fn token ->
+        if is_pid(lv_pid) do
+          send(lv_pid, {:agent_message_thinking_chunk, placeholder_message.id, token})
+        end
+      end,
+      on_tool_result: fn tool_result ->
+        if is_pid(lv_pid) do
+          send(lv_pid, {:agent_message_tool_result, placeholder_message.id, tool_result})
+        end
       end
     ]
 
     case agent_runner().run_streaming(target_agent, sub_messages, nil, stream_opts) do
-      {:ok, %{content: content, usage: usage}} ->
-        metadata = delegated_message_metadata(placeholder_message.metadata, usage: usage)
+      {:ok, result} ->
+        metadata =
+          delegated_message_metadata(
+            placeholder_message.metadata,
+            response_metadata: response_metadata(result)
+          )
 
         persist_delegated_message(
           chat_room,
           placeholder_message,
           %{
-            content: content,
-            status: "completed",
+            content: result.content,
+            status: :completed,
             metadata: metadata,
             agent_id: target_agent.id
           },
@@ -300,24 +318,19 @@ defmodule App.Chat.Orchestrator do
           "[Orchestrator] Delegated agent #{target_agent.name} failed: #{inspect(reason)}"
         )
 
-        existing_message = Chat.get_message_by_id(placeholder_message.id)
-        current_content = existing_message && existing_message.content
+        error_text = delegated_error_text(reason)
 
         metadata =
           delegated_message_metadata(placeholder_message.metadata,
-            error: delegated_error_text(reason)
+            error: error_text
           )
 
         persist_delegated_message(
           chat_room,
           placeholder_message,
           %{
-            content:
-              if(blank?(current_content),
-                do: "Agent #{target_agent.name} encountered an error.",
-                else: current_content
-              ),
-            status: "error",
+            content: error_text,
+            status: :error,
             metadata: metadata,
             agent_id: target_agent.id
           },
@@ -357,7 +370,7 @@ defmodule App.Chat.Orchestrator do
     |> normalize_metadata()
     |> Kernel.||(%{})
     |> Map.merge(%{"delegated" => true, "tool_name" => "ask_agent"})
-    |> maybe_put_metadata("usage", Keyword.get(extra_attrs, :usage))
+    |> Map.merge(Keyword.get(extra_attrs, :response_metadata, %{}))
     |> maybe_put_metadata("error", Keyword.get(extra_attrs, :error))
   end
 
@@ -375,18 +388,23 @@ defmodule App.Chat.Orchestrator do
   defp normalize_instruction_text(value) when is_binary(value), do: String.trim(value)
   defp normalize_instruction_text(value), do: value
 
-  defp response_metadata(response) do
-    %{
-      "usage" => normalize_metadata(ReqLLM.Response.usage(response)),
-      "finish_reason" => response.finish_reason && to_string(response.finish_reason),
-      "provider_meta" => normalize_metadata(response.provider_meta)
-    }
-    |> Enum.reject(fn {_key, value} -> is_nil(value) or value == %{} end)
-    |> Map.new()
+  defp response_metadata(result) do
+    %{}
+    |> maybe_put_metadata("usage", result.usage)
+    |> maybe_put_metadata("thinking", blank_to_nil(result.thinking))
+    |> maybe_put_metadata("tool_responses", empty_list_to_nil(result.tool_responses))
+    |> maybe_put_metadata("finish_reason", result.finish_reason)
+    |> maybe_put_metadata("provider_meta", normalize_metadata(result.provider_meta))
   end
 
   defp normalize_metadata(nil), do: nil
   defp normalize_metadata(value), do: value |> Jason.encode!() |> Jason.decode!()
+
+  defp blank_to_nil(value) when value in [nil, ""], do: nil
+  defp blank_to_nil(value), do: value
+
+  defp empty_list_to_nil([]), do: nil
+  defp empty_list_to_nil(value), do: value
 
   defp blank?(value), do: value in [nil, ""]
 

@@ -30,7 +30,8 @@ defmodule AppWeb.ProviderLive.FormComponent do
               {"google", "Google"},
               {"gemini", "Gemini"},
               {"mistral", "Mistral"},
-              {"cohere", "Cohere"}
+              {"cohere", "Cohere"},
+              {"openrouter", "OpenRouter"}
             ]}
             placeholder="Select a provider"
           />

@@ -6,13 +6,14 @@ defmodule App.Chat.Message do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
   @roles ~w(user assistant system tool)
-  @statuses ~w(requesting streaming completed error)
+  @statuses [:pending, :streaming, :error, :completed]
+  @incomplete_statuses [:pending, :streaming]
 
   schema "chat_messages" do
     field :position, :integer
     field :role, :string
     field :content, :string
-    field :status, :string, default: "completed"
+    field :status, Ecto.Enum, values: @statuses, default: :completed
     field :metadata, :map, default: %{}
 
     belongs_to :chat_room, App.Chat.ChatRoom
@@ -35,9 +36,9 @@ defmodule App.Chat.Message do
   end
 
   defp validate_content_required(changeset) do
-    status = get_field(changeset, :status, "completed")
+    status = get_field(changeset, :status, :completed)
 
-    if status in ["requesting", "streaming"] do
+    if status in @incomplete_statuses do
       changeset
     else
       validate_required(changeset, [:content])

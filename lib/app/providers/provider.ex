@@ -14,7 +14,7 @@ defmodule App.Providers.Provider do
     timestamps(type: :utc_datetime)
   end
 
-  @valid_providers ~w(openai anthropic google gemini mistral cohere)
+  @valid_providers ~w(openai anthropic google gemini mistral cohere openrouter)
 
   def changeset(provider, attrs) do
     provider

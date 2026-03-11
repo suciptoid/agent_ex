@@ -21,7 +21,8 @@ defmodule App.Agents.Tools do
   @doc """
   Executes a list of tool calls against the resolved tools.
 
-  Returns `{:ok, [tool_result_message]}` or `{:error, reason}`.
+  Returns `{:ok, %{messages: [tool_result_message], results: [tool_result]}}`
+  or `{:error, reason}`.
   Each `tool_call` is a map with `:id`, `:name`, and `:arguments` (map).
   """
   def execute_all(tool_calls, tools) when is_list(tool_calls) and is_list(tools) do
@@ -31,34 +32,44 @@ defmodule App.Agents.Tools do
       Enum.map(tool_calls, fn %{id: id, name: name, arguments: args} ->
         Logger.debug("[Tools] Executing tool #{name} with args: #{inspect(args)}")
 
-        result =
+        {status, text} =
           case Map.get(tool_map, name) do
             nil ->
-              {:ok, "Error: unknown tool '#{name}'"}
+              {"error", "Error: unknown tool '#{name}'"}
 
             tool ->
               case ReqLLM.Tool.execute(tool, args) do
                 {:ok, output} ->
                   text = result_to_text(output)
                   Logger.debug("[Tools] Tool #{name} result: #{String.slice(text, 0, 200)}")
-                  {:ok, text}
+                  {"ok", text}
 
                 {:error, reason} ->
                   error_text = "Error: #{inspect(reason)}"
                   Logger.warning("[Tools] Tool #{name} error: #{error_text}")
-                  {:ok, error_text}
+                  {"error", error_text}
               end
           end
 
-        {id, name, result}
+        normalized_args = normalize_metadata(args)
+
+        %{
+          message: ReqLLM.Context.tool_result(id, name, text),
+          result: %{
+            "id" => id,
+            "name" => name,
+            "arguments" => normalized_args,
+            "content" => text,
+            "status" => status
+          }
+        }
       end)
 
-    tool_messages =
-      Enum.map(results, fn {id, name, {:ok, text}} ->
-        ReqLLM.Context.tool_result(id, name, text)
-      end)
-
-    {:ok, tool_messages}
+    {:ok,
+     %{
+       messages: Enum.map(results, & &1.message),
+       results: Enum.map(results, & &1.result)
+     }}
   end
 
   def do_web_fetch(%{url: url}) when is_binary(url) do
@@ -101,4 +112,7 @@ defmodule App.Agents.Tools do
   defp body_to_text(body) when is_binary(body), do: body
   defp body_to_text(body) when is_map(body) or is_list(body), do: Jason.encode!(body)
   defp body_to_text(body), do: inspect(body)
+
+  defp normalize_metadata(nil), do: %{}
+  defp normalize_metadata(value), do: value |> Jason.encode!() |> Jason.decode!()
 end

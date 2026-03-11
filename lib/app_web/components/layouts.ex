@@ -136,7 +136,7 @@ defmodule AppWeb.Layouts do
   """
   def theme_toggle(assigns) do
     ~H"""
-    <div class="relative flex flex-row items-center border-2 border-gray-300 dark:border-gray-600 bg-gray-200 dark:bg-gray-700 rounded-full p-1">
+    <div class="relative flex flex-row justify-between items-center border-2 border-gray-300 dark:border-gray-600 bg-gray-200 dark:bg-gray-700 rounded-full p-1">
       <div class="absolute w-6 h-6 rounded-full bg-white dark:bg-gray-800 shadow-sm left-1 [[data-theme=light]_&]:left-[calc(50%-12px)] [[data-theme=dark]_&]:left-[calc(100%-28px)] transition-[left]" />
 
       <button
@@ -291,7 +291,6 @@ defmodule AppWeb.Layouts do
                 </.menu_item>
                 <.menu_separator />
                 <div class="px-2 py-2">
-                  <p class="text-xs text-muted-foreground mb-2">Theme</p>
                   <.theme_toggle />
                 </div>
                 <.menu_separator />

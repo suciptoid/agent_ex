@@ -35,110 +35,124 @@
       <%!-- Chat panel --%>
       <div class="flex flex-1 min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm mt-3">
         <%!-- Message list --%>
-        <div
-          id="chat-messages"
-          phx-update="stream"
-          class="flex-1 overflow-y-auto"
-        >
+        <div class="flex-1 min-h-0 relative">
           <div
-            id="chat-messages-empty-state"
-            class="hidden only:flex items-center justify-center h-full p-10 text-sm text-muted-foreground"
+            id="chat-messages"
+            phx-update="stream"
+            phx-hook=".ChatMessages"
+            class="flex-1 overflow-y-auto h-full"
           >
-            Send the first message to start the conversation.
-          </div>
-
-          <div
-            :for={{dom_id, message} <- @streams.messages}
-            id={dom_id}
-            class={[
-              "flex gap-2.5 px-3 py-2 group transition-colors",
-              if(user_message?(message), do: "flex-row-reverse", else: "flex-row")
-            ]}
-          >
-            <%!-- Avatar --%>
-            <div class={[
-              "flex-shrink-0 flex size-7 items-center justify-center rounded-full text-xs font-semibold mt-0.5",
-              if(user_message?(message),
-                do: "bg-primary text-primary-foreground",
-                else: "bg-muted text-muted-foreground"
-              )
-            ]}>
-              <.icon name={message_icon(message)} class="size-3.5" />
+            <div
+              id="chat-messages-empty-state"
+              class="hidden only:flex items-center justify-center h-full p-10 text-sm text-muted-foreground"
+            >
+              Send the first message to start the conversation.
             </div>
 
-            <%!-- Content --%>
-            <div class={[
-              "flex-1 min-w-0 space-y-0.5",
-              if(user_message?(message), do: "items-end", else: "items-start"),
-              "flex flex-col"
-            ]}>
-              <div class={[
-                "flex items-center gap-2 text-xs",
+            <div
+              :for={{dom_id, message} <- @streams.messages}
+              id={dom_id}
+              class={[
+                "flex gap-2.5 px-3 py-2 group transition-colors",
                 if(user_message?(message), do: "flex-row-reverse", else: "flex-row")
+              ]}
+            >
+              <%!-- Avatar --%>
+              <div class={[
+                "flex-shrink-0 flex size-7 items-center justify-center rounded-full text-xs font-semibold mt-0.5",
+                if(user_message?(message),
+                  do: "bg-primary text-primary-foreground",
+                  else: "bg-muted text-muted-foreground"
+                )
               ]}>
-                <span class="font-semibold text-foreground">{speaker_name(message)}</span>
-                <span class="text-muted-foreground/50">
-                  {Calendar.strftime(message.inserted_at, "%H:%M")}
-                </span>
-                <%= if tool_message?(message) do %>
-                  <span class="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                    <.icon name="hero-wrench-screwdriver" class="size-3" /> tool
-                  </span>
-                <% end %>
-                <%= if streaming_message?(message) do %>
-                  <span class="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-                    <span class="inline-block size-1.5 rounded-full bg-primary animate-pulse">
-                    </span>
-                    <%= if message.status == "requesting" do %>
-                      thinking…
-                    <% else %>
-                      streaming…
-                    <% end %>
-                  </span>
-                <% end %>
+                <.icon name={message_icon(message)} class="size-3.5" />
               </div>
 
-              <%!-- Message body --%>
-              <%= if tool_message?(message) do %>
-                <div
-                  class="w-full max-w-2xl"
-                  id={"tool-msg-#{dom_id}"}
-                  phx-hook=".ToolCallMessage"
-                >
-                  <button
-                    data-toggle-btn
-                    class="flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 font-medium"
-                  >
-                    <.icon
-                      name="hero-chevron-right"
-                      class="size-3 transition-transform duration-200 data-[expanded=true]:rotate-90"
-                    />
-                    <span data-label>Show tool call</span>
-                  </button>
-                  <div
-                    data-body
-                    class="hidden mt-1 rounded-lg bg-amber-500/5 border border-amber-500/20 px-3 py-2 font-mono text-xs text-foreground leading-5"
-                  >
-                    <span class="whitespace-pre-wrap break-words">{message.content || ""}</span>
-                  </div>
-                </div>
-              <% else %>
-                <p class={[
-                  "whitespace-pre-wrap break-words text-sm leading-6 text-foreground max-w-2xl",
-                  if(user_message?(message),
-                    do:
-                      "rounded-2xl rounded-tr-sm bg-primary text-primary-foreground px-3 py-1.5",
-                    else: ""
-                  )
+              <%!-- Content --%>
+              <div class={[
+                "flex-1 min-w-0 space-y-0.5",
+                if(user_message?(message), do: "items-end", else: "items-start"),
+                "flex flex-col"
+              ]}>
+                <div class={[
+                  "flex items-center gap-2 text-xs",
+                  if(user_message?(message), do: "flex-row-reverse", else: "flex-row")
                 ]}>
-                  {message.content || ""}
-                  <%= if streaming_message?(message) do %>
-                    <span class="inline-block w-0.5 h-4 bg-foreground/40 ml-0.5 animate-pulse align-middle" />
+                  <span class="font-semibold text-foreground">{speaker_name(message)}</span>
+                  <span class="text-muted-foreground/50">
+                    {Calendar.strftime(message.inserted_at, "%H:%M")}
+                  </span>
+                  <%= if tool_message?(message) do %>
+                    <span class="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                      <.icon name="hero-wrench-screwdriver" class="size-3" /> tool
+                    </span>
                   <% end %>
-                </p>
-              <% end %>
+                  <%= if streaming_message?(message) do %>
+                    <span class="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                      <span class="inline-block size-1.5 rounded-full bg-primary animate-pulse">
+                      </span>
+                      <%= if message.status == "requesting" do %>
+                        thinking…
+                      <% else %>
+                        streaming…
+                      <% end %>
+                    </span>
+                  <% end %>
+                </div>
+
+                <%!-- Message body --%>
+                <%= if tool_message?(message) do %>
+                  <div
+                    class="w-full max-w-2xl"
+                    id={"tool-msg-#{dom_id}"}
+                    phx-hook=".ToolCallMessage"
+                  >
+                    <button
+                      data-toggle-btn
+                      class="flex items-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 font-medium"
+                    >
+                      <.icon
+                        name="hero-chevron-right"
+                        class="size-3 transition-transform duration-200 data-[expanded=true]:rotate-90"
+                      />
+                      <span data-label>Show tool call</span>
+                    </button>
+                    <div
+                      data-body
+                      class="hidden mt-1 rounded-lg bg-amber-500/5 border border-amber-500/20 px-3 py-2 font-mono text-xs text-foreground leading-5"
+                    >
+                      <span class="whitespace-pre-line break-words" phx-no-format>{message.content || ""}</span>
+                    </div>
+                  </div>
+                <% else %>
+                  <p
+                    class={[
+                      "whitespace-pre-line break-words text-sm leading-6 text-foreground max-w-2xl",
+                      if(user_message?(message),
+                        do:
+                          "rounded-2xl rounded-tr-sm bg-primary text-primary-foreground px-3 py-1.5",
+                        else: ""
+                      )
+                    ]}
+                    phx-no-format
+                  >{message.content || ""}
+                    <%= if streaming_message?(message) do %>
+                      <span class="inline-block w-0.5 h-4 bg-foreground/40 ml-0.5 animate-pulse align-middle" />
+                    <% end %>
+                  </p>
+                <% end %>
+              </div>
             </div>
           </div>
+
+          <%!-- Scroll to bottom button --%>
+          <button
+            id="scroll-to-bottom-btn"
+            class="hidden absolute bottom-4 right-4 size-10 rounded-full bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 transition-all items-center justify-center"
+            aria-label="Scroll to bottom"
+          >
+            <.icon name="hero-arrow-down" class="size-5" />
+          </button>
         </div>
 
         <%!-- Message input --%>
@@ -216,6 +230,56 @@
 
         btn.addEventListener("click", () => { expanded = !expanded; update(); });
         update();
+      }
+    }
+  </script>
+
+  <%!-- Chat messages auto-scroll hook --%>
+  <script :type={Phoenix.LiveView.ColocatedHook} name=".ChatMessages">
+    export default {
+      mounted() {
+        this.isNearBottom = true
+        this.scrollBtn = document.getElementById("scroll-to-bottom-btn")
+
+        this.el.addEventListener("scroll", () => this.checkScrollPosition())
+        if (this.scrollBtn) {
+          this.scrollBtn.addEventListener("click", () => this.scrollToBottom())
+        }
+
+        this.scrollToBottom()
+      },
+
+      updated() {
+        if (this.isNearBottom) {
+          this.scrollToBottom()
+        }
+      },
+
+      destroyed() {
+        if (this.scrollBtn) {
+          this.scrollBtn.removeEventListener("click", this.scrollToBottom)
+        }
+      },
+
+      checkScrollPosition() {
+        const threshold = this.el.scrollHeight * 0.1
+        const distanceFromBottom = this.el.scrollHeight - this.el.scrollTop - this.el.clientHeight
+        this.isNearBottom = distanceFromBottom <= threshold
+
+        if (this.scrollBtn) {
+          this.scrollBtn.style.display = this.isNearBottom ? "none" : "flex"
+        }
+      },
+
+      scrollToBottom() {
+        this.el.scrollTo({
+          top: this.el.scrollHeight,
+          behavior: "smooth"
+        })
+        this.isNearBottom = true
+        if (this.scrollBtn) {
+          this.scrollBtn.style.display = "none"
+        }
       }
     }
   </script>

@@ -15,12 +15,12 @@ defmodule AppWeb.ProviderLive.FormComponent do
         on_cancel={@on_close}
       >
         <:content :let={{attrs, %{hide: hide}}}>
-          <div
-            {attrs}
-            role="dialog"
-            aria-modal="true"
-            class="fixed inset-0 z-50 flex items-center justify-center p-4"
-          >
+          <.focus_wrap {attrs}>
+            <div
+              role="dialog"
+              aria-modal="true"
+              class="fixed inset-0 z-50 flex items-center justify-center p-4"
+            >
             <div class="w-full max-w-md rounded-3xl border border-border/80 bg-background p-6 shadow-2xl shadow-black/20 sm:p-7">
               <div class="mb-6 space-y-2">
                 <h2 class="text-2xl font-semibold text-foreground">{@title}</h2>
@@ -63,6 +63,7 @@ defmodule AppWeb.ProviderLive.FormComponent do
               </.form>
             </div>
           </div>
+          </.focus_wrap>
         </:content>
       </.dialog>
     </div>

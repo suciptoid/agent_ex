@@ -6,6 +6,7 @@
 @import "../../deps/pui/assets/css/pui.css";
 
 @plugin "../vendor/heroicons";
+@plugin "@tailwindcss/typography";
 
 @custom-variant phx-click-loading (.phx-click-loading&, .phx-click-loading &);
 @custom-variant phx-submit-loading (.phx-submit-loading&, .phx-submit-loading &);

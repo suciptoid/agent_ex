@@ -210,7 +210,7 @@
                     >{message.content}</p>
                   <% else %>
                     <div
-                      class="prose prose-sm prose-foreground max-w-2xl dark:prose-invert prose-pre:bg-muted prose-pre:text-foreground prose-code:text-foreground prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground prose-em:text-foreground"
+                      class="prose prose-sm prose-foreground max-w-2xl dark:prose-invert prose-pre:bg-muted prose-pre:text-foreground prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground prose-em:text-foreground"
                       phx-no-format
                     >{raw(render_markdown(message.content))}</div>
                   <% end %>

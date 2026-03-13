@@ -203,17 +203,17 @@
                 <% end %>
 
                 <%= if message_has_content?(message) do %>
-                  <p
-                    class={[
-                      "max-w-2xl whitespace-pre-line break-words text-sm leading-6 text-foreground",
-                      if(user_message?(message),
-                        do:
-                          "rounded-2xl rounded-tr-sm bg-primary px-3 py-1.5 text-primary-foreground",
-                        else: ""
-                      )
-                    ]}
-                    phx-no-format
-                  >{message.content}</p>
+                  <%= if user_message?(message) do %>
+                    <p
+                      class="max-w-2xl whitespace-pre-line break-words rounded-2xl rounded-tr-sm bg-primary px-3 py-1.5 text-sm leading-6 text-primary-foreground"
+                      phx-no-format
+                    >{message.content}</p>
+                  <% else %>
+                    <div
+                      class="prose prose-sm prose-foreground max-w-2xl dark:prose-invert prose-pre:bg-muted prose-pre:text-foreground prose-code:text-foreground prose-headings:text-foreground prose-p:text-foreground prose-li:text-foreground prose-strong:text-foreground prose-em:text-foreground"
+                      phx-no-format
+                    >{raw(render_markdown(message.content))}</div>
+                  <% end %>
                 <% end %>
               </div>
             </div>

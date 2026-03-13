@@ -69,7 +69,9 @@ defmodule App.MixProject do
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
       {:cloak_ecto, "~> 1.3"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      {:mdex, "~> 0.11"},
+      {:mdex_gfm, "~> 0.2"}
     ]
   end
 

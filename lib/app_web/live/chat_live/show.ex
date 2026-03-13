@@ -938,4 +938,15 @@ defmodule AppWeb.ChatLive.Show do
   end
 
   defp changeset_error(reason), do: inspect(reason)
+
+  def render_markdown(nil), do: ""
+
+  def render_markdown(content) when is_binary(content) do
+    MDEx.new(streaming: true)
+    |> MDExGFM.attach()
+    |> MDEx.Document.put_markdown(content)
+    |> MDEx.to_html!()
+  end
+
+  def render_markdown(_), do: ""
 end

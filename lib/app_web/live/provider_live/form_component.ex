@@ -21,48 +21,48 @@ defmodule AppWeb.ProviderLive.FormComponent do
               aria-modal="true"
               class="fixed inset-0 z-50 flex items-center justify-center p-4"
             >
-            <div class="w-full max-w-md rounded-3xl border border-border/80 bg-background p-6 shadow-2xl shadow-black/20 sm:p-7">
-              <div class="mb-6 space-y-2">
-                <h2 class="text-2xl font-semibold text-foreground">{@title}</h2>
-                <p class="text-sm text-muted-foreground">
-                  Save your provider details securely so agents can reuse them across rooms.
-                </p>
-              </div>
-
-              <.form
-                for={@form}
-                id="provider-form"
-                phx-change="validate"
-                phx-submit="save"
-                phx-target={@myself}
-                class="space-y-5"
-              >
-                <.input field={@form[:name]} type="text" label="Name (optional)" />
-
-                <.select
-                  field={@form[:provider]}
-                  label="Provider"
-                  options={[
-                    {"openai", "OpenAI"},
-                    {"anthropic", "Anthropic"},
-                    {"google", "Google"},
-                    {"gemini", "Gemini"},
-                    {"mistral", "Mistral"},
-                    {"cohere", "Cohere"},
-                    {"openrouter", "OpenRouter"}
-                  ]}
-                  placeholder="Select a provider"
-                />
-
-                <.input field={@form[:api_key]} type="password" label="API Key" />
-
-                <div class="flex justify-end gap-3 pt-2">
-                  <.button type="button" variant="outline" phx-click={hide}>Cancel</.button>
-                  <.button type="submit" phx-disable-with="Saving...">Save Provider</.button>
+              <div class="w-full max-w-md rounded-3xl border border-border/80 bg-background p-6 shadow-2xl shadow-black/20 sm:p-7">
+                <div class="mb-6 space-y-2">
+                  <h2 class="text-2xl font-semibold text-foreground">{@title}</h2>
+                  <p class="text-sm text-muted-foreground">
+                    Save your provider details securely so agents can reuse them across rooms.
+                  </p>
                 </div>
-              </.form>
+
+                <.form
+                  for={@form}
+                  id="provider-form"
+                  phx-change="validate"
+                  phx-submit="save"
+                  phx-target={@myself}
+                  class="space-y-5"
+                >
+                  <.input field={@form[:name]} type="text" label="Name (optional)" />
+
+                  <.select
+                    field={@form[:provider]}
+                    label="Provider"
+                    options={[
+                      {"openai", "OpenAI"},
+                      {"anthropic", "Anthropic"},
+                      {"google", "Google"},
+                      {"gemini", "Gemini"},
+                      {"mistral", "Mistral"},
+                      {"cohere", "Cohere"},
+                      {"openrouter", "OpenRouter"}
+                    ]}
+                    placeholder="Select a provider"
+                  />
+
+                  <.input field={@form[:api_key]} type="password" label="API Key" />
+
+                  <div class="flex justify-end gap-3 pt-2">
+                    <.button type="button" variant="outline" phx-click={hide}>Cancel</.button>
+                    <.button type="submit" phx-disable-with="Saving...">Save Provider</.button>
+                  </div>
+                </.form>
+              </div>
             </div>
-          </div>
           </.focus_wrap>
         </:content>
       </.dialog>

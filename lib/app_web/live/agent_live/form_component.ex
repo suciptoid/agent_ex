@@ -36,136 +36,136 @@ defmodule AppWeb.AgentLive.FormComponent do
               aria-modal="true"
               class="fixed inset-0 z-50 flex items-center justify-center p-4"
             >
-            <div class="w-full max-w-2xl rounded-3xl border border-border/80 bg-background p-6 shadow-2xl shadow-black/20 sm:p-7">
-              <div class="mb-6 space-y-2">
-                <h2 class="text-2xl font-semibold text-foreground">{@title}</h2>
-                <p class="text-sm text-muted-foreground">
-                  Configure the agent, its model, and any optional builtin tools.
-                </p>
-              </div>
-
-              <%= if @providers == [] do %>
-                <div class="space-y-4 rounded-2xl border border-dashed border-border bg-muted/30 p-6 text-center">
+              <div class="w-full max-w-2xl rounded-3xl border border-border/80 bg-background p-6 shadow-2xl shadow-black/20 sm:p-7">
+                <div class="mb-6 space-y-2">
+                  <h2 class="text-2xl font-semibold text-foreground">{@title}</h2>
                   <p class="text-sm text-muted-foreground">
-                    You need at least one provider before you can create an agent.
+                    Configure the agent, its model, and any optional builtin tools.
                   </p>
-                  <div class="flex justify-center gap-3">
-                    <.button type="button" variant="outline" phx-click={hide}>Close</.button>
-                    <.link navigate={~p"/providers"}>
-                      <.button>Add Provider</.button>
-                    </.link>
-                  </div>
                 </div>
-              <% else %>
-                <.form
-                  for={@form}
-                  id="agent-form"
-                  phx-change="validate"
-                  phx-submit="save"
-                  phx-target={@myself}
-                  class="space-y-6"
-                >
-                  <div class="grid gap-4 md:grid-cols-2">
+
+                <%= if @providers == [] do %>
+                  <div class="space-y-4 rounded-2xl border border-dashed border-border bg-muted/30 p-6 text-center">
+                    <p class="text-sm text-muted-foreground">
+                      You need at least one provider before you can create an agent.
+                    </p>
+                    <div class="flex justify-center gap-3">
+                      <.button type="button" variant="outline" phx-click={hide}>Close</.button>
+                      <.link navigate={~p"/providers"}>
+                        <.button>Add Provider</.button>
+                      </.link>
+                    </div>
+                  </div>
+                <% else %>
+                  <.form
+                    for={@form}
+                    id="agent-form"
+                    phx-change="validate"
+                    phx-submit="save"
+                    phx-target={@myself}
+                    class="space-y-6"
+                  >
+                    <div class="grid gap-4 md:grid-cols-2">
+                      <.input
+                        field={@form[:name]}
+                        type="text"
+                        label="Name"
+                        placeholder="Research Assistant"
+                      />
+
+                      <.select
+                        field={@form[:provider_id]}
+                        label="Provider"
+                        options={@provider_options}
+                        placeholder="Select a provider"
+                      />
+                    </div>
+
                     <.input
-                      field={@form[:name]}
+                      field={@form[:model]}
                       type="text"
-                      label="Name"
-                      placeholder="Research Assistant"
+                      label="Model"
+                      placeholder="anthropic:claude-haiku-4-5"
                     />
 
-                    <.select
-                      field={@form[:provider_id]}
-                      label="Provider"
-                      options={@provider_options}
-                      placeholder="Select a provider"
-                    />
-                  </div>
-
-                  <.input
-                    field={@form[:model]}
-                    type="text"
-                    label="Model"
-                    placeholder="anthropic:claude-haiku-4-5"
-                  />
-
-                  <.textarea
-                    field={@form[:system_prompt]}
-                    label="System Prompt"
-                    rows="6"
-                    placeholder="You are a helpful assistant focused on concise, practical answers."
-                  />
-
-                  <div class="grid gap-4 md:grid-cols-2">
-                    <.input
-                      field={@form[:temperature]}
-                      type="number"
-                      label="Temperature"
-                      step="0.1"
-                      min="0"
-                      max="2"
-                      placeholder="0.3"
+                    <.textarea
+                      field={@form[:system_prompt]}
+                      label="System Prompt"
+                      rows="6"
+                      placeholder="You are a helpful assistant focused on concise, practical answers."
                     />
 
-                    <.input
-                      field={@form[:max_tokens]}
-                      type="number"
-                      label="Max Tokens"
-                      min="1"
-                      placeholder="256"
-                    />
-                  </div>
+                    <div class="grid gap-4 md:grid-cols-2">
+                      <.input
+                        field={@form[:temperature]}
+                        type="number"
+                        label="Temperature"
+                        step="0.1"
+                        min="0"
+                        max="2"
+                        placeholder="0.3"
+                      />
 
-                  <div class="space-y-3">
-                    <div>
-                      <p class="text-sm font-medium text-foreground">Builtin Tools</p>
-                      <p class="text-xs text-muted-foreground">
-                        Enable optional capabilities the model can call while generating a response.
-                      </p>
+                      <.input
+                        field={@form[:max_tokens]}
+                        type="number"
+                        label="Max Tokens"
+                        min="1"
+                        placeholder="256"
+                      />
                     </div>
 
-                    <input type="hidden" name="agent[tools][]" value="" />
+                    <div class="space-y-3">
+                      <div>
+                        <p class="text-sm font-medium text-foreground">Builtin Tools</p>
+                        <p class="text-xs text-muted-foreground">
+                          Enable optional capabilities the model can call while generating a response.
+                        </p>
+                      </div>
 
-                    <div class="grid gap-3 md:grid-cols-2">
-                      <label
-                        :for={tool <- @available_tools}
-                        for={"agent-tool-#{tool}"}
-                        class={[
-                          "flex items-start gap-3 rounded-xl border p-4 transition",
-                          if(tool in @selected_tools,
-                            do: "border-primary bg-primary/5",
-                            else: "border-border hover:border-primary/40"
-                          )
-                        ]}
-                      >
-                        <.checkbox
-                          id={"agent-tool-#{tool}"}
-                          name="agent[tools][]"
-                          value={tool}
-                          checked={tool in @selected_tools}
-                        />
-                        <div class="space-y-1">
-                          <p class="text-sm font-medium text-foreground">{tool}</p>
-                          <p class="text-xs text-muted-foreground">
-                            <%= case tool do %>
-                              <% "web_fetch" -> %>
-                                Fetch and return the body of a web page on demand.
-                              <% _ -> %>
-                                Additional tool support.
-                            <% end %>
-                          </p>
-                        </div>
-                      </label>
+                      <input type="hidden" name="agent[tools][]" value="" />
+
+                      <div class="grid gap-3 md:grid-cols-2">
+                        <label
+                          :for={tool <- @available_tools}
+                          for={"agent-tool-#{tool}"}
+                          class={[
+                            "flex items-start gap-3 rounded-xl border p-4 transition",
+                            if(tool in @selected_tools,
+                              do: "border-primary bg-primary/5",
+                              else: "border-border hover:border-primary/40"
+                            )
+                          ]}
+                        >
+                          <.checkbox
+                            id={"agent-tool-#{tool}"}
+                            name="agent[tools][]"
+                            value={tool}
+                            checked={tool in @selected_tools}
+                          />
+                          <div class="space-y-1">
+                            <p class="text-sm font-medium text-foreground">{tool}</p>
+                            <p class="text-xs text-muted-foreground">
+                              <%= case tool do %>
+                                <% "web_fetch" -> %>
+                                  Fetch and return the body of a web page on demand.
+                                <% _ -> %>
+                                  Additional tool support.
+                              <% end %>
+                            </p>
+                          </div>
+                        </label>
+                      </div>
                     </div>
-                  </div>
 
-                  <div class="flex justify-end gap-3 pt-2">
-                    <.button type="button" variant="outline" phx-click={hide}>Cancel</.button>
-                    <.button type="submit" phx-disable-with="Saving...">Save Agent</.button>
-                  </div>
-                </.form>
-              <% end %>
+                    <div class="flex justify-end gap-3 pt-2">
+                      <.button type="button" variant="outline" phx-click={hide}>Cancel</.button>
+                      <.button type="submit" phx-disable-with="Saving...">Save Agent</.button>
+                    </div>
+                  </.form>
+                <% end %>
+              </div>
             </div>
-          </div>
           </.focus_wrap>
         </:content>
       </.dialog>

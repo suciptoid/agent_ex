@@ -5,6 +5,7 @@ defmodule App.AgentsTest do
 
   import App.AgentsFixtures
   import App.ProvidersFixtures
+  import App.ToolsFixtures
   import App.UsersFixtures
 
   setup do
@@ -52,6 +53,24 @@ defmodule App.AgentsTest do
       assert agent.provider.id == provider.id
     end
 
+    test "creates an agent with a custom user tool", %{
+      scope: scope,
+      provider: provider,
+      user: user
+    } do
+      tool = tool_fixture(user, %{name: "brave_search"})
+
+      assert {:ok, agent} =
+               Agents.create_agent(scope, %{
+                 "name" => "Searcher",
+                 "model" => "anthropic:claude-haiku-4-5",
+                 "provider_id" => provider.id,
+                 "tools" => [tool.name, "web_fetch"]
+               })
+
+      assert Enum.sort(agent.tools) == ["brave_search", "web_fetch"]
+    end
+
     test "rejects providers owned by another user", %{scope: scope} do
       other_provider = provider_fixture(user_fixture())
 
@@ -94,7 +113,7 @@ defmodule App.AgentsTest do
     test "preloads virtual extra params for forms", %{user: user, provider: provider} do
       agent = agent_fixture(user, %{provider: provider, temperature: 0.6, max_tokens: 1024})
 
-      changeset = Agents.change_agent(agent)
+      changeset = Agents.change_agent(App.Users.Scope.for_user(user), agent)
 
       assert Ecto.Changeset.get_field(changeset, :temperature) == 0.6
       assert Ecto.Changeset.get_field(changeset, :max_tokens) == 1024

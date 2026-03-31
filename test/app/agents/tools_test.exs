@@ -1,11 +1,16 @@
 defmodule App.Agents.ToolsTest do
-  use ExUnit.Case, async: false
+  use App.DataCase, async: false
 
   alias App.Agents.Tools
+
+  import App.ToolsFixtures
+  import App.UsersFixtures
 
   setup do
     previous_config = Application.get_env(:app, App.Agents.Tools)
     Application.put_env(:app, App.Agents.Tools, req_options: [plug: {Req.Test, __MODULE__}])
+
+    user = user_fixture()
 
     on_exit(fn ->
       if previous_config do
@@ -15,16 +20,23 @@ defmodule App.Agents.ToolsTest do
       end
     end)
 
-    :ok
+    %{user: user}
   end
 
   test "available_tools/0 lists builtin tools" do
-    assert Tools.available_tools() == ["web_fetch"]
+    assert Tools.available_tools() == ["web_fetch", "shell"]
   end
 
   test "resolve/1 returns configured ReqLLM tools" do
     [tool] = Tools.resolve(["web_fetch"])
     assert tool.name == "web_fetch"
+  end
+
+  test "resolve/2 includes custom tools for the current user", %{user: user} do
+    tool = tool_fixture(user, %{name: "brave_search"})
+
+    [resolved_tool] = Tools.resolve([tool.name], user_id: user.id)
+    assert resolved_tool.name == "brave_search"
   end
 
   test "do_web_fetch/1 returns the response body on success" do
@@ -33,6 +45,19 @@ defmodule App.Agents.ToolsTest do
     end)
 
     assert {:ok, "hello from the stub"} = Tools.do_web_fetch(%{url: "https://example.test"})
+  end
+
+  test "do_web_fetch/1 accepts optional headers" do
+    Req.Test.stub(__MODULE__, fn conn ->
+      assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer 123"]
+      Plug.Conn.send_resp(conn, 200, "authorized")
+    end)
+
+    assert {:ok, "authorized"} =
+             Tools.do_web_fetch(%{
+               url: "https://example.test",
+               headers: %{"authorization" => "Bearer 123"}
+             })
   end
 
   test "do_web_fetch/1 surfaces non-success status codes" do
@@ -67,5 +92,9 @@ defmodule App.Agents.ToolsTest do
 
     assert result["content"] == "hello from the stub"
     assert result["status"] == "ok"
+  end
+
+  test "do_shell/1 executes commands" do
+    assert {:ok, "hello\n"} = Tools.do_shell(%{command: "printf 'hello\\n'"})
   end
 end

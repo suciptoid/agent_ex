@@ -1,0 +1,4 @@
+- Added a first-class `tools` context and schema for user-owned HTTP tools with encrypted static headers and mixed runtime/fixed parameter definitions.
+- Added authenticated LiveView tool creator at `/tools/create` and linked it in the dashboard sidebar.
+- Extended agent tool resolution to support custom HTTP tools, optional `web_fetch` headers, and a new builtin `shell` tool.
+- Updated agent forms/tests so saved custom tools can be selected alongside builtin tools.

@@ -5,8 +5,6 @@ defmodule App.Agents.Agent do
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
-  @tool_names App.Agents.Tools.available_tools()
-
   schema "agents" do
     field :name, :string
     field :system_prompt, :string
@@ -25,7 +23,7 @@ defmodule App.Agents.Agent do
     timestamps(type: :utc_datetime_usec)
   end
 
-  def changeset(agent, attrs) do
+  def changeset(agent, attrs, opts \\ []) do
     agent
     |> cast(attrs, [
       :name,
@@ -45,7 +43,7 @@ defmodule App.Agents.Agent do
     |> validate_format(:model, ~r/^[^:\s]+:.+$/, message: "must use provider:model format")
     |> validate_number(:temperature, greater_than_or_equal_to: 0, less_than_or_equal_to: 2)
     |> validate_number(:max_tokens, greater_than: 0)
-    |> validate_tools()
+    |> validate_tools(Keyword.get(opts, :allowed_tools, App.Agents.Tools.available_tools()))
     |> put_extra_params()
     |> foreign_key_constraint(:provider_id)
     |> foreign_key_constraint(:user_id)
@@ -58,11 +56,11 @@ defmodule App.Agents.Agent do
     |> Enum.uniq()
   end
 
-  defp validate_tools(changeset) do
+  defp validate_tools(changeset, allowed_tools) do
     invalid_tools =
       changeset
       |> get_field(:tools, [])
-      |> Enum.reject(&(&1 in @tool_names))
+      |> Enum.reject(&(&1 in allowed_tools))
 
     if invalid_tools == [] do
       changeset

@@ -3,6 +3,7 @@ defmodule AppWeb.AgentLiveTest do
 
   import App.AgentsFixtures
   import App.ProvidersFixtures
+  import App.ToolsFixtures
   import Phoenix.LiveViewTest
 
   setup :register_and_log_in_user
@@ -22,6 +23,7 @@ defmodule AppWeb.AgentLiveTest do
 
     test "creates an agent", %{conn: conn, user: user, scope: scope} do
       provider = provider_fixture(user)
+      custom_tool = tool_fixture(user, %{name: "brave_search"})
       {:ok, live_view, _html} = live(conn, ~p"/agents")
 
       live_view
@@ -39,7 +41,7 @@ defmodule AppWeb.AgentLiveTest do
           "provider_id" => provider.id,
           "temperature" => "0.4",
           "max_tokens" => "256",
-          "tools" => ["", "web_fetch"]
+          "tools" => ["", "web_fetch", custom_tool.name]
         }
       })
 
@@ -49,6 +51,7 @@ defmodule AppWeb.AgentLiveTest do
       assert created_agent.name == "Planner"
       assert has_element?(live_view, "#agent-#{created_agent.id}")
       assert has_element?(live_view, "#edit-agent-#{created_agent.id}")
+      assert Enum.sort(created_agent.tools) == ["brave_search", "web_fetch"]
     end
 
     test "deletes an agent", %{conn: conn, user: user} do

@@ -76,10 +76,12 @@ defmodule AppWeb.ChatLive.Index do
         "No messages yet."
 
       message ->
-        if String.length(message.content) > 120 do
-          String.slice(message.content, 0, 120) <> "…"
+        content = message.content || ""
+
+        if String.length(content) > 120 do
+          String.slice(content, 0, 120) <> "…"
         else
-          message.content
+          content
         end
     end
   end

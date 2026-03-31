@@ -20,7 +20,10 @@ defmodule App.Agents.Runner do
 
   def run(%Agent{provider: %Provider{api_key: api_key}} = agent, messages, opts) do
     context = build_context(agent, messages, opts)
-    tools = App.Agents.Tools.resolve(agent.tools) ++ Keyword.get(opts, :extra_tools, [])
+
+    tools =
+      App.Agents.Tools.resolve(agent.tools, user_id: agent.user_id) ++
+        Keyword.get(opts, :extra_tools, [])
 
     llm_opts =
       [api_key: api_key, tools: tools]
@@ -45,7 +48,10 @@ defmodule App.Agents.Runner do
         opts
       ) do
     context = build_context(agent, messages, opts)
-    tools = App.Agents.Tools.resolve(agent.tools) ++ Keyword.get(opts, :extra_tools, [])
+
+    tools =
+      App.Agents.Tools.resolve(agent.tools, user_id: agent.user_id) ++
+        Keyword.get(opts, :extra_tools, [])
 
     llm_opts =
       [api_key: api_key, tools: tools]

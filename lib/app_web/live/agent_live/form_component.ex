@@ -40,7 +40,7 @@ defmodule AppWeb.AgentLive.FormComponent do
                 <div class="mb-6 space-y-2">
                   <h2 class="text-2xl font-semibold text-foreground">{@title}</h2>
                   <p class="text-sm text-muted-foreground">
-                    Configure the agent, its model, and any optional builtin tools.
+                    Configure the agent, its model, and any optional builtin or custom tools.
                   </p>
                 </div>
 
@@ -117,9 +117,9 @@ defmodule AppWeb.AgentLive.FormComponent do
 
                     <div class="space-y-3">
                       <div>
-                        <p class="text-sm font-medium text-foreground">Builtin Tools</p>
+                        <p class="text-sm font-medium text-foreground">Tools</p>
                         <p class="text-xs text-muted-foreground">
-                          Enable optional capabilities the model can call while generating a response.
+                          Enable builtin tools like `web_fetch` or `shell`, plus any custom API tools you created.
                         </p>
                       </div>
 
@@ -148,9 +148,11 @@ defmodule AppWeb.AgentLive.FormComponent do
                             <p class="text-xs text-muted-foreground">
                               <%= case tool do %>
                                 <% "web_fetch" -> %>
-                                  Fetch and return the body of a web page on demand.
+                                  Fetch and return the body of a web page on demand, with optional headers.
+                                <% "shell" -> %>
+                                  Execute local shell commands and return stdout/stderr. Use with caution.
                                 <% _ -> %>
-                                  Additional tool support.
+                                  Custom API tool created from your saved tool definitions.
                               <% end %>
                             </p>
                           </div>
@@ -175,7 +177,7 @@ defmodule AppWeb.AgentLive.FormComponent do
 
   @impl true
   def update(%{agent: agent} = assigns, socket) do
-    changeset = Agents.change_agent(agent)
+    changeset = Agents.change_agent(assigns.current_scope, agent)
 
     {:ok,
      socket
@@ -186,8 +188,7 @@ defmodule AppWeb.AgentLive.FormComponent do
   @impl true
   def handle_event("validate", %{"agent" => agent_params}, socket) do
     changeset =
-      socket.assigns.agent
-      |> Agents.change_agent(agent_params)
+      Agents.change_agent(socket.assigns.current_scope, socket.assigns.agent, agent_params)
       |> Map.put(:action, :validate)
 
     {:noreply, assign_form(socket, changeset)}

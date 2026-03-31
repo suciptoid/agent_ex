@@ -13,7 +13,7 @@ defmodule AppWeb.AgentLive.Index do
     {:ok,
      socket
      |> assign(:providers, providers)
-     |> assign(:available_tools, Agents.available_tools())
+     |> assign(:available_tools, Agents.available_tools(socket.assigns.current_scope))
      |> stream_configure(:agents, dom_id: &"agent-#{&1.id}")
      |> stream(:agents, agents)}
   end

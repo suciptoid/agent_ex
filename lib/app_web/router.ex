@@ -58,7 +58,9 @@ defmodule AppWeb.Router do
       live "/providers", ProviderLive.Index, :index
       live "/providers/new", ProviderLive.Index, :new
       live "/providers/:id/edit", ProviderLive.Index, :edit
+      live "/tools/list", ToolLive.Index, :index
       live "/tools/create", ToolLive.Create, :new
+      live "/tools/:id/edit", ToolLive.Create, :edit
       live "/agents", AgentLive.Index, :index
       live "/agents/new", AgentLive.Index, :new
       live "/agents/:id/edit", AgentLive.Index, :edit

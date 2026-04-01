@@ -2,3 +2,6 @@
 - Added authenticated LiveView tool creator at `/tools/create` and linked it in the dashboard sidebar.
 - Extended agent tool resolution to support custom HTTP tools, optional `web_fetch` headers, and a new builtin `shell` tool.
 - Updated agent forms/tests so saved custom tools can be selected alongside builtin tools.
+- Added `/tools/list` plus edit navigation for saved tools.
+- Reused the tool form for both create and edit flows.
+- Upgraded `endpoint` into a URL template with validated placeholders like `{dynamic_path}` that are resolved before HTTP requests.

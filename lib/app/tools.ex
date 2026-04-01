@@ -28,6 +28,14 @@ defmodule App.Tools do
     Repo.get_by!(Tool, id: id, user_id: scope.user.id)
   end
 
+  def update_tool(%Scope{} = scope, %Tool{} = tool, attrs) do
+    ensure_user_owns_tool!(scope, tool)
+
+    tool
+    |> Tool.changeset(attrs)
+    |> Repo.update()
+  end
+
   def list_named_tools(user_id, names) when is_list(names) do
     Tool
     |> where([tool], tool.user_id == ^user_id and tool.name in ^names)
@@ -44,5 +52,11 @@ defmodule App.Tools do
     tool
     |> Tool.prepare_for_form()
     |> Tool.changeset(attrs)
+  end
+
+  defp ensure_user_owns_tool!(%Scope{} = scope, %Tool{user_id: user_id}) do
+    if user_id != scope.user.id do
+      raise Ecto.NoResultsError, query: Tool
+    end
   end
 end

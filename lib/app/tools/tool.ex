@@ -52,6 +52,7 @@ defmodule App.Tools.Tool do
     |> validate_inclusion(:http_method, @http_methods)
     |> validate_param_rows()
     |> validate_header_rows()
+    |> validate_endpoint_placeholders()
     |> put_parameter_definitions()
     |> put_static_headers()
     |> unique_constraint(:name, name: :tools_user_id_name_index)
@@ -113,6 +114,12 @@ defmodule App.Tools.Tool do
   def runtime_param_items(%__MODULE__{} = tool) do
     parameter_items(tool)
     |> Enum.filter(&(Map.get(&1, "source") == "llm"))
+  end
+
+  def template_placeholders(%__MODULE__{} = tool) do
+    Regex.scan(~r/\{([A-Za-z_][A-Za-z0-9_]*)\}/, tool.endpoint || "", capture: :all_but_first)
+    |> List.flatten()
+    |> Enum.uniq()
   end
 
   defp validate_tool_name(:name, value) do
@@ -217,6 +224,35 @@ defmodule App.Tools.Tool do
       changeset
     else
       add_error(changeset, :header_rows, "header keys must be unique")
+    end
+  end
+
+  defp validate_endpoint_placeholders(changeset) do
+    placeholder_names =
+      changeset
+      |> get_field(:endpoint)
+      |> to_string()
+      |> then(&Regex.scan(~r/\{([A-Za-z_][A-Za-z0-9_]*)\}/, &1, capture: :all_but_first))
+      |> List.flatten()
+      |> Enum.uniq()
+
+    param_names =
+      changeset
+      |> get_field(:param_rows, [])
+      |> Enum.map(&normalize_map/1)
+      |> Enum.map(&Map.get(&1, "name", ""))
+      |> Enum.reject(&(&1 == ""))
+
+    missing_names = Enum.reject(placeholder_names, &(&1 in param_names))
+
+    if missing_names == [] do
+      changeset
+    else
+      add_error(
+        changeset,
+        :endpoint,
+        "template placeholders must match parameter names: #{Enum.join(missing_names, ", ")}"
+      )
     end
   end
 

@@ -250,8 +250,9 @@ defmodule App.Agents.Tools do
       end)
 
     params = Map.merge(fixed_params, runtime_params)
+    consumed_names = Tool.template_placeholders(tool)
 
-    case request_for_tool(tool, params) do
+    case request_for_tool(tool, params, consumed_names) do
       {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
         {:ok, body_to_text(body)}
 
@@ -263,17 +264,21 @@ defmodule App.Agents.Tools do
     end
   end
 
-  defp request_for_tool(%Tool{http_method: "post"} = tool, params) do
+  defp request_for_tool(%Tool{http_method: "post"} = tool, params, consumed_names) do
+    {url, remaining_params} = build_request_url(tool.endpoint, params, consumed_names)
+
     Req.post(
-      tool.endpoint,
-      Keyword.merge(req_options(), headers: headers_list(tool.static_headers), json: params)
+      url,
+      Keyword.merge(req_options(), headers: headers_list(tool.static_headers), json: remaining_params)
     )
   end
 
-  defp request_for_tool(%Tool{} = tool, params) do
+  defp request_for_tool(%Tool{} = tool, params, consumed_names) do
+    {url, remaining_params} = build_request_url(tool.endpoint, params, consumed_names)
+
     Req.get(
-      tool.endpoint,
-      Keyword.merge(req_options(), headers: headers_list(tool.static_headers), params: params)
+      url,
+      Keyword.merge(req_options(), headers: headers_list(tool.static_headers), params: remaining_params)
     )
   end
 
@@ -301,6 +306,16 @@ defmodule App.Agents.Tools do
     Enum.reject(tool_names, &(&1 in @builtin_tool_names))
   end
 
+  defp build_request_url(endpoint_template, params, consumed_names) do
+    url =
+      Enum.reduce(consumed_names, endpoint_template, fn name, acc ->
+        String.replace(acc, "{#{name}}", stringify_template_value(Map.get(params, name)))
+      end)
+
+    remaining_params = Map.drop(params, consumed_names)
+    {url, remaining_params}
+  end
+
   defp headers_list(nil), do: []
 
   defp headers_list(headers) when is_map(headers) do
@@ -314,6 +329,10 @@ defmodule App.Agents.Tools do
   defp normalize_headers(_headers), do: %{}
 
   defp json_schema_type(type), do: Map.fetch!(@supported_param_types, type)
+
+  defp stringify_template_value(nil), do: ""
+  defp stringify_template_value(value) when is_binary(value), do: value
+  defp stringify_template_value(value), do: to_string(value)
 
   defp fetch_runtime_arg(args, name) do
     case Map.fetch(args, name) do

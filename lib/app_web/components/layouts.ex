@@ -253,7 +253,7 @@ defmodule AppWeb.Layouts do
           </.link>
 
           <.link
-            navigate={~p"/tools/create"}
+            navigate={~p"/tools/list"}
             class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
           >
             <.icon name="hero-wrench-screwdriver" class="size-5 flex-shrink-0" />

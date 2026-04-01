@@ -42,6 +42,21 @@ defmodule App.ToolsTest do
 
       assert "has already been taken" in errors_on(changeset).name
     end
+
+    test "requires endpoint placeholders to exist as params", %{scope: scope} do
+      assert {:error, changeset} =
+               Tools.create_tool(scope, %{
+                 "name" => "reader",
+                 "description" => "Reads content",
+                 "endpoint" => "https://r.jina.ai/{dynamic_path}",
+                 "http_method" => "get",
+                 "param_rows" => [
+                   %{"name" => "query", "type" => "string", "source" => "llm", "value" => ""}
+                 ]
+               })
+
+      assert "template placeholders must match parameter names: dynamic_path" in errors_on(changeset).endpoint
+    end
   end
 
   describe "list_tool_names/1" do

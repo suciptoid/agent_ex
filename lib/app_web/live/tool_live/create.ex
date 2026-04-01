@@ -6,19 +6,18 @@ defmodule AppWeb.ToolLive.Create do
 
   @impl true
   def mount(_params, _session, socket) do
-    changeset = Tools.change_tool(%Tool{})
+    {:ok, socket}
+  end
 
-    {:ok,
-     socket
-     |> assign(:page_title, "Create Tool")
-     |> assign(:saved_tools, Tools.list_tools(socket.assigns.current_scope))
-     |> assign_form(changeset)}
+  @impl true
+  def handle_params(params, _url, socket) do
+    {:noreply, apply_action(socket, socket.assigns.live_action, params)}
   end
 
   @impl true
   def handle_event("validate", %{"tool" => tool_params}, socket) do
     changeset =
-      %Tool{}
+      socket.assigns.tool
       |> Tools.change_tool(normalize_tool_params(tool_params))
       |> Map.put(:action, :validate)
 
@@ -26,19 +25,7 @@ defmodule AppWeb.ToolLive.Create do
   end
 
   def handle_event("save", %{"tool" => tool_params}, socket) do
-    case Tools.create_tool(socket.assigns.current_scope, normalize_tool_params(tool_params)) do
-      {:ok, _tool} ->
-        changeset = Tools.change_tool(%Tool{})
-
-        {:noreply,
-         socket
-         |> put_flash(:info, "Tool created successfully")
-         |> assign(:saved_tools, Tools.list_tools(socket.assigns.current_scope))
-         |> assign_form(changeset)}
-
-      {:error, %Ecto.Changeset{} = changeset} ->
-        {:noreply, assign_form(socket, changeset)}
-    end
+    save_tool(socket, socket.assigns.live_action, normalize_tool_params(tool_params))
   end
 
   def handle_event("add-param", _params, socket) do
@@ -79,21 +66,23 @@ defmodule AppWeb.ToolLive.Create do
     <Layouts.dashboard flash={@flash} current_scope={@current_scope}>
       <div class="mx-auto flex w-full max-w-6xl flex-col gap-6 xl:flex-row">
         <section class="flex-1 space-y-6">
-          <div class="space-y-2 border-b border-border pb-6">
-            <div class="flex items-center gap-3">
+          <div class="space-y-3 border-b border-border pb-6">
+            <div class="flex items-center justify-between gap-4">
               <span class="inline-flex rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.2em] text-primary">
                 HTTP Tool Builder
               </span>
+
+              <.link navigate={~p"/tools/list"} class="text-sm font-medium text-primary hover:underline">
+                Back to tool list
+              </.link>
             </div>
 
-            <h1 class="text-3xl font-bold tracking-tight text-foreground">
-              Create reusable API tools
-            </h1>
+            <h1 class="text-3xl font-bold tracking-tight text-foreground">{@page_title}</h1>
 
             <p class="max-w-3xl text-sm text-muted-foreground">
-              Define an HTTP endpoint once, choose which parameters the LLM should fill at runtime,
-              lock fixed values such as `safe_search=true`, and store headers like `Authorization`
-              securely for future agent runs.
+              Use a URL template when the path itself needs runtime data, like
+              <code phx-no-curly-interpolation>https://r.jina.ai/{dynamic_path}?param_a=value</code>.
+              Every <code phx-no-curly-interpolation>{placeholder}</code> must match a parameter name below.
             </p>
           </div>
 
@@ -103,7 +92,7 @@ defmodule AppWeb.ToolLive.Create do
                 field={@form[:name]}
                 type="text"
                 label="Tool name"
-                placeholder="brave_search"
+                placeholder="brave_reader"
               />
 
               <.select
@@ -117,14 +106,14 @@ defmodule AppWeb.ToolLive.Create do
               field={@form[:description]}
               type="text"
               label="Description"
-              placeholder="Search the web with Brave and return JSON results."
+              placeholder="Read a document through Jina's mirror."
             />
 
             <.input
               field={@form[:endpoint]}
               type="text"
-              label="API endpoint"
-              placeholder="https://api.search.brave.com/res/v1/web/search"
+              label="URL template"
+              placeholder="https://r.jina.ai/{dynamic_path}?param_a=value"
             />
 
             <section class="space-y-4 rounded-3xl border border-border bg-card/70 p-5 shadow-sm">
@@ -132,7 +121,7 @@ defmodule AppWeb.ToolLive.Create do
                 <div>
                   <h2 class="text-lg font-semibold text-foreground">Input parameters</h2>
                   <p class="text-sm text-muted-foreground">
-                    Choose which params are filled by the LLM at runtime and which ones stay fixed.
+                    Parameters can feed query/body values and placeholders inside the URL template.
                   </p>
                 </div>
 
@@ -147,10 +136,7 @@ defmodule AppWeb.ToolLive.Create do
                   class="grid gap-3 rounded-2xl border border-border/70 bg-background p-4 md:grid-cols-[minmax(0,1.2fr)_160px_160px_minmax(0,1fr)_auto]"
                 >
                   <div class="space-y-2">
-                    <label
-                      class="text-sm font-medium text-foreground"
-                      for={"tool-param-#{index}-name"}
-                    >
+                    <label class="text-sm font-medium text-foreground" for={"tool-param-#{index}-name"}>
                       Name
                     </label>
                     <input
@@ -159,15 +145,12 @@ defmodule AppWeb.ToolLive.Create do
                       value={row["name"]}
                       type="text"
                       class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      placeholder="query"
+                      placeholder="dynamic_path"
                     />
                   </div>
 
                   <div class="space-y-2">
-                    <label
-                      class="text-sm font-medium text-foreground"
-                      for={"tool-param-#{index}-type"}
-                    >
+                    <label class="text-sm font-medium text-foreground" for={"tool-param-#{index}-type"}>
                       Type
                     </label>
                     <select
@@ -175,21 +158,14 @@ defmodule AppWeb.ToolLive.Create do
                       name={"tool[param_rows][#{index}][type]"}
                       class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
-                      <option
-                        :for={type <- Tool.param_types()}
-                        value={type}
-                        selected={row["type"] == type}
-                      >
+                      <option :for={type <- Tool.param_types()} value={type} selected={row["type"] == type}>
                         {type}
                       </option>
                     </select>
                   </div>
 
                   <div class="space-y-2">
-                    <label
-                      class="text-sm font-medium text-foreground"
-                      for={"tool-param-#{index}-source"}
-                    >
+                    <label class="text-sm font-medium text-foreground" for={"tool-param-#{index}-source"}>
                       Filled by
                     </label>
                     <select
@@ -197,21 +173,14 @@ defmodule AppWeb.ToolLive.Create do
                       name={"tool[param_rows][#{index}][source]"}
                       class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
-                      <option
-                        :for={source <- Tool.tool_sources()}
-                        value={source}
-                        selected={row["source"] == source}
-                      >
+                      <option :for={source <- Tool.tool_sources()} value={source} selected={row["source"] == source}>
                         {source_label(source)}
                       </option>
                     </select>
                   </div>
 
                   <div class="space-y-2">
-                    <label
-                      class="text-sm font-medium text-foreground"
-                      for={"tool-param-#{index}-value"}
-                    >
+                    <label class="text-sm font-medium text-foreground" for={"tool-param-#{index}-value"}>
                       Fixed value
                     </label>
                     <input
@@ -220,7 +189,7 @@ defmodule AppWeb.ToolLive.Create do
                       value={row["value"]}
                       type="text"
                       class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      placeholder="true"
+                      placeholder="https://example.com/doc"
                     />
                   </div>
 
@@ -248,7 +217,7 @@ defmodule AppWeb.ToolLive.Create do
                 <div>
                   <h2 class="text-lg font-semibold text-foreground">Headers</h2>
                   <p class="text-sm text-muted-foreground">
-                    Store secret headers such as API keys or bearer tokens securely at creation time.
+                    Store static request headers securely, such as `Authorization`.
                   </p>
                 </div>
 
@@ -263,10 +232,7 @@ defmodule AppWeb.ToolLive.Create do
                   class="grid gap-3 rounded-2xl border border-border/70 bg-background p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
                 >
                   <div class="space-y-2">
-                    <label
-                      class="text-sm font-medium text-foreground"
-                      for={"tool-header-#{index}-key"}
-                    >
+                    <label class="text-sm font-medium text-foreground" for={"tool-header-#{index}-key"}>
                       Header name
                     </label>
                     <input
@@ -280,10 +246,7 @@ defmodule AppWeb.ToolLive.Create do
                   </div>
 
                   <div class="space-y-2">
-                    <label
-                      class="text-sm font-medium text-foreground"
-                      for={"tool-header-#{index}-value"}
-                    >
+                    <label class="text-sm font-medium text-foreground" for={"tool-header-#{index}-value"}>
                       Header value
                     </label>
                     <input
@@ -315,9 +278,12 @@ defmodule AppWeb.ToolLive.Create do
               <% end %>
             </section>
 
-            <div class="flex justify-end">
+            <div class="flex justify-end gap-3">
+              <.link navigate={~p"/tools/list"}>
+                <.button type="button" variant="outline">Cancel</.button>
+              </.link>
               <.button id="save-tool-button" type="submit" phx-disable-with="Saving...">
-                Save tool
+                {save_label(@live_action)}
               </.button>
             </div>
           </.form>
@@ -326,73 +292,72 @@ defmodule AppWeb.ToolLive.Create do
         <aside class="w-full shrink-0 space-y-4 xl:w-[22rem]">
           <section class="rounded-3xl border border-border bg-card p-5 shadow-sm">
             <div class="space-y-2">
-              <h2 class="text-lg font-semibold text-foreground">Builtin tools</h2>
+              <h2 class="text-lg font-semibold text-foreground">Template example</h2>
               <p class="text-sm text-muted-foreground">
-                Every agent can also opt into `web_fetch` and the cautionary `shell` tool.
+                Dynamic path segments should be modeled with placeholders in the URL itself.
               </p>
             </div>
 
-            <div class="mt-4 space-y-3">
-              <div class="rounded-2xl border border-border bg-background p-4">
-                <p class="text-sm font-medium text-foreground">web_fetch</p>
-                <p class="mt-1 text-xs text-muted-foreground">
-                  Fetches a URL and now accepts optional request headers for authenticated requests.
-                </p>
-              </div>
+            <div class="mt-4 rounded-2xl border border-border bg-background p-4 text-xs text-muted-foreground">
+              <code phx-no-curly-interpolation class="block">
+                https://r.jina.ai/{dynamic_path}?param_a=value
+              </code>
 
-              <div class="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4">
-                <p class="text-sm font-medium text-foreground">shell</p>
-                <p class="mt-1 text-xs text-muted-foreground">
-                  Runs a shell command on the host system and returns stdout/stderr. Use with caution.
-                </p>
-              </div>
-            </div>
-          </section>
-
-          <section class="rounded-3xl border border-border bg-card p-5 shadow-sm">
-            <div class="space-y-2">
-              <h2 class="text-lg font-semibold text-foreground">Saved tools</h2>
-              <p class="text-sm text-muted-foreground">
-                Reusable HTTP tools available to the current user.
-              </p>
-            </div>
-
-            <div class="mt-4 space-y-3">
-              <%= for tool <- @saved_tools do %>
-                <div
-                  id={"saved-tool-#{tool.id}"}
-                  class="rounded-2xl border border-border bg-background p-4"
-                >
-                  <div class="flex items-start justify-between gap-3">
-                    <div>
-                      <p class="text-sm font-semibold text-foreground">{tool.name}</p>
-                      <p class="mt-1 text-xs uppercase tracking-wide text-primary">
-                        {String.upcase(tool.http_method)}
-                      </p>
-                    </div>
-
-                    <span class="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-                      {length(Tool.runtime_param_items(tool))} runtime params
-                    </span>
-                  </div>
-
-                  <p class="mt-3 text-xs text-muted-foreground">{tool.endpoint}</p>
-                </div>
-              <% end %>
-
-              <div
-                :if={@saved_tools == []}
-                id="saved-tools-empty-state"
-                class="rounded-2xl border border-dashed border-border bg-muted/30 p-5 text-sm text-muted-foreground"
-              >
-                No custom tools yet. Create one from an API endpoint to make it selectable on agents.
-              </div>
+              <ul class="mt-3 space-y-2">
+                <li><code>dynamic_path</code> → source: LLM at runtime</li>
+                <li><code>param_a</code> → source: Fixed during creation, value: <code>value</code></li>
+              </ul>
             </div>
           </section>
         </aside>
       </div>
     </Layouts.dashboard>
     """
+  end
+
+  defp apply_action(socket, :new, _params) do
+    changeset = Tools.change_tool(%Tool{})
+
+    socket
+    |> assign(:page_title, "Create Tool")
+    |> assign(:tool, %Tool{})
+    |> assign_form(changeset)
+  end
+
+  defp apply_action(socket, :edit, %{"id" => id}) do
+    tool = Tools.get_tool!(socket.assigns.current_scope, id)
+    changeset = Tools.change_tool(tool)
+
+    socket
+    |> assign(:page_title, "Edit Tool")
+    |> assign(:tool, tool)
+    |> assign_form(changeset)
+  end
+
+  defp save_tool(socket, :new, tool_params) do
+    case Tools.create_tool(socket.assigns.current_scope, tool_params) do
+      {:ok, _tool} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Tool created successfully")
+         |> push_navigate(to: ~p"/tools/list")}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:noreply, assign_form(socket, changeset)}
+    end
+  end
+
+  defp save_tool(socket, :edit, tool_params) do
+    case Tools.update_tool(socket.assigns.current_scope, socket.assigns.tool, tool_params) do
+      {:ok, _tool} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Tool updated successfully")
+         |> push_navigate(to: ~p"/tools/list")}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:noreply, assign_form(socket, changeset)}
+    end
   end
 
   defp assign_form(socket, %Ecto.Changeset{} = changeset) do
@@ -422,7 +387,7 @@ defmodule AppWeb.ToolLive.Create do
       |> Map.put_new("header_rows", header_rows(socket.assigns.form))
       |> Map.update!(Atom.to_string(field), updater)
 
-    changeset = Tools.change_tool(%Tool{}, params)
+    changeset = Tools.change_tool(socket.assigns.tool, params)
     assign_form(socket, changeset)
   end
 
@@ -430,12 +395,12 @@ defmodule AppWeb.ToolLive.Create do
   defp ensure_rows([], :header), do: [Tool.blank_header_row()]
   defp ensure_rows(rows, _kind), do: rows
 
-  defp param_rows(form),
-    do: form.params["param_rows"] || form.data.param_rows || [Tool.blank_param_row()]
-
-  defp header_rows(form),
-    do: form.params["header_rows"] || form.data.header_rows || [Tool.blank_header_row()]
+  defp param_rows(form), do: form.params["param_rows"] || form.data.param_rows || [Tool.blank_param_row()]
+  defp header_rows(form), do: form.params["header_rows"] || form.data.header_rows || [Tool.blank_header_row()]
 
   defp source_label("llm"), do: "LLM at runtime"
   defp source_label("fixed"), do: "Fixed during creation"
+
+  defp save_label(:edit), do: "Save Changes"
+  defp save_label(_action), do: "Save Tool"
 end

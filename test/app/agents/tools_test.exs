@@ -39,6 +39,27 @@ defmodule App.Agents.ToolsTest do
     assert resolved_tool.name == "brave_search"
   end
 
+  test "custom tool templates can interpolate runtime path params", %{user: user} do
+    _tool =
+      tool_fixture(user, %{
+        name: "jina_reader",
+        endpoint: "https://example.test/{dynamic_path}",
+        param_rows: [
+          %{"name" => "dynamic_path", "type" => "string", "source" => "llm", "value" => ""},
+          %{"name" => "safe_search", "type" => "boolean", "source" => "fixed", "value" => "true"}
+        ]
+      })
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      assert conn.request_path == "/docs/file.txt"
+      assert conn.query_string == "safe_search=true"
+      Plug.Conn.send_resp(conn, 200, "templated")
+    end)
+
+    [tool] = Tools.resolve(["jina_reader"], user_id: user.id)
+    assert {:ok, "templated"} = ReqLLM.Tool.execute(tool, %{"dynamic_path" => "docs/file.txt"})
+  end
+
   test "do_web_fetch/1 returns the response body on success" do
     Req.Test.stub(__MODULE__, fn conn ->
       Plug.Conn.send_resp(conn, 200, "hello from the stub")

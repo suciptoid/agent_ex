@@ -193,15 +193,31 @@ defmodule AppWeb.Layouts do
     ~H"""
     <div
       id="dashboard-layout"
-      class="h-screen flex bg-background overflow-hidden"
+      class="relative flex h-screen w-full bg-background overflow-hidden"
       phx-hook=".SidebarState"
       data-sidebar-collapsed="false"
     >
+      <%!-- Mobile toggle --%>
+      <button
+        type="button"
+        class={[
+          "fixed left-4 top-4 z-30 flex h-11 w-11 items-center justify-center rounded-2xl border border-border bg-card/95 text-foreground shadow-lg backdrop-blur transition-all duration-300 hover:bg-accent lg:hidden",
+          "[[data-sidebar-collapsed=false]_&]:pointer-events-none",
+          "[[data-sidebar-collapsed=false]_&]:opacity-0",
+          "[[data-sidebar-collapsed=false]_&]:translate-x-2"
+        ]}
+        aria-label="Open sidebar"
+        data-sidebar-toggle
+        aria-expanded="false"
+      >
+        <.icon name="hero-bars-3" class="size-5" />
+      </button>
+
       <%!-- Mobile overlay (tap to close sidebar) --%>
       <div
         data-sidebar-toggle
         class={[
-          "fixed inset-0 bg-black/50 z-20 transition-opacity duration-300 lg:hidden pointer-events-auto opacity-100",
+          "fixed inset-0 z-40 bg-black/45 backdrop-blur-sm transition-opacity duration-300 lg:hidden pointer-events-auto opacity-100",
           "[[data-sidebar-collapsed=true]_&]:opacity-0",
           "[[data-sidebar-collapsed=true]_&]:pointer-events-none"
         ]}
@@ -209,9 +225,10 @@ defmodule AppWeb.Layouts do
 
       <%!-- Sidebar --%>
       <aside class={[
-        "relative z-30 h-full bg-card border-r border-border transition-all duration-300 ease-in-out flex flex-col flex-shrink-0",
-        "w-56",
-        "[[data-sidebar-collapsed=true]_&]:-translate-x-full lg:[[data-sidebar-collapsed=true]_&]:translate-x-0",
+        "fixed inset-y-2 left-2 z-50 flex h-[calc(100vh-1rem)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl transition-all duration-300 ease-in-out",
+        "w-72",
+        "[[data-sidebar-collapsed=true]_&]:-translate-x-[calc(100%+0.75rem)] lg:[[data-sidebar-collapsed=true]_&]:translate-x-0",
+        "lg:relative lg:inset-y-0 lg:left-0 lg:h-full lg:max-w-none lg:rounded-none lg:border-y-0 lg:border-l-0 lg:shadow-none lg:w-56",
         "lg:[[data-sidebar-collapsed=true]_&]:w-14"
       ]}>
         <%!-- Sidebar top: hamburger + logo --%>
@@ -318,8 +335,8 @@ defmodule AppWeb.Layouts do
       </aside>
 
       <%!-- Main Content --%>
-      <main class="flex-1 min-w-0 h-full overflow-hidden flex flex-col">
-        <div class="flex-1 overflow-y-auto p-4 sm:p-5 lg:p-6 h-full flex flex-col">
+      <main class="flex h-full w-full min-w-0 flex-1 flex-col overflow-hidden">
+        <div class="flex h-full flex-1 flex-col overflow-y-auto p-4 pt-20 sm:px-5 sm:pb-5 sm:pt-20 lg:p-6">
           {render_slot(@inner_block)}
         </div>
       </main>

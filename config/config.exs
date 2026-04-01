@@ -24,7 +24,9 @@ config :app,
   ecto_repos: [App.Repo],
   generators: [timestamp_type: :utc_datetime, binary_id: true]
 
-config :req_llm, load_dotenv: false
+config :req_llm,
+  load_dotenv: false,
+  stream_receive_timeout: 60_000
 
 # Configure the endpoint
 config :app, AppWeb.Endpoint,

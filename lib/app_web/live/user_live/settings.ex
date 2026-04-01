@@ -10,91 +10,93 @@ defmodule AppWeb.UserLive.Settings do
       flash={@flash}
       current_scope={@current_scope}
     >
-      <div class="space-y-8">
-        <%!-- Page Header --%>
-        <div class="border-b border-gray-200 dark:border-gray-700 pb-6">
-          <h1 class="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
-            Account Settings
-          </h1>
-          <p class="mt-2 text-lg text-gray-600 dark:text-gray-300">
-            Manage your account email address and password settings
-          </p>
+      <div class="flex h-full min-h-0 flex-col p-4 pt-20 sm:px-5 sm:pb-5 sm:pt-20 lg:p-6">
+        <div class="space-y-8">
+          <%!-- Page Header --%>
+          <div class="border-b border-gray-200 dark:border-gray-700 pb-6">
+            <h1 class="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
+              Account Settings
+            </h1>
+            <p class="mt-2 text-lg text-gray-600 dark:text-gray-300">
+              Manage your account email address and password settings
+            </p>
+          </div>
+
+          <%!-- Email Settings Card --%>
+          <.card>
+            <.card_header>
+              <.card_title>Email Address</.card_title>
+              <.card_description>Update your email address</.card_description>
+            </.card_header>
+            <.card_content>
+              <.form
+                for={@email_form}
+                id="email_form"
+                phx-submit="update_email"
+                phx-change="validate_email"
+              >
+                <.input
+                  field={@email_form[:email]}
+                  type="email"
+                  label="Email"
+                  autocomplete="username"
+                  spellcheck="false"
+                  required
+                />
+                <div class="mt-4">
+                  <.button phx-disable-with="Changing...">Change Email</.button>
+                </div>
+              </.form>
+            </.card_content>
+          </.card>
+
+          <%!-- Password Settings Card --%>
+          <.card>
+            <.card_header>
+              <.card_title>Password</.card_title>
+              <.card_description>Update your password</.card_description>
+            </.card_header>
+            <.card_content>
+              <.form
+                for={@password_form}
+                id="password_form"
+                action={~p"/users/update-password"}
+                method="post"
+                phx-change="validate_password"
+                phx-submit="update_password"
+                phx-trigger-action={@trigger_submit}
+              >
+                <input
+                  name={@password_form[:email].name}
+                  type="hidden"
+                  id="hidden_user_email"
+                  spellcheck="false"
+                  value={@current_email}
+                />
+                <.input
+                  field={@password_form[:password]}
+                  type="password"
+                  label="New password"
+                  autocomplete="new-password"
+                  spellcheck="false"
+                  required
+                />
+                <.input
+                  field={@password_form[:password_confirmation]}
+                  type="password"
+                  label="Confirm new password"
+                  autocomplete="new-password"
+                  spellcheck="false"
+                />
+                <div class="mt-4">
+                  <.button phx-disable-with="Saving...">
+                    Save Password
+                  </.button>
+                </div>
+              </.form>
+            </.card_content>
+          </.card>
         </div>
-
-        <%!-- Email Settings Card --%>
-        <.card>
-          <.card_header>
-            <.card_title>Email Address</.card_title>
-            <.card_description>Update your email address</.card_description>
-          </.card_header>
-          <.card_content>
-            <.form
-              for={@email_form}
-              id="email_form"
-              phx-submit="update_email"
-              phx-change="validate_email"
-            >
-              <.input
-                field={@email_form[:email]}
-                type="email"
-                label="Email"
-                autocomplete="username"
-                spellcheck="false"
-                required
-              />
-              <div class="mt-4">
-                <.button phx-disable-with="Changing...">Change Email</.button>
-              </div>
-            </.form>
-          </.card_content>
-        </.card>
-
-        <%!-- Password Settings Card --%>
-        <.card>
-          <.card_header>
-            <.card_title>Password</.card_title>
-            <.card_description>Update your password</.card_description>
-          </.card_header>
-          <.card_content>
-            <.form
-              for={@password_form}
-              id="password_form"
-              action={~p"/users/update-password"}
-              method="post"
-              phx-change="validate_password"
-              phx-submit="update_password"
-              phx-trigger-action={@trigger_submit}
-            >
-              <input
-                name={@password_form[:email].name}
-                type="hidden"
-                id="hidden_user_email"
-                spellcheck="false"
-                value={@current_email}
-              />
-              <.input
-                field={@password_form[:password]}
-                type="password"
-                label="New password"
-                autocomplete="new-password"
-                spellcheck="false"
-                required
-              />
-              <.input
-                field={@password_form[:password_confirmation]}
-                type="password"
-                label="Confirm new password"
-                autocomplete="new-password"
-                spellcheck="false"
-              />
-              <div class="mt-4">
-                <.button phx-disable-with="Saving...">
-                  Save Password
-                </.button>
-              </div>
-            </.form>
-          </.card_content>
-        </.card>
       </div>
     </Layouts.dashboard>
     """

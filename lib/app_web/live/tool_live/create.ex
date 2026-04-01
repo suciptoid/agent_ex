@@ -64,283 +64,296 @@ defmodule AppWeb.ToolLive.Create do
   def render(assigns) do
     ~H"""
     <Layouts.dashboard flash={@flash} current_scope={@current_scope}>
-      <div class="mx-auto flex w-full max-w-6xl flex-col gap-6 xl:flex-row">
-        <section class="flex-1 space-y-6">
-          <div class="space-y-3 border-b border-border pb-6">
-            <div class="flex items-center justify-between gap-4">
-              <span class="inline-flex rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.2em] text-primary">
-                HTTP Tool Builder
-              </span>
-
-              <.link
-                navigate={~p"/tools/list"}
-                class="text-sm font-medium text-primary hover:underline"
-              >
-                Back to tool list
-              </.link>
-            </div>
-
-            <h1 class="text-3xl font-bold tracking-tight text-foreground">{@page_title}</h1>
-
-            <p class="max-w-3xl text-sm text-muted-foreground">
-              Use a URL template when the path itself needs runtime data, like <code phx-no-curly-interpolation>https://r.jina.ai/{dynamic_path}?param_a=value</code>.
-              Every <code phx-no-curly-interpolation>{placeholder}</code>
-              must match a parameter name below.
-            </p>
-          </div>
-
-          <.form for={@form} id="tool-form" phx-change="validate" phx-submit="save" class="space-y-8">
-            <div class="grid gap-4 lg:grid-cols-2">
-              <.input
-                field={@form[:name]}
-                type="text"
-                label="Tool name"
-                placeholder="brave_reader"
-              />
-
-              <.select
-                field={@form[:http_method]}
-                label="HTTP method"
-                options={Enum.map(Tool.http_methods(), &{String.upcase(&1), &1})}
-              />
-            </div>
-
-            <.input
-              field={@form[:description]}
-              type="text"
-              label="Description"
-              placeholder="Read a document through Jina's mirror."
-            />
-
-            <.input
-              field={@form[:endpoint]}
-              type="text"
-              label="URL template"
-              placeholder="https://r.jina.ai/{dynamic_path}?param_a=value"
-            />
-
-            <section class="space-y-4 rounded-3xl border border-border bg-card/70 p-5 shadow-sm">
+      <div class="flex h-full min-h-0 flex-col p-4 pt-20 sm:px-5 sm:pb-5 sm:pt-20 lg:p-6">
+        <div class="mx-auto flex w-full max-w-6xl flex-col gap-6 xl:flex-row">
+          <section class="flex-1 space-y-6">
+            <div class="space-y-3 border-b border-border pb-6">
               <div class="flex items-center justify-between gap-4">
-                <div>
-                  <h2 class="text-lg font-semibold text-foreground">Input parameters</h2>
-                  <p class="text-sm text-muted-foreground">
-                    Parameters can feed query/body values and placeholders inside the URL template.
-                  </p>
-                </div>
+                <span class="inline-flex rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.2em] text-primary">
+                  HTTP Tool Builder
+                </span>
 
-                <.button id="add-param-button" type="button" variant="outline" phx-click="add-param">
-                  Add parameter
-                </.button>
+                <.link
+                  navigate={~p"/tools/list"}
+                  class="text-sm font-medium text-primary hover:underline"
+                >
+                  Back to tool list
+                </.link>
               </div>
 
-              <%= for {row, index} <- Enum.with_index(param_rows(@form)) do %>
-                <div
-                  id={"param-row-#{index}"}
-                  class="grid gap-3 rounded-2xl border border-border/70 bg-background p-4 md:grid-cols-[minmax(0,1.2fr)_160px_160px_minmax(0,1fr)_auto]"
-                >
-                  <div class="space-y-2">
-                    <label
-                      class="text-sm font-medium text-foreground"
-                      for={"tool-param-#{index}-name"}
-                    >
-                      Name
-                    </label>
-                    <input
-                      id={"tool-param-#{index}-name"}
-                      name={"tool[param_rows][#{index}][name]"}
-                      value={row["name"]}
-                      type="text"
-                      class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      placeholder="dynamic_path"
-                    />
-                  </div>
+              <h1 class="text-3xl font-bold tracking-tight text-foreground">{@page_title}</h1>
 
-                  <div class="space-y-2">
-                    <label
-                      class="text-sm font-medium text-foreground"
-                      for={"tool-param-#{index}-type"}
-                    >
-                      Type
-                    </label>
-                    <select
-                      id={"tool-param-#{index}-type"}
-                      name={"tool[param_rows][#{index}][type]"}
-                      class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      <option
-                        :for={type <- Tool.param_types()}
-                        value={type}
-                        selected={row["type"] == type}
-                      >
-                        {type}
-                      </option>
-                    </select>
-                  </div>
-
-                  <div class="space-y-2">
-                    <label
-                      class="text-sm font-medium text-foreground"
-                      for={"tool-param-#{index}-source"}
-                    >
-                      Filled by
-                    </label>
-                    <select
-                      id={"tool-param-#{index}-source"}
-                      name={"tool[param_rows][#{index}][source]"}
-                      class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      <option
-                        :for={source <- Tool.tool_sources()}
-                        value={source}
-                        selected={row["source"] == source}
-                      >
-                        {source_label(source)}
-                      </option>
-                    </select>
-                  </div>
-
-                  <div class="space-y-2">
-                    <label
-                      class="text-sm font-medium text-foreground"
-                      for={"tool-param-#{index}-value"}
-                    >
-                      Fixed value
-                    </label>
-                    <input
-                      id={"tool-param-#{index}-value"}
-                      name={"tool[param_rows][#{index}][value]"}
-                      value={row["value"]}
-                      type="text"
-                      class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      placeholder="https://example.com/doc"
-                    />
-                  </div>
-
-                  <div class="flex items-end justify-end">
-                    <.button
-                      id={"remove-param-#{index}"}
-                      type="button"
-                      variant="outline"
-                      phx-click="remove-param"
-                      phx-value-index={index}
-                    >
-                      Remove
-                    </.button>
-                  </div>
-                </div>
-              <% end %>
-
-              <%= for {message, _opts} <- Keyword.get_values(@form.errors, :param_rows) do %>
-                <p class="text-sm text-destructive">{message}</p>
-              <% end %>
-            </section>
-
-            <section class="space-y-4 rounded-3xl border border-border bg-card/70 p-5 shadow-sm">
-              <div class="flex items-center justify-between gap-4">
-                <div>
-                  <h2 class="text-lg font-semibold text-foreground">Headers</h2>
-                  <p class="text-sm text-muted-foreground">
-                    Store static request headers securely, such as `Authorization`.
-                  </p>
-                </div>
-
-                <.button id="add-header-button" type="button" variant="outline" phx-click="add-header">
-                  Add header
-                </.button>
-              </div>
-
-              <%= for {row, index} <- Enum.with_index(header_rows(@form)) do %>
-                <div
-                  id={"header-row-#{index}"}
-                  class="grid gap-3 rounded-2xl border border-border/70 bg-background p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
-                >
-                  <div class="space-y-2">
-                    <label
-                      class="text-sm font-medium text-foreground"
-                      for={"tool-header-#{index}-key"}
-                    >
-                      Header name
-                    </label>
-                    <input
-                      id={"tool-header-#{index}-key"}
-                      name={"tool[header_rows][#{index}][key]"}
-                      value={row["key"]}
-                      type="text"
-                      class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      placeholder="Authorization"
-                    />
-                  </div>
-
-                  <div class="space-y-2">
-                    <label
-                      class="text-sm font-medium text-foreground"
-                      for={"tool-header-#{index}-value"}
-                    >
-                      Header value
-                    </label>
-                    <input
-                      id={"tool-header-#{index}-value"}
-                      name={"tool[header_rows][#{index}][value]"}
-                      value={row["value"]}
-                      type="password"
-                      class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      placeholder="Bearer ..."
-                    />
-                  </div>
-
-                  <div class="flex items-end justify-end">
-                    <.button
-                      id={"remove-header-#{index}"}
-                      type="button"
-                      variant="outline"
-                      phx-click="remove-header"
-                      phx-value-index={index}
-                    >
-                      Remove
-                    </.button>
-                  </div>
-                </div>
-              <% end %>
-
-              <%= for {message, _opts} <- Keyword.get_values(@form.errors, :header_rows) do %>
-                <p class="text-sm text-destructive">{message}</p>
-              <% end %>
-            </section>
-
-            <div class="flex justify-end gap-3">
-              <.link navigate={~p"/tools/list"}>
-                <.button type="button" variant="outline">Cancel</.button>
-              </.link>
-              <.button id="save-tool-button" type="submit" phx-disable-with="Saving...">
-                {save_label(@live_action)}
-              </.button>
-            </div>
-          </.form>
-        </section>
-
-        <aside class="w-full shrink-0 space-y-4 xl:w-[22rem]">
-          <section class="rounded-3xl border border-border bg-card p-5 shadow-sm">
-            <div class="space-y-2">
-              <h2 class="text-lg font-semibold text-foreground">Template example</h2>
-              <p class="text-sm text-muted-foreground">
-                Dynamic path segments should be modeled with placeholders in the URL itself.
+              <p class="max-w-3xl text-sm text-muted-foreground">
+                Use a URL template when the path itself needs runtime data, like <code phx-no-curly-interpolation>https://r.jina.ai/{dynamic_path}?param_a=value</code>.
+                Every <code phx-no-curly-interpolation>{placeholder}</code>
+                must match a parameter name below.
               </p>
             </div>
 
-            <div class="mt-4 rounded-2xl border border-border bg-background p-4 text-xs text-muted-foreground">
-              <code phx-no-curly-interpolation class="block">
-                https://r.jina.ai/{dynamic_path}?param_a=value
-              </code>
+            <.form
+              for={@form}
+              id="tool-form"
+              phx-change="validate"
+              phx-submit="save"
+              class="space-y-8"
+            >
+              <div class="grid gap-4 lg:grid-cols-2">
+                <.input
+                  field={@form[:name]}
+                  type="text"
+                  label="Tool name"
+                  placeholder="brave_reader"
+                />
 
-              <ul class="mt-3 space-y-2">
-                <li><code>dynamic_path</code> → source: LLM at runtime</li>
-                <li>
-                  <code>param_a</code> → source: Fixed during creation, value: <code>value</code>
-                </li>
-              </ul>
-            </div>
+                <.select
+                  field={@form[:http_method]}
+                  label="HTTP method"
+                  options={Enum.map(Tool.http_methods(), &{String.upcase(&1), &1})}
+                />
+              </div>
+
+              <.input
+                field={@form[:description]}
+                type="text"
+                label="Description"
+                placeholder="Read a document through Jina's mirror."
+              />
+
+              <.input
+                field={@form[:endpoint]}
+                type="text"
+                label="URL template"
+                placeholder="https://r.jina.ai/{dynamic_path}?param_a=value"
+              />
+
+              <section class="space-y-4 rounded-3xl border border-border bg-card/70 p-5 shadow-sm">
+                <div class="flex items-center justify-between gap-4">
+                  <div>
+                    <h2 class="text-lg font-semibold text-foreground">Input parameters</h2>
+                    <p class="text-sm text-muted-foreground">
+                      Parameters can feed query/body values and placeholders inside the URL template.
+                    </p>
+                  </div>
+
+                  <.button id="add-param-button" type="button" variant="outline" phx-click="add-param">
+                    Add parameter
+                  </.button>
+                </div>
+
+                <%= for {row, index} <- Enum.with_index(param_rows(@form)) do %>
+                  <div
+                    id={"param-row-#{index}"}
+                    class="grid gap-3 rounded-2xl border border-border/70 bg-background p-4 md:grid-cols-[minmax(0,1.2fr)_160px_160px_minmax(0,1fr)_auto]"
+                  >
+                    <div class="space-y-2">
+                      <label
+                        class="text-sm font-medium text-foreground"
+                        for={"tool-param-#{index}-name"}
+                      >
+                        Name
+                      </label>
+                      <input
+                        id={"tool-param-#{index}-name"}
+                        name={"tool[param_rows][#{index}][name]"}
+                        value={row["name"]}
+                        type="text"
+                        class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        placeholder="dynamic_path"
+                      />
+                    </div>
+
+                    <div class="space-y-2">
+                      <label
+                        class="text-sm font-medium text-foreground"
+                        for={"tool-param-#{index}-type"}
+                      >
+                        Type
+                      </label>
+                      <select
+                        id={"tool-param-#{index}-type"}
+                        name={"tool[param_rows][#{index}][type]"}
+                        class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <option
+                          :for={type <- Tool.param_types()}
+                          value={type}
+                          selected={row["type"] == type}
+                        >
+                          {type}
+                        </option>
+                      </select>
+                    </div>
+
+                    <div class="space-y-2">
+                      <label
+                        class="text-sm font-medium text-foreground"
+                        for={"tool-param-#{index}-source"}
+                      >
+                        Filled by
+                      </label>
+                      <select
+                        id={"tool-param-#{index}-source"}
+                        name={"tool[param_rows][#{index}][source]"}
+                        class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <option
+                          :for={source <- Tool.tool_sources()}
+                          value={source}
+                          selected={row["source"] == source}
+                        >
+                          {source_label(source)}
+                        </option>
+                      </select>
+                    </div>
+
+                    <div class="space-y-2">
+                      <label
+                        class="text-sm font-medium text-foreground"
+                        for={"tool-param-#{index}-value"}
+                      >
+                        Fixed value
+                      </label>
+                      <input
+                        id={"tool-param-#{index}-value"}
+                        name={"tool[param_rows][#{index}][value]"}
+                        value={row["value"]}
+                        type="text"
+                        class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        placeholder="https://example.com/doc"
+                      />
+                    </div>
+
+                    <div class="flex items-end justify-end">
+                      <.button
+                        id={"remove-param-#{index}"}
+                        type="button"
+                        variant="outline"
+                        phx-click="remove-param"
+                        phx-value-index={index}
+                      >
+                        Remove
+                      </.button>
+                    </div>
+                  </div>
+                <% end %>
+
+                <%= for {message, _opts} <- Keyword.get_values(@form.errors, :param_rows) do %>
+                  <p class="text-sm text-destructive">{message}</p>
+                <% end %>
+              </section>
+
+              <section class="space-y-4 rounded-3xl border border-border bg-card/70 p-5 shadow-sm">
+                <div class="flex items-center justify-between gap-4">
+                  <div>
+                    <h2 class="text-lg font-semibold text-foreground">Headers</h2>
+                    <p class="text-sm text-muted-foreground">
+                      Store static request headers securely, such as `Authorization`.
+                    </p>
+                  </div>
+
+                  <.button
+                    id="add-header-button"
+                    type="button"
+                    variant="outline"
+                    phx-click="add-header"
+                  >
+                    Add header
+                  </.button>
+                </div>
+
+                <%= for {row, index} <- Enum.with_index(header_rows(@form)) do %>
+                  <div
+                    id={"header-row-#{index}"}
+                    class="grid gap-3 rounded-2xl border border-border/70 bg-background p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
+                  >
+                    <div class="space-y-2">
+                      <label
+                        class="text-sm font-medium text-foreground"
+                        for={"tool-header-#{index}-key"}
+                      >
+                        Header name
+                      </label>
+                      <input
+                        id={"tool-header-#{index}-key"}
+                        name={"tool[header_rows][#{index}][key]"}
+                        value={row["key"]}
+                        type="text"
+                        class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        placeholder="Authorization"
+                      />
+                    </div>
+
+                    <div class="space-y-2">
+                      <label
+                        class="text-sm font-medium text-foreground"
+                        for={"tool-header-#{index}-value"}
+                      >
+                        Header value
+                      </label>
+                      <input
+                        id={"tool-header-#{index}-value"}
+                        name={"tool[header_rows][#{index}][value]"}
+                        value={row["value"]}
+                        type="password"
+                        class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        placeholder="Bearer ..."
+                      />
+                    </div>
+
+                    <div class="flex items-end justify-end">
+                      <.button
+                        id={"remove-header-#{index}"}
+                        type="button"
+                        variant="outline"
+                        phx-click="remove-header"
+                        phx-value-index={index}
+                      >
+                        Remove
+                      </.button>
+                    </div>
+                  </div>
+                <% end %>
+
+                <%= for {message, _opts} <- Keyword.get_values(@form.errors, :header_rows) do %>
+                  <p class="text-sm text-destructive">{message}</p>
+                <% end %>
+              </section>
+
+              <div class="flex justify-end gap-3">
+                <.link navigate={~p"/tools/list"}>
+                  <.button type="button" variant="outline">Cancel</.button>
+                </.link>
+                <.button id="save-tool-button" type="submit" phx-disable-with="Saving...">
+                  {save_label(@live_action)}
+                </.button>
+              </div>
+            </.form>
           </section>
-        </aside>
+
+          <aside class="w-full shrink-0 space-y-4 xl:w-[22rem]">
+            <section class="rounded-3xl border border-border bg-card p-5 shadow-sm">
+              <div class="space-y-2">
+                <h2 class="text-lg font-semibold text-foreground">Template example</h2>
+                <p class="text-sm text-muted-foreground">
+                  Dynamic path segments should be modeled with placeholders in the URL itself.
+                </p>
+              </div>
+
+              <div class="mt-4 rounded-2xl border border-border bg-background p-4 text-xs text-muted-foreground">
+                <code phx-no-curly-interpolation class="block">
+                  https://r.jina.ai/{dynamic_path}?param_a=value
+                </code>
+
+                <ul class="mt-3 space-y-2">
+                  <li><code>dynamic_path</code> → source: LLM at runtime</li>
+                  <li>
+                    <code>param_a</code> → source: Fixed during creation, value: <code>value</code>
+                  </li>
+                </ul>
+              </div>
+            </section>
+          </aside>
+        </div>
       </div>
     </Layouts.dashboard>
     """

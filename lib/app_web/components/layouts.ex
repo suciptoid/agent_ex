@@ -336,7 +336,7 @@ defmodule AppWeb.Layouts do
 
       <%!-- Main Content --%>
       <main class="flex h-full w-full min-w-0 flex-1 flex-col overflow-hidden">
-        <div class="flex h-full flex-1 flex-col overflow-y-auto p-4 pt-20 sm:px-5 sm:pb-5 sm:pt-20 lg:p-6">
+        <div class="flex h-full flex-1 flex-col overflow-y-auto">
           {render_slot(@inner_block)}
         </div>
       </main>

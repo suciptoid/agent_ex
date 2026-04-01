@@ -174,6 +174,20 @@ defmodule App.Chat do
     Phoenix.PubSub.unsubscribe(App.PubSub, chat_room_topic(chat_room_id))
   end
 
+  def broadcast_chat_room(%ChatRoom{id: chat_room_id}, message),
+    do: broadcast_chat_room(chat_room_id, message)
+
+  def broadcast_chat_room(chat_room_id, message) do
+    Phoenix.PubSub.broadcast(App.PubSub, chat_room_topic(chat_room_id), message)
+  end
+
+  def broadcast_chat_room_from(%ChatRoom{id: chat_room_id}, from_pid, message),
+    do: broadcast_chat_room_from(chat_room_id, from_pid, message)
+
+  def broadcast_chat_room_from(chat_room_id, from_pid, message) do
+    Phoenix.PubSub.broadcast_from(App.PubSub, from_pid, chat_room_topic(chat_room_id), message)
+  end
+
   def chat_room_topic(chat_room_id), do: "chat_room:" <> chat_room_id
 
   @doc """

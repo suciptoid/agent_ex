@@ -53,7 +53,13 @@ defmodule AppWeb.ChatLive.Show do
       chat_room = socket.assigns.chat_room
 
       case Chat.create_message(chat_room, %{role: "user", content: content}) do
-        {:ok, _user_message} ->
+        {:ok, user_message} ->
+          Chat.broadcast_chat_room_from(
+            chat_room.id,
+            self(),
+            {:user_message_created, user_message}
+          )
+
           messages = Chat.list_messages(chat_room)
           active_agent = active_agent_for_room(chat_room)
 
@@ -67,6 +73,12 @@ defmodule AppWeb.ChatLive.Show do
             {:ok, placeholder_message} ->
               case Chat.start_stream(chat_room, messages, placeholder_message) do
                 {:ok, _pid} ->
+                  Chat.broadcast_chat_room_from(
+                    chat_room.id,
+                    self(),
+                    {:agent_message_created, placeholder_message}
+                  )
+
                   {:noreply,
                    socket
                    |> begin_stream(placeholder_message)
@@ -128,6 +140,12 @@ defmodule AppWeb.ChatLive.Show do
           {:ok, placeholder_message} ->
             case Chat.start_stream(chat_room, prior_messages, placeholder_message) do
               {:ok, _pid} ->
+                Chat.broadcast_chat_room_from(
+                  chat_room.id,
+                  self(),
+                  {:stream_updated, placeholder_message}
+                )
+
                 {:noreply, socket |> begin_stream(placeholder_message)}
 
               {:error, reason} ->
@@ -176,7 +194,8 @@ defmodule AppWeb.ChatLive.Show do
      |> maybe_stream_main_placeholder()}
   end
 
-  def handle_info({:stream_chunk, _message_id, _token}, socket), do: {:noreply, socket}
+  def handle_info({:stream_chunk, message_id, token}, socket),
+    do: {:noreply, stream_agent_message_chunk(socket, message_id, token)}
 
   def handle_info(
         {:stream_thinking_chunk, message_id, token},
@@ -191,7 +210,8 @@ defmodule AppWeb.ChatLive.Show do
      |> maybe_stream_main_placeholder()}
   end
 
-  def handle_info({:stream_thinking_chunk, _message_id, _token}, socket), do: {:noreply, socket}
+  def handle_info({:stream_thinking_chunk, message_id, token}, socket),
+    do: {:noreply, stream_agent_message_thinking_chunk(socket, message_id, token)}
 
   def handle_info(
         {:stream_tool_started, message_id, tool_result},
@@ -200,8 +220,9 @@ defmodule AppWeb.ChatLive.Show do
     {:noreply, put_main_stream_tool_response(socket, tool_result)}
   end
 
-  def handle_info({:stream_tool_started, _message_id, _tool_result}, socket),
-    do: {:noreply, socket}
+  def handle_info({:stream_tool_started, message_id, tool_result}, socket) do
+    {:noreply, put_agent_stream_tool_response(socket, message_id, tool_result)}
+  end
 
   def handle_info(
         {:stream_tool_result, message_id, tool_result},
@@ -210,14 +231,26 @@ defmodule AppWeb.ChatLive.Show do
     {:noreply, put_main_stream_tool_response(socket, tool_result)}
   end
 
-  def handle_info({:stream_tool_result, _message_id, _tool_result}, socket),
-    do: {:noreply, socket}
+  def handle_info({:stream_tool_result, message_id, tool_result}, socket) do
+    {:noreply, put_agent_stream_tool_response(socket, message_id, tool_result)}
+  end
 
   def handle_info({:agent_message_created, message}, socket) do
     if same_chat_room_message?(socket, message) do
       {:noreply,
        socket
        |> maybe_track_agent_stream(message)
+       |> assign(:latest_message_id, message.id)
+       |> stream_insert_message(message)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info({:user_message_created, message}, socket) do
+    if same_chat_room_message?(socket, message) do
+      {:noreply,
+       socket
        |> assign(:latest_message_id, message.id)
        |> stream_insert_message(message)}
     else
@@ -261,9 +294,10 @@ defmodule AppWeb.ChatLive.Show do
     if same_chat_room_message?(socket, message) do
       socket =
         socket
+        |> clear_agent_stream(message.id)
+        |> assign(:latest_message_id, message.id)
         |> stream_insert_message(message)
-        |> sync_main_stream_from_message(message)
-        |> maybe_track_agent_stream(message)
+        |> sync_stream_state_from_update(message)
 
       {:noreply, socket}
     else
@@ -317,14 +351,7 @@ defmodule AppWeb.ChatLive.Show do
   end
 
   def tool_response_label(tool_response) do
-    name = Map.get(tool_response, "name") || "tool"
-    arguments = tool_response |> Map.get("arguments", %{}) |> format_tool_arguments()
-
-    if arguments == "" do
-      name
-    else
-      "#{name}(#{arguments})"
-    end
+    Map.get(tool_response, "name") || "tool"
   end
 
   def tool_response_error?(tool_response), do: Map.get(tool_response, "status") == "error"
@@ -630,24 +657,6 @@ defmodule AppWeb.ChatLive.Show do
 
   defp format_currency(cost), do: "$" <> :erlang.float_to_binary(cost, decimals: 6)
 
-  defp format_tool_arguments(nil), do: ""
-  defp format_tool_arguments(arguments) when arguments == %{}, do: ""
-
-  defp format_tool_arguments(arguments) do
-    arguments
-    |> Enum.sort_by(fn {key, _value} -> to_string(key) end)
-    |> Enum.map_join(", ", fn {key, value} -> "#{key}: #{tool_value_preview(value)}" end)
-    |> truncate_text(80)
-  end
-
-  defp tool_value_preview(value) when is_binary(value), do: truncate_text(value, 36)
-  defp tool_value_preview(value) when is_number(value), do: to_string(value)
-  defp tool_value_preview(value) when is_boolean(value), do: to_string(value)
-  defp tool_value_preview(value), do: value |> Jason.encode!() |> truncate_text(36)
-
-  defp truncate_text(text, max_length) when byte_size(text) <= max_length, do: text
-  defp truncate_text(text, max_length), do: String.slice(text, 0, max_length) <> "…"
-
   defp build_message_metadata(existing_metadata, thinking, tool_responses) do
     existing_metadata
     |> normalize_metadata_map()
@@ -737,6 +746,24 @@ defmodule AppWeb.ChatLive.Show do
   end
 
   defp sync_main_stream_from_message(socket, _message), do: socket
+
+  defp sync_stream_state_from_update(socket, %{status: status} = message)
+       when status in [:completed, :error] do
+    socket =
+      if socket.assigns.streaming_message_id == message.id do
+        reset_main_stream(socket)
+      else
+        socket
+      end
+
+    maybe_track_agent_stream(socket, message)
+  end
+
+  defp sync_stream_state_from_update(socket, message) do
+    socket
+    |> sync_main_stream_from_message(message)
+    |> maybe_track_agent_stream(message)
+  end
 
   defp maybe_update_streaming_message(message_id, content, status, metadata) do
     case Chat.get_message_by_id(message_id) do

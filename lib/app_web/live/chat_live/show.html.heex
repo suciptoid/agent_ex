@@ -155,51 +155,51 @@
                 <% end %>
 
                 <%= for {tool_response, index} <- Enum.with_index(responses) do %>
-                  <div
+                  <.accordion
+                    variant="unstyled"
                     id={"message-tool-response-#{message.id}-#{index}"}
                     class="w-full max-w-2xl"
-                    data-default-expanded="false"
-                    data-label-collapsed="Show response"
-                    data-label-expanded="Hide response"
-                    phx-hook=".CollapsibleSection"
                   >
-                    <button
-                      data-toggle-btn
-                      type="button"
-                      class={[
-                        "flex max-w-full items-center gap-1.5 text-[11px] font-medium",
-                        if(tool_response_error?(tool_response),
-                          do:
-                            "text-rose-600 hover:text-rose-700 dark:text-rose-300 dark:hover:text-rose-200",
-                          else:
-                            "text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
-                        )
-                      ]}
+                    <.accordion_item
+                      variant="unstyled"
+                      class={
+                        "overflow-hidden rounded-lg border transition-colors " <>
+                          if(tool_response_error?(tool_response),
+                            do: "border-rose-500/20 bg-rose-500/5",
+                            else: "border-amber-500/20 bg-amber-500/5"
+                          )
+                      }
                     >
-                      <.icon
-                        name="hero-chevron-right"
-                        class="size-3 shrink-0 transition-transform duration-200"
-                      />
-                      <.icon
-                        :if={tool_response_running?(tool_response)}
-                        name="hero-arrow-path"
-                        class="size-3 shrink-0 animate-spin"
-                      />
-                      <span data-label class="shrink-0">Show response</span>
-                      <span class="truncate">{tool_response_label(tool_response)}</span>
-                    </button>
-                    <div
-                      data-body
-                      class={[
-                        "mt-1 hidden rounded-lg border px-3 py-2 text-xs leading-5 text-foreground",
-                        if(tool_response_error?(tool_response),
-                          do: "border-rose-500/20 bg-rose-500/5",
-                          else: "border-amber-500/20 bg-amber-500/5"
-                        )
-                      ]}
-                      phx-no-format
-                    ><span class="whitespace-pre-line break-words" phx-no-format>{tool_response_content(tool_response)}</span></div>
-                  </div>
+                      <.accordion_trigger
+                        variant="unstyled"
+                        class={
+                          "flex max-w-full items-center gap-1.5 px-3 py-2 text-[11px] font-medium [&>span]:flex [&>span]:min-w-0 [&>span]:items-center [&>span]:gap-1.5 " <>
+                            if(tool_response_error?(tool_response),
+                              do:
+                                "text-rose-600 hover:text-rose-700 dark:text-rose-300 dark:hover:text-rose-200",
+                              else:
+                                "text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+                            )
+                        }
+                      >
+                        <.icon
+                          :if={tool_response_running?(tool_response)}
+                          name="hero-arrow-path"
+                          class="size-3 shrink-0 animate-spin"
+                        />
+                        <span class="shrink-0">Response</span>
+                        <span class="truncate">{tool_response_label(tool_response)}</span>
+                      </.accordion_trigger>
+                      <.accordion_content
+                        variant="unstyled"
+                        class="border-t border-current/10 px-3 py-2 text-xs leading-5 text-foreground"
+                      >
+                        <span class="whitespace-pre-line break-words" phx-no-format>
+                          {tool_response_content(tool_response)}
+                        </span>
+                      </.accordion_content>
+                    </.accordion_item>
+                  </.accordion>
                 <% end %>
 
                 <%= if message_has_content?(message) do %>

@@ -105,6 +105,7 @@ defmodule AppWeb.ChatLiveTest do
       assert assistant_message.content == "Lead Agent: Plan next week"
       assert has_element?(live_view, "#message-#{user_message.id}")
       assert has_element?(live_view, "#message-#{assistant_message.id}")
+      assert has_element?(live_view, "#chat-message-submit[aria-label='Send message']")
     end
 
     test "regenerates the latest assistant message in place", %{
@@ -195,15 +196,139 @@ defmodule AppWeb.ChatLiveTest do
 
       assert has_element?(
                live_view,
-               "#message-thinking-#{assistant_message.id}[data-default-expanded='false']"
+               "#message-tool-response-#{assistant_message.id}-0 details summary",
+               "web_fetch"
              )
 
       assert has_element?(
                live_view,
-               "#message-tool-response-#{assistant_message.id}-0[data-default-expanded='false']"
+               "#message-thinking-#{assistant_message.id}[data-default-expanded='false']"
+             )
+
+      refute has_element?(
+               live_view,
+               "#message-tool-response-#{assistant_message.id}-0",
+               "https://example.com/data.txt"
              )
 
       assert has_element?(live_view, "#message-cost-#{assistant_message.id}")
+    end
+
+    test "broadcasts assistant streaming updates to another open tab before completion", %{
+      conn: conn,
+      user: user,
+      scope: scope
+    } do
+      previous_runner = Application.get_env(:app, :agent_runner)
+      previous_stub_config = Application.get_env(:app, App.TestSupport.SlowStreamingRunnerStub)
+
+      tool_response = %{
+        "id" => "tool_sync",
+        "name" => "web_fetch",
+        "arguments" => %{"url" => "https://example.com/live.json"},
+        "content" => "live payload",
+        "status" => "ok"
+      }
+
+      Application.put_env(:app, :agent_runner, App.TestSupport.SlowStreamingRunnerStub)
+
+      Application.put_env(:app, App.TestSupport.SlowStreamingRunnerStub,
+        notify_pid: self(),
+        thinking: "Working on it",
+        tool_response: tool_response
+      )
+
+      on_exit(fn ->
+        if previous_runner do
+          Application.put_env(:app, :agent_runner, previous_runner)
+        else
+          Application.delete_env(:app, :agent_runner)
+        end
+
+        if previous_stub_config do
+          Application.put_env(:app, App.TestSupport.SlowStreamingRunnerStub, previous_stub_config)
+        else
+          Application.delete_env(:app, App.TestSupport.SlowStreamingRunnerStub)
+        end
+      end)
+
+      provider = provider_fixture(user)
+      agent = agent_fixture(user, %{provider: provider, name: "Sync Agent"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Shared Room",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      {:ok, first_tab, _html} = live(conn, ~p"/chat/#{room.id}")
+      {:ok, second_tab, _html} = live(conn, ~p"/chat/#{room.id}")
+
+      first_tab
+      |> form("#chat-message-form", %{
+        "message" => %{"content" => "Sync this now"}
+      })
+      |> render_submit()
+
+      assert_receive {:slow_runner_started, runner_pid}
+
+      user_message =
+        wait_for_messages(first_tab, scope, room.id, fn messages ->
+          Enum.find(messages, &(&1.role == "user" && &1.content == "Sync this now"))
+        end)
+
+      assistant_message =
+        wait_for_messages(first_tab, scope, room.id, fn messages ->
+          Enum.find(messages, &(&1.role == "assistant" && &1.status == :pending))
+        end)
+
+      assert_eventually(second_tab, fn ->
+        has_element?(second_tab, "#message-#{user_message.id}", "Sync this now")
+      end)
+
+      assert_eventually(second_tab, fn ->
+        has_element?(second_tab, "#message-#{assistant_message.id}")
+      end)
+
+      assert_eventually(second_tab, fn ->
+        has_element?(second_tab, "#message-#{assistant_message.id}", "S")
+      end)
+
+      assert_eventually(second_tab, fn ->
+        has_element?(
+          second_tab,
+          "#message-tool-response-#{assistant_message.id}-0 details summary",
+          "web_fetch"
+        )
+      end)
+
+      assert_eventually(second_tab, fn ->
+        has_element?(
+          second_tab,
+          "#message-tool-response-#{assistant_message.id}-0",
+          "live payload"
+        )
+      end)
+
+      refute Chat.get_chat_room!(scope, room.id)
+             |> Chat.list_messages()
+             |> Enum.any?(&(&1.role == "assistant" && &1.status == :completed))
+
+      ref = Process.monitor(runner_pid)
+      send(runner_pid, :continue)
+      assert_receive {:DOWN, ^ref, :process, ^runner_pid, _reason}
+
+      completed_message =
+        wait_for_messages(nil, scope, room.id, fn messages ->
+          Enum.find(messages, &(&1.role == "assistant" && &1.status == :completed))
+        end)
+
+      assert completed_message.content == "Sync Agent: Sync this now"
+
+      assert_eventually(first_tab, fn ->
+        not Chat.stream_running?(assistant_message.id)
+      end)
     end
 
     test "cancels an in-flight streamed response", %{conn: conn, user: user, scope: scope} do
@@ -402,5 +527,17 @@ defmodule AppWeb.ChatLiveTest do
         result -> {:halt, result}
       end
     end) || flunk("expected chat messages to reach the desired state")
+  end
+
+  defp assert_eventually(live_view, callback) do
+    Enum.reduce_while(1..30, nil, fn _, _acc ->
+      _ = :sys.get_state(live_view.pid)
+
+      if callback.() do
+        {:halt, :ok}
+      else
+        {:cont, nil}
+      end
+    end) || flunk("expected live view to reach the desired state")
   end
 end

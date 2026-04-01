@@ -294,7 +294,7 @@ defmodule App.Chat.StreamWorker do
   end
 
   defp broadcast(chat_room_id, message) do
-    Phoenix.PubSub.broadcast(App.PubSub, Chat.chat_room_topic(chat_room_id), message)
+    Chat.broadcast_chat_room(chat_room_id, message)
   end
 
   defp build_message_metadata(existing_metadata, thinking, tool_responses) do

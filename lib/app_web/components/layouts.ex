@@ -329,25 +329,66 @@ defmodule AppWeb.Layouts do
       <script :type={Phoenix.LiveView.ColocatedHook} name=".SidebarState">
         export default {
           mounted() {
-            const root = this.el;
-            const toggles = root.querySelectorAll("[data-sidebar-toggle]");
-            const setState = (collapsed) => {
-              root.dataset.sidebarCollapsed = String(collapsed);
-              toggles.forEach((toggle) => {
+            this.desktopMedia = window.matchMedia("(min-width: 1024px)");
+            this.desktopStorageKey = "sidebar_collapsed_desktop";
+
+            this.applyState = (collapsed, { persistDesktop = true } = {}) => {
+              this.collapsed = collapsed;
+              this.el.dataset.sidebarCollapsed = String(collapsed);
+
+              this.toggles.forEach((toggle) => {
                 toggle.setAttribute("aria-expanded", String(!collapsed));
               });
-              localStorage.setItem("sidebar_collapsed", String(collapsed));
+
+              if (persistDesktop && this.desktopMedia.matches) {
+                localStorage.setItem(this.desktopStorageKey, String(collapsed));
+              }
             };
 
-            const stored = localStorage.getItem("sidebar_collapsed");
-            setState(stored === "true");
+            this.defaultState = () => {
+              if (this.desktopMedia.matches) {
+                return localStorage.getItem(this.desktopStorageKey) === "true";
+              }
 
-            toggles.forEach((toggle) => {
-              toggle.addEventListener("click", () => {
-                const next = root.dataset.sidebarCollapsed !== "true";
-                setState(next);
+              return true;
+            };
+
+            this.handleToggle = () => {
+              this.applyState(this.el.dataset.sidebarCollapsed !== "true");
+            };
+
+            this.handleViewportChange = () => {
+              this.applyState(this.defaultState(), { persistDesktop: false });
+            };
+
+            this.bindToggles = () => {
+              this.toggles = Array.from(this.el.querySelectorAll("[data-sidebar-toggle]"));
+
+              this.toggles.forEach((toggle) => {
+                toggle.addEventListener("click", this.handleToggle);
               });
-            });
+            };
+
+            this.unbindToggles = () => {
+              (this.toggles || []).forEach((toggle) => {
+                toggle.removeEventListener("click", this.handleToggle);
+              });
+            };
+
+            this.bindToggles();
+            this.desktopMedia.addEventListener("change", this.handleViewportChange);
+            this.applyState(this.defaultState(), { persistDesktop: false });
+          },
+
+          updated() {
+            this.unbindToggles();
+            this.bindToggles();
+            this.applyState(this.collapsed ?? this.defaultState(), { persistDesktop: false });
+          },
+
+          destroyed() {
+            this.unbindToggles();
+            this.desktopMedia.removeEventListener("change", this.handleViewportChange);
           }
         }
       </script>

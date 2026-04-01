@@ -9,10 +9,42 @@ defmodule App.TestSupport.SlowStreamingRunnerStub do
     emit_chunk =
       stream_callback(recipient, opts, :on_result, fn token -> {:stream_chunk, token} end)
 
-    notify_pid = Application.get_env(:app, __MODULE__, []) |> Keyword.get(:notify_pid)
+    emit_thinking =
+      stream_callback(recipient, opts, :on_thinking, fn token ->
+        {:stream_thinking_chunk, token}
+      end)
+
+    emit_tool_start =
+      stream_callback(recipient, opts, :on_tool_start, fn tool_result ->
+        {:stream_tool_started, tool_result}
+      end)
+
+    emit_tool_result =
+      stream_callback(recipient, opts, :on_tool_result, fn tool_result ->
+        {:stream_tool_result, tool_result}
+      end)
+
+    config = Application.get_env(:app, __MODULE__, [])
+    notify_pid = Keyword.get(config, :notify_pid)
+    thinking = Keyword.get(config, :thinking)
+    tool_response = Keyword.get(config, :tool_response)
 
     if is_pid(notify_pid) do
       send(notify_pid, {:slow_runner_started, self()})
+    end
+
+    if is_binary(thinking) and thinking != "" do
+      emit_thinking.(thinking)
+    end
+
+    if is_map(tool_response) do
+      running_tool =
+        tool_response
+        |> Map.put("content", nil)
+        |> Map.put("status", "running")
+
+      emit_tool_start.(running_tool)
+      emit_tool_result.(tool_response)
     end
 
     case String.graphemes(content) do

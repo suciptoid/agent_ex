@@ -93,6 +93,7 @@ defmodule AppWeb do
       import PUI.Popover
       import PUI.Select
       import PUI.Dialog
+      import PUI.Accordion
       import PUI.Components
       import PUI.Container
 

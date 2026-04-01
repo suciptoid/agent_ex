@@ -71,7 +71,12 @@ defmodule AppWeb.ToolLive.CreateTest do
         "http_method" => "get",
         "param_rows" => %{
           "0" => %{"name" => "dynamic_path", "type" => "string", "source" => "llm", "value" => ""},
-          "1" => %{"name" => "safe_search", "type" => "boolean", "source" => "fixed", "value" => "true"}
+          "1" => %{
+            "name" => "safe_search",
+            "type" => "boolean",
+            "source" => "fixed",
+            "value" => "true"
+          }
         },
         "header_rows" => %{
           "0" => %{"key" => "authorization", "value" => "Bearer brave-key"}

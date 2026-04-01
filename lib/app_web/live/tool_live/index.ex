@@ -25,8 +25,7 @@ defmodule AppWeb.ToolLive.Index do
             <div class="space-y-2">
               <h1 class="text-3xl font-bold tracking-tight text-foreground">Tools</h1>
               <p class="text-sm text-muted-foreground">
-                Manage reusable HTTP tools, including URL templates with runtime placeholders like
-                <code phx-no-curly-interpolation>/{dynamic_path}</code>.
+                Manage reusable HTTP tools, including URL templates with runtime placeholders like <code phx-no-curly-interpolation>/{dynamic_path}</code>.
               </p>
             </div>
 
@@ -59,7 +58,9 @@ defmodule AppWeb.ToolLive.Index do
             </div>
 
             <div class="mt-4 rounded-2xl border border-border bg-background p-4">
-              <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">URL Template</p>
+              <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                URL Template
+              </p>
               <p class="mt-2 break-all text-sm text-foreground">{tool.endpoint}</p>
             </div>
 

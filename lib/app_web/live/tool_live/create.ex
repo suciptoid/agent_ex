@@ -72,7 +72,10 @@ defmodule AppWeb.ToolLive.Create do
                 HTTP Tool Builder
               </span>
 
-              <.link navigate={~p"/tools/list"} class="text-sm font-medium text-primary hover:underline">
+              <.link
+                navigate={~p"/tools/list"}
+                class="text-sm font-medium text-primary hover:underline"
+              >
                 Back to tool list
               </.link>
             </div>
@@ -80,9 +83,9 @@ defmodule AppWeb.ToolLive.Create do
             <h1 class="text-3xl font-bold tracking-tight text-foreground">{@page_title}</h1>
 
             <p class="max-w-3xl text-sm text-muted-foreground">
-              Use a URL template when the path itself needs runtime data, like
-              <code phx-no-curly-interpolation>https://r.jina.ai/{dynamic_path}?param_a=value</code>.
-              Every <code phx-no-curly-interpolation>{placeholder}</code> must match a parameter name below.
+              Use a URL template when the path itself needs runtime data, like <code phx-no-curly-interpolation>https://r.jina.ai/{dynamic_path}?param_a=value</code>.
+              Every <code phx-no-curly-interpolation>{placeholder}</code>
+              must match a parameter name below.
             </p>
           </div>
 
@@ -136,7 +139,10 @@ defmodule AppWeb.ToolLive.Create do
                   class="grid gap-3 rounded-2xl border border-border/70 bg-background p-4 md:grid-cols-[minmax(0,1.2fr)_160px_160px_minmax(0,1fr)_auto]"
                 >
                   <div class="space-y-2">
-                    <label class="text-sm font-medium text-foreground" for={"tool-param-#{index}-name"}>
+                    <label
+                      class="text-sm font-medium text-foreground"
+                      for={"tool-param-#{index}-name"}
+                    >
                       Name
                     </label>
                     <input
@@ -150,7 +156,10 @@ defmodule AppWeb.ToolLive.Create do
                   </div>
 
                   <div class="space-y-2">
-                    <label class="text-sm font-medium text-foreground" for={"tool-param-#{index}-type"}>
+                    <label
+                      class="text-sm font-medium text-foreground"
+                      for={"tool-param-#{index}-type"}
+                    >
                       Type
                     </label>
                     <select
@@ -158,14 +167,21 @@ defmodule AppWeb.ToolLive.Create do
                       name={"tool[param_rows][#{index}][type]"}
                       class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
-                      <option :for={type <- Tool.param_types()} value={type} selected={row["type"] == type}>
+                      <option
+                        :for={type <- Tool.param_types()}
+                        value={type}
+                        selected={row["type"] == type}
+                      >
                         {type}
                       </option>
                     </select>
                   </div>
 
                   <div class="space-y-2">
-                    <label class="text-sm font-medium text-foreground" for={"tool-param-#{index}-source"}>
+                    <label
+                      class="text-sm font-medium text-foreground"
+                      for={"tool-param-#{index}-source"}
+                    >
                       Filled by
                     </label>
                     <select
@@ -173,14 +189,21 @@ defmodule AppWeb.ToolLive.Create do
                       name={"tool[param_rows][#{index}][source]"}
                       class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
-                      <option :for={source <- Tool.tool_sources()} value={source} selected={row["source"] == source}>
+                      <option
+                        :for={source <- Tool.tool_sources()}
+                        value={source}
+                        selected={row["source"] == source}
+                      >
                         {source_label(source)}
                       </option>
                     </select>
                   </div>
 
                   <div class="space-y-2">
-                    <label class="text-sm font-medium text-foreground" for={"tool-param-#{index}-value"}>
+                    <label
+                      class="text-sm font-medium text-foreground"
+                      for={"tool-param-#{index}-value"}
+                    >
                       Fixed value
                     </label>
                     <input
@@ -232,7 +255,10 @@ defmodule AppWeb.ToolLive.Create do
                   class="grid gap-3 rounded-2xl border border-border/70 bg-background p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
                 >
                   <div class="space-y-2">
-                    <label class="text-sm font-medium text-foreground" for={"tool-header-#{index}-key"}>
+                    <label
+                      class="text-sm font-medium text-foreground"
+                      for={"tool-header-#{index}-key"}
+                    >
                       Header name
                     </label>
                     <input
@@ -246,7 +272,10 @@ defmodule AppWeb.ToolLive.Create do
                   </div>
 
                   <div class="space-y-2">
-                    <label class="text-sm font-medium text-foreground" for={"tool-header-#{index}-value"}>
+                    <label
+                      class="text-sm font-medium text-foreground"
+                      for={"tool-header-#{index}-value"}
+                    >
                       Header value
                     </label>
                     <input
@@ -305,7 +334,9 @@ defmodule AppWeb.ToolLive.Create do
 
               <ul class="mt-3 space-y-2">
                 <li><code>dynamic_path</code> → source: LLM at runtime</li>
-                <li><code>param_a</code> → source: Fixed during creation, value: <code>value</code></li>
+                <li>
+                  <code>param_a</code> → source: Fixed during creation, value: <code>value</code>
+                </li>
               </ul>
             </div>
           </section>
@@ -395,8 +426,11 @@ defmodule AppWeb.ToolLive.Create do
   defp ensure_rows([], :header), do: [Tool.blank_header_row()]
   defp ensure_rows(rows, _kind), do: rows
 
-  defp param_rows(form), do: form.params["param_rows"] || form.data.param_rows || [Tool.blank_param_row()]
-  defp header_rows(form), do: form.params["header_rows"] || form.data.header_rows || [Tool.blank_header_row()]
+  defp param_rows(form),
+    do: form.params["param_rows"] || form.data.param_rows || [Tool.blank_param_row()]
+
+  defp header_rows(form),
+    do: form.params["header_rows"] || form.data.header_rows || [Tool.blank_header_row()]
 
   defp source_label("llm"), do: "LLM at runtime"
   defp source_label("fixed"), do: "Fixed during creation"

@@ -50,18 +50,21 @@ defmodule App.Chat.Orchestrator do
   end
 
   @doc """
-  Streams a response from the active agent for the given messages to `lv_pid`.
+  Streams a response from the active agent for the given messages.
 
-  The user message should already be present in `messages`.
-  Sends `{:stream_chunk, token}` to `lv_pid` and returns
-  `{:ok, %{content:, agent_id:, metadata:}}` on success.
+  The third argument may be a pid or a keyword list of callbacks.
   """
-  def stream_message(%ChatRoom{} = chat_room, messages, lv_pid) when is_pid(lv_pid) do
+  def stream_message(%ChatRoom{} = chat_room, messages, recipient_or_callbacks) do
     with {:ok, agent} <- active_agent(chat_room) do
       Logger.debug("[Orchestrator] Streaming agent #{agent.name} (#{agent.id})")
-      run_opts = multi_agent_opts(chat_room, messages, lv_pid)
+      callbacks = normalize_stream_callbacks(recipient_or_callbacks)
 
-      case agent_runner().run_streaming(agent, messages, lv_pid, run_opts) do
+      run_opts =
+        chat_room
+        |> multi_agent_opts(messages, callbacks)
+        |> Keyword.merge(callback_run_opts(callbacks))
+
+      case agent_runner().run_streaming(agent, messages, callbacks[:recipient], run_opts) do
         {:ok, result} ->
           {:ok,
            %{
@@ -88,7 +91,7 @@ defmodule App.Chat.Orchestrator do
   defp multi_agent_opts(
          %ChatRoom{chat_room_agents: chat_room_agents} = chat_room,
          messages,
-         lv_pid
+         callbacks
        ) do
     agents = Enum.map(chat_room_agents, & &1.agent)
 
@@ -120,14 +123,14 @@ defmodule App.Chat.Orchestrator do
       [
         extra_system_prompt: extra_prompt,
         extra_tools: [
-          build_handover_tool(chat_room, agents, lv_pid),
-          build_ask_agent_tool(chat_room, agents, messages, lv_pid)
+          build_handover_tool(chat_room, agents, callbacks),
+          build_ask_agent_tool(chat_room, agents, messages, callbacks)
         ]
       ]
     end
   end
 
-  defp build_handover_tool(chat_room, agents, lv_pid) do
+  defp build_handover_tool(chat_room, agents, callbacks) do
     agent_descriptions =
       agents
       |> Enum.map(fn a ->
@@ -171,7 +174,7 @@ defmodule App.Chat.Orchestrator do
 
             case Chat.set_active_agent(chat_room, target_agent.id) do
               :ok ->
-                if is_pid(lv_pid), do: send(lv_pid, {:active_agent_changed, target_agent.id})
+                notify_active_agent_changed(callbacks, target_agent.id)
 
                 msg =
                   if blank?(reason),
@@ -188,7 +191,7 @@ defmodule App.Chat.Orchestrator do
     )
   end
 
-  defp build_ask_agent_tool(chat_room, agents, current_messages, lv_pid) do
+  defp build_ask_agent_tool(chat_room, agents, current_messages, callbacks) do
     agent_descriptions =
       agents
       |> Enum.map(fn a ->
@@ -241,7 +244,7 @@ defmodule App.Chat.Orchestrator do
 
             case Chat.create_message(chat_room, placeholder_attrs) do
               {:ok, placeholder_message} ->
-                if is_pid(lv_pid), do: send(lv_pid, {:agent_message_created, placeholder_message})
+                notify_agent_message_created(callbacks, placeholder_message)
 
                 {:ok, _pid} =
                   Task.start(fn ->
@@ -251,7 +254,7 @@ defmodule App.Chat.Orchestrator do
                       messages_snapshot,
                       instructions,
                       placeholder_message,
-                      lv_pid
+                      callbacks
                     )
                   end)
 
@@ -271,30 +274,22 @@ defmodule App.Chat.Orchestrator do
          messages_snapshot,
          instructions,
          placeholder_message,
-         lv_pid
+         callbacks
        ) do
     sub_messages = messages_snapshot ++ [%{role: "user", content: instructions}]
 
     stream_opts = [
       on_result: fn token ->
-        if is_pid(lv_pid) do
-          send(lv_pid, {:agent_message_stream_chunk, placeholder_message.id, token})
-        end
+        notify_agent_message_stream_chunk(callbacks, placeholder_message.id, token)
       end,
       on_thinking: fn token ->
-        if is_pid(lv_pid) do
-          send(lv_pid, {:agent_message_thinking_chunk, placeholder_message.id, token})
-        end
+        notify_agent_message_thinking_chunk(callbacks, placeholder_message.id, token)
       end,
       on_tool_start: fn tool_result ->
-        if is_pid(lv_pid) do
-          send(lv_pid, {:agent_message_tool_started, placeholder_message.id, tool_result})
-        end
+        notify_agent_message_tool_started(callbacks, placeholder_message.id, tool_result)
       end,
       on_tool_result: fn tool_result ->
-        if is_pid(lv_pid) do
-          send(lv_pid, {:agent_message_tool_result, placeholder_message.id, tool_result})
-        end
+        notify_agent_message_tool_result(callbacks, placeholder_message.id, tool_result)
       end
     ]
 
@@ -315,7 +310,7 @@ defmodule App.Chat.Orchestrator do
             metadata: metadata,
             agent_id: target_agent.id
           },
-          lv_pid
+          callbacks
         )
 
       {:error, reason} ->
@@ -339,17 +334,17 @@ defmodule App.Chat.Orchestrator do
             metadata: metadata,
             agent_id: target_agent.id
           },
-          lv_pid
+          callbacks
         )
     end
   end
 
-  defp persist_delegated_message(chat_room, placeholder_message, attrs, lv_pid) do
+  defp persist_delegated_message(chat_room, placeholder_message, attrs, callbacks) do
     case Chat.get_message_by_id(placeholder_message.id) do
       nil ->
         case Chat.create_message(chat_room, Map.put_new(attrs, :role, "assistant")) do
           {:ok, message} ->
-            if is_pid(lv_pid), do: send(lv_pid, {:agent_message_created, message})
+            notify_agent_message_created(callbacks, message)
 
           {:error, reason} ->
             Logger.error(
@@ -360,7 +355,7 @@ defmodule App.Chat.Orchestrator do
       existing_message ->
         case Chat.update_message(existing_message, attrs) do
           {:ok, message} ->
-            if is_pid(lv_pid), do: send(lv_pid, {:agent_message_updated, message})
+            notify_agent_message_updated(callbacks, message)
 
           {:error, reason} ->
             Logger.error(
@@ -412,6 +407,126 @@ defmodule App.Chat.Orchestrator do
   defp empty_list_to_nil(value), do: value
 
   defp blank?(value), do: value in [nil, ""]
+
+  defp normalize_stream_callbacks(recipient) when is_pid(recipient) do
+    [
+      recipient: recipient,
+      on_result: nil,
+      on_thinking: nil,
+      on_tool_start: nil,
+      on_tool_result: nil
+    ]
+  end
+
+  defp normalize_stream_callbacks(callbacks) when is_list(callbacks) do
+    Keyword.put_new(callbacks, :recipient, nil)
+  end
+
+  defp normalize_stream_callbacks(_other), do: [recipient: nil]
+
+  defp callback_run_opts(callbacks) do
+    [
+      on_result: callbacks[:on_result],
+      on_thinking: callbacks[:on_thinking],
+      on_tool_start: callbacks[:on_tool_start],
+      on_tool_result: callbacks[:on_tool_result]
+    ]
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+  end
+
+  defp notify_active_agent_changed(callbacks, agent_id) do
+    call_callback(
+      callbacks[:on_active_agent_changed],
+      [agent_id],
+      fn recipient ->
+        send(recipient, {:active_agent_changed, agent_id})
+      end,
+      callbacks[:recipient]
+    )
+  end
+
+  defp notify_agent_message_created(callbacks, message) do
+    call_callback(
+      callbacks[:on_agent_message_created],
+      [message],
+      fn recipient ->
+        send(recipient, {:agent_message_created, message})
+      end,
+      callbacks[:recipient]
+    )
+  end
+
+  defp notify_agent_message_stream_chunk(callbacks, message_id, token) do
+    call_callback(
+      callbacks[:on_agent_message_stream_chunk],
+      [message_id, token],
+      fn recipient ->
+        send(recipient, {:agent_message_stream_chunk, message_id, token})
+      end,
+      callbacks[:recipient]
+    )
+  end
+
+  defp notify_agent_message_thinking_chunk(callbacks, message_id, token) do
+    call_callback(
+      callbacks[:on_agent_message_thinking_chunk],
+      [message_id, token],
+      fn recipient ->
+        send(recipient, {:agent_message_thinking_chunk, message_id, token})
+      end,
+      callbacks[:recipient]
+    )
+  end
+
+  defp notify_agent_message_tool_started(callbacks, message_id, tool_result) do
+    call_callback(
+      callbacks[:on_agent_message_tool_started],
+      [message_id, tool_result],
+      fn recipient ->
+        send(recipient, {:agent_message_tool_started, message_id, tool_result})
+      end,
+      callbacks[:recipient]
+    )
+  end
+
+  defp notify_agent_message_tool_result(callbacks, message_id, tool_result) do
+    call_callback(
+      callbacks[:on_agent_message_tool_result],
+      [message_id, tool_result],
+      fn recipient ->
+        send(recipient, {:agent_message_tool_result, message_id, tool_result})
+      end,
+      callbacks[:recipient]
+    )
+  end
+
+  defp notify_agent_message_updated(callbacks, message) do
+    call_callback(
+      callbacks[:on_agent_message_updated],
+      [message],
+      fn recipient ->
+        send(recipient, {:agent_message_updated, message})
+      end,
+      callbacks[:recipient]
+    )
+  end
+
+  defp call_callback(callback, args, _fallback, _recipient) when is_function(callback) do
+    apply_callback(callback, args)
+  end
+
+  defp call_callback(_callback, _args, fallback, recipient) when is_pid(recipient) do
+    fallback.(recipient)
+  end
+
+  defp call_callback(_callback, _args, _fallback, _recipient), do: :ok
+
+  defp apply_callback(callback, [arg]) when is_function(callback, 1), do: callback.(arg)
+
+  defp apply_callback(callback, [arg1, arg2]) when is_function(callback, 2),
+    do: callback.(arg1, arg2)
+
+  defp apply_callback(_callback, _args), do: :ok
 
   defp agent_runner, do: Application.get_env(:app, :agent_runner, App.Agents.Runner)
 end

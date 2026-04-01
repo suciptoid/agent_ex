@@ -274,6 +274,76 @@ defmodule AppWeb.ChatLiveTest do
       assert has_element?(live_view, "#chat-message-submit[aria-label='Send message']")
     end
 
+    test "continues streaming after leaving the chat room", %{
+      conn: conn,
+      user: user,
+      scope: scope
+    } do
+      previous_runner = Application.get_env(:app, :agent_runner)
+      previous_stub_config = Application.get_env(:app, App.TestSupport.SlowStreamingRunnerStub)
+
+      Application.put_env(:app, :agent_runner, App.TestSupport.SlowStreamingRunnerStub)
+      Application.put_env(:app, App.TestSupport.SlowStreamingRunnerStub, notify_pid: self())
+
+      on_exit(fn ->
+        if previous_runner do
+          Application.put_env(:app, :agent_runner, previous_runner)
+        else
+          Application.delete_env(:app, :agent_runner)
+        end
+
+        if previous_stub_config do
+          Application.put_env(:app, App.TestSupport.SlowStreamingRunnerStub, previous_stub_config)
+        else
+          Application.delete_env(:app, App.TestSupport.SlowStreamingRunnerStub)
+        end
+      end)
+
+      provider = provider_fixture(user)
+      agent = agent_fixture(user, %{provider: provider, name: "Slow Agent"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Background Room",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
+
+      live_view
+      |> form("#chat-message-form", %{
+        "message" => %{"content" => "Finish even if I leave"}
+      })
+      |> render_submit()
+
+      assert_receive {:slow_runner_started, runner_pid}
+
+      assistant_message =
+        wait_for_messages(live_view, scope, room.id, fn messages ->
+          Enum.find(messages, &(&1.role == "assistant" && &1.status == :pending))
+        end)
+
+      assert has_element?(live_view, "#message-#{assistant_message.id}")
+
+      assert {:error, {:live_redirect, %{to: to}}} =
+               live_view
+               |> element("a.inline-flex[href='/chat']")
+               |> render_click()
+
+      assert to == "/chat"
+
+      send(runner_pid, :continue)
+
+      completed_message =
+        wait_for_messages(nil, scope, room.id, fn messages ->
+          Enum.find(messages, &(&1.id == assistant_message.id && &1.status == :completed))
+        end)
+
+      assert completed_message.content == "Slow Agent: Finish even if I leave"
+      assert completed_message.agent_id == agent.id
+    end
+
     test "renders delegated agent streaming updates", %{conn: conn, user: user} do
       provider = provider_fixture(user)
       lead_agent = agent_fixture(user, %{provider: provider, name: "Lead Agent"})
@@ -323,7 +393,7 @@ defmodule AppWeb.ChatLiveTest do
 
   defp wait_for_messages(live_view, scope, room_id, callback) do
     Enum.reduce_while(1..30, nil, fn _, _acc ->
-      _ = :sys.get_state(live_view.pid)
+      if live_view, do: _ = :sys.get_state(live_view.pid)
       reloaded_room = Chat.get_chat_room!(scope, room_id)
       messages = Chat.list_messages(reloaded_room)
 

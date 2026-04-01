@@ -12,6 +12,8 @@ defmodule App.Application do
       App.Repo,
       {DNSCluster, query: Application.get_env(:app, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: App.PubSub},
+      {Registry, keys: :unique, name: App.Chat.StreamRegistry},
+      {DynamicSupervisor, name: App.Chat.StreamSupervisor, strategy: :one_for_one},
       App.Vault,
       # Start a worker by calling: App.Worker.start_link(arg)
       # {App.Worker, []},

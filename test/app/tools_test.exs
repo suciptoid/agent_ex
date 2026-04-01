@@ -55,7 +55,9 @@ defmodule App.ToolsTest do
                  ]
                })
 
-      assert "template placeholders must match parameter names: dynamic_path" in errors_on(changeset).endpoint
+      assert "template placeholders must match parameter names: dynamic_path" in errors_on(
+               changeset
+             ).endpoint
     end
   end
 

@@ -111,7 +111,7 @@
                     <button
                       :if={
                         regeneratable_message?(message, @latest_message_id) and
-                          is_nil(@streaming_task_ref)
+                          not @streaming_active?
                       }
                       id={"regenerate-message-#{message.id}"}
                       type="button"
@@ -234,7 +234,7 @@
             id="chat-message-form"
             phx-change="validate"
             phx-submit="send"
-            data-streaming={to_string(not is_nil(@streaming_task_ref))}
+            data-streaming={to_string(@streaming_active?)}
             class="relative"
           >
             <.textarea
@@ -247,16 +247,16 @@
             />
             <button
               id="chat-message-submit"
-              type={if @streaming_task_ref, do: "button", else: "submit"}
-              phx-click={if @streaming_task_ref, do: "cancel-stream", else: nil}
+              type={if @streaming_active?, do: "button", else: "submit"}
+              phx-click={if @streaming_active?, do: "cancel-stream", else: nil}
               class={[
                 "group absolute bottom-2 right-2 flex size-8 items-center justify-center rounded-lg bg-primary p-0 text-primary-foreground shadow-sm transition-colors hover:bg-primary/90",
-                if(@streaming_task_ref, do: "hover:bg-destructive", else: "")
+                if(@streaming_active?, do: "hover:bg-destructive", else: "")
               ]}
-              aria-label={if @streaming_task_ref, do: "Stop generating", else: "Send message"}
-              title={if @streaming_task_ref, do: "Stop generating", else: "Send message"}
+              aria-label={if @streaming_active?, do: "Stop generating", else: "Send message"}
+              title={if @streaming_active?, do: "Stop generating", else: "Send message"}
             >
-              <%= if @streaming_task_ref do %>
+              <%= if @streaming_active? do %>
                 <span class="relative flex size-4 items-center justify-center">
                   <.icon
                     name="hero-arrow-path"

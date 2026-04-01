@@ -1,10 +1,7 @@
 defmodule AppWeb.ChatLive.Show do
   use AppWeb, :live_view
 
-  require Logger
-
   alias App.Chat
-  alias App.Chat.Orchestrator
 
   @stream_db_write_every 10
 
@@ -16,7 +13,6 @@ defmodule AppWeb.ChatLive.Show do
      |> assign(:chat_room, nil)
      |> assign(:agent_message_streams, %{})
      |> assign(:latest_message_id, nil)
-     |> assign(:streaming_task, nil)
      |> assign(:streaming_message_id, nil)
      |> assign(:streaming_message_agent, nil)
      |> assign(:streaming_message_inserted_at, nil)
@@ -24,7 +20,8 @@ defmodule AppWeb.ChatLive.Show do
      |> assign(:streaming_thinking, nil)
      |> assign(:streaming_tool_responses, [])
      |> assign(:streaming_token_count, 0)
-     |> assign(:streaming_task_ref, nil)
+     |> assign(:streaming_active?, false)
+     |> assign(:subscribed_chat_room_id, nil)
      |> assign_message_form(%{"content" => ""})
      |> stream_configure(:messages, dom_id: &"message-#{&1.id}")
      |> stream(:messages, [])}
@@ -32,7 +29,7 @@ defmodule AppWeb.ChatLive.Show do
 
   @impl true
   def handle_params(%{"id" => id}, _url, socket) do
-    {:noreply, load_chat_room(socket, id)}
+    {:noreply, socket |> maybe_switch_subscription(id) |> load_chat_room(id)}
   end
 
   @impl true
@@ -40,8 +37,7 @@ defmodule AppWeb.ChatLive.Show do
     {:noreply, assign_message_form(socket, message_params)}
   end
 
-  def handle_event("send", _params, %{assigns: %{streaming_task_ref: ref}} = socket)
-      when not is_nil(ref) do
+  def handle_event("send", _params, %{assigns: %{streaming_active?: true}} = socket) do
     {:noreply, put_flash(socket, :error, "Wait for the current response to finish first")}
   end
 
@@ -60,7 +56,6 @@ defmodule AppWeb.ChatLive.Show do
         {:ok, _user_message} ->
           messages = Chat.list_messages(chat_room)
           active_agent = active_agent_for_room(chat_room)
-          lv_pid = self()
 
           case Chat.create_message(chat_room, %{
                  role: "assistant",
@@ -70,32 +65,25 @@ defmodule AppWeb.ChatLive.Show do
                  metadata: %{}
                }) do
             {:ok, placeholder_message} ->
-              task =
-                Task.async(fn ->
-                  case Orchestrator.stream_message(chat_room, messages, lv_pid) do
-                    {:ok, result} -> {:stream_done, {:ok, result}}
-                    {:error, reason} -> {:stream_done, {:error, reason}}
-                  end
-                end)
+              case Chat.start_stream(chat_room, messages, placeholder_message) do
+                {:ok, _pid} ->
+                  {:noreply,
+                   socket
+                   |> begin_stream(placeholder_message)
+                   |> assign_message_form(%{"content" => ""})}
 
-              {:noreply,
-               socket
-               |> begin_stream(placeholder_message, task)
-               |> assign_message_form(%{"content" => ""})}
+                {:error, reason} ->
+                  {:noreply,
+                   socket
+                   |> put_flash(:error, "Failed to start stream: #{inspect(reason)}")
+                   |> load_chat_room(chat_room.id)}
+              end
 
             {:error, _reason} ->
-              task =
-                Task.async(fn ->
-                  case Orchestrator.stream_message(chat_room, messages, lv_pid) do
-                    {:ok, result} -> {:stream_done, {:ok, result}}
-                    {:error, reason} -> {:stream_done, {:error, reason}}
-                  end
-                end)
-
               {:noreply,
                socket
-               |> begin_stream(nil, task)
-               |> assign_message_form(%{"content" => ""})}
+               |> assign_message_form(%{"content" => ""})
+               |> put_flash(:error, "Failed to prepare assistant response")}
           end
 
         {:error, changeset} ->
@@ -113,7 +101,7 @@ defmodule AppWeb.ChatLive.Show do
     message = Enum.find(messages, &(&1.id == id))
 
     cond do
-      socket.assigns.streaming_task_ref ->
+      socket.assigns.streaming_active? ->
         {:noreply, put_flash(socket, :error, "Wait for the current response to finish first")}
 
       is_nil(message) ->
@@ -138,15 +126,13 @@ defmodule AppWeb.ChatLive.Show do
 
         case Chat.update_message(message, attrs) do
           {:ok, placeholder_message} ->
-            task =
-              Task.async(fn ->
-                case Orchestrator.stream_message(chat_room, prior_messages, self()) do
-                  {:ok, result} -> {:stream_done, {:ok, result}}
-                  {:error, reason} -> {:stream_done, {:error, reason}}
-                end
-              end)
+            case Chat.start_stream(chat_room, prior_messages, placeholder_message) do
+              {:ok, _pid} ->
+                {:noreply, socket |> begin_stream(placeholder_message)}
 
-            {:noreply, socket |> begin_stream(placeholder_message, task)}
+              {:error, reason} ->
+                {:noreply, put_flash(socket, :error, "Failed to regenerate: #{inspect(reason)}")}
+            end
 
           {:error, changeset} ->
             {:noreply,
@@ -155,61 +141,77 @@ defmodule AppWeb.ChatLive.Show do
     end
   end
 
-  def handle_event("cancel-stream", _params, %{assigns: %{streaming_task: nil}} = socket) do
+  def handle_event("cancel-stream", _params, %{assigns: %{streaming_message_id: nil}} = socket) do
     {:noreply, socket}
   end
 
   def handle_event("cancel-stream", _params, socket) do
-    _ = Task.shutdown(socket.assigns.streaming_task, :brutal_kill)
-    chat_room = socket.assigns.chat_room
+    case Chat.cancel_stream(socket.assigns.streaming_message_id) do
+      :ok ->
+        {:noreply,
+         socket
+         |> load_chat_room(socket.assigns.chat_room.id)
+         |> put_flash(:info, "Stopped generating")}
 
-    {:noreply,
-     socket
-     |> persist_main_stream_cancel(chat_room, socket.assigns.streaming_message_id)
-     |> load_chat_room(chat_room.id)
-     |> reset_main_stream()
-     |> put_flash(:info, "Stopped generating")}
+      {:error, :not_found} ->
+        {:noreply, socket |> load_chat_room(socket.assigns.chat_room.id) |> reset_main_stream()}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to stop stream: #{inspect(reason)}")}
+    end
   end
 
   @impl true
-  def handle_info({:stream_chunk, token}, socket) do
+  def handle_info(
+        {:stream_chunk, message_id, token},
+        %{assigns: %{streaming_message_id: message_id}} = socket
+      ) do
     new_content = append_text(socket.assigns.streaming_content, token)
-    new_count = socket.assigns.streaming_token_count + 1
 
-    socket =
-      socket
-      |> assign(:streaming_content, new_content)
-      |> assign(:streaming_token_count, new_count)
-      |> maybe_stream_main_placeholder()
-
-    if rem(new_count, @stream_db_write_every) == 0 && socket.assigns.streaming_message_id do
-      maybe_update_streaming_message(
-        socket.assigns.streaming_message_id,
-        new_content,
-        stream_placeholder_status(new_content),
-        current_stream_metadata(socket)
-      )
-    end
-
-    {:noreply, socket}
+    {:noreply,
+     socket
+     |> assign(:streaming_content, new_content)
+     |> assign(:streaming_token_count, socket.assigns.streaming_token_count + 1)
+     |> assign(:streaming_active?, true)
+     |> maybe_stream_main_placeholder()}
   end
 
-  def handle_info({:stream_thinking_chunk, token}, socket) do
+  def handle_info({:stream_chunk, _message_id, _token}, socket), do: {:noreply, socket}
+
+  def handle_info(
+        {:stream_thinking_chunk, message_id, token},
+        %{assigns: %{streaming_message_id: message_id}} = socket
+      ) do
     new_thinking = append_text(socket.assigns.streaming_thinking, token)
 
     {:noreply,
      socket
      |> assign(:streaming_thinking, new_thinking)
+     |> assign(:streaming_active?, true)
      |> maybe_stream_main_placeholder()}
   end
 
-  def handle_info({:stream_tool_started, tool_result}, socket) do
+  def handle_info({:stream_thinking_chunk, _message_id, _token}, socket), do: {:noreply, socket}
+
+  def handle_info(
+        {:stream_tool_started, message_id, tool_result},
+        %{assigns: %{streaming_message_id: message_id}} = socket
+      ) do
     {:noreply, put_main_stream_tool_response(socket, tool_result)}
   end
 
-  def handle_info({:stream_tool_result, tool_result}, socket) do
+  def handle_info({:stream_tool_started, _message_id, _tool_result}, socket),
+    do: {:noreply, socket}
+
+  def handle_info(
+        {:stream_tool_result, message_id, tool_result},
+        %{assigns: %{streaming_message_id: message_id}} = socket
+      ) do
     {:noreply, put_main_stream_tool_response(socket, tool_result)}
   end
+
+  def handle_info({:stream_tool_result, _message_id, _tool_result}, socket),
+    do: {:noreply, socket}
 
   def handle_info({:agent_message_created, message}, socket) do
     if same_chat_room_message?(socket, message) do
@@ -255,50 +257,18 @@ defmodule AppWeb.ChatLive.Show do
     {:noreply, load_chat_room(socket, socket.assigns.chat_room.id)}
   end
 
-  def handle_info({ref, {:stream_done, result}}, socket)
-      when socket.assigns.streaming_task_ref == ref do
-    Process.demonitor(ref, [:flush])
-    chat_room = socket.assigns.chat_room
-    streaming_message_id = socket.assigns.streaming_message_id
+  def handle_info({:stream_updated, message}, socket) do
+    if same_chat_room_message?(socket, message) do
+      socket =
+        socket
+        |> stream_insert_message(message)
+        |> sync_main_stream_from_message(message)
+        |> maybe_track_agent_stream(message)
 
-    socket =
-      case result do
-        {:ok, %{content: content, agent_id: agent_id, metadata: metadata}} ->
-          persist_main_stream_success(
-            socket,
-            chat_room,
-            streaming_message_id,
-            content,
-            agent_id,
-            metadata
-          )
-
-        {:error, reason} ->
-          error_text = error_message(reason)
-
-          socket
-          |> persist_main_stream_error(chat_room, streaming_message_id, error_text)
-          |> put_flash(:error, error_text)
-      end
-
-    {:noreply,
-     socket
-     |> load_chat_room(chat_room.id)
-     |> reset_main_stream()}
-  end
-
-  def handle_info({:DOWN, ref, :process, _pid, reason}, socket)
-      when socket.assigns.streaming_task_ref == ref do
-    Logger.error("[ChatLive.Show] Streaming task crashed: #{inspect(reason)}")
-    chat_room = socket.assigns.chat_room
-    error_text = "The agent encountered an error"
-
-    {:noreply,
-     socket
-     |> persist_main_stream_error(chat_room, socket.assigns.streaming_message_id, error_text)
-     |> load_chat_room(chat_room.id)
-     |> reset_main_stream()
-     |> put_flash(:error, error_text)}
+      {:noreply, socket}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
@@ -318,7 +288,8 @@ defmodule AppWeb.ChatLive.Show do
     assistant_message?(message) and
       not delegated_message?(message) and
       latest_message?(message, latest_message_id) and
-      message.status in [:completed, :error]
+      message.status in [:completed, :error] and
+      not Chat.stream_running?(message.id)
   end
 
   def regenerate_label(%{status: :error}), do: "Retry"
@@ -391,6 +362,7 @@ defmodule AppWeb.ChatLive.Show do
     |> assign(:page_title, chat_room.title)
     |> assign(:latest_message_id, latest_message_id(messages))
     |> stream(:messages, Enum.reverse(messages), reset: true)
+    |> sync_main_stream(messages)
   end
 
   defp assign_message_form(socket, params) do
@@ -406,7 +378,7 @@ defmodule AppWeb.ChatLive.Show do
 
   defp active_agent_for_room(_), do: nil
 
-  defp begin_stream(socket, placeholder_message, task) do
+  defp begin_stream(socket, placeholder_message) do
     streaming_message_id = placeholder_message && placeholder_message.id
     streaming_message_agent = placeholder_message && placeholder_message.agent
     streaming_message_inserted_at = placeholder_message && placeholder_message.inserted_at
@@ -420,7 +392,6 @@ defmodule AppWeb.ChatLive.Show do
 
     socket
     |> load_chat_room(socket.assigns.chat_room.id)
-    |> assign(:streaming_task, task)
     |> assign(:streaming_message_id, streaming_message_id)
     |> assign(:streaming_message_agent, streaming_message_agent)
     |> assign(:streaming_message_inserted_at, streaming_message_inserted_at)
@@ -428,12 +399,11 @@ defmodule AppWeb.ChatLive.Show do
     |> assign(:streaming_thinking, streaming_thinking)
     |> assign(:streaming_tool_responses, streaming_tool_responses)
     |> assign(:streaming_token_count, 0)
-    |> assign(:streaming_task_ref, task.ref)
+    |> assign(:streaming_active?, true)
   end
 
   defp reset_main_stream(socket) do
     socket
-    |> assign(:streaming_task, nil)
     |> assign(:streaming_message_id, nil)
     |> assign(:streaming_message_agent, nil)
     |> assign(:streaming_message_inserted_at, nil)
@@ -441,7 +411,7 @@ defmodule AppWeb.ChatLive.Show do
     |> assign(:streaming_thinking, nil)
     |> assign(:streaming_tool_responses, [])
     |> assign(:streaming_token_count, 0)
-    |> assign(:streaming_task_ref, nil)
+    |> assign(:streaming_active?, false)
   end
 
   defp maybe_stream_main_placeholder(%{assigns: %{streaming_message_id: nil}} = socket),
@@ -470,166 +440,6 @@ defmodule AppWeb.ChatLive.Show do
       socket.assigns.streaming_thinking,
       socket.assigns.streaming_tool_responses
     )
-  end
-
-  defp persist_main_stream_success(
-         socket,
-         chat_room,
-         streaming_message_id,
-         content,
-         agent_id,
-         metadata
-       ) do
-    attrs = %{
-      content: content,
-      agent_id: agent_id,
-      metadata: metadata,
-      status: :completed
-    }
-
-    case streaming_message_id && Chat.get_message_by_id(streaming_message_id) do
-      nil ->
-        case Chat.create_message(chat_room, Map.put(attrs, :role, "assistant")) do
-          {:ok, _message} ->
-            socket
-
-          {:error, reason} ->
-            Logger.error("[ChatLive.Show] Failed to save streamed message: #{inspect(reason)}")
-            put_flash(socket, :error, "Failed to save response: #{changeset_error(reason)}")
-        end
-
-      message ->
-        case Chat.update_message(message, attrs) do
-          {:ok, _message} ->
-            socket
-
-          {:error, reason} ->
-            Logger.error("[ChatLive.Show] Failed to update streamed message: #{inspect(reason)}")
-            put_flash(socket, :error, "Failed to save response: #{changeset_error(reason)}")
-        end
-    end
-  end
-
-  defp persist_main_stream_error(socket, chat_room, streaming_message_id, error_text) do
-    metadata = current_stream_metadata(socket) |> Map.put("error", error_text)
-
-    attrs = %{
-      content: error_text,
-      status: :error,
-      metadata: metadata
-    }
-
-    case streaming_message_id && Chat.get_message_by_id(streaming_message_id) do
-      nil ->
-        agent_id = current_stream_agent_id(socket, chat_room)
-
-        create_attrs =
-          %{
-            role: "assistant",
-            content: error_text,
-            status: :error,
-            metadata: metadata
-          }
-          |> maybe_put_agent_id(agent_id)
-
-        case Chat.create_message(chat_room, create_attrs) do
-          {:ok, _message} -> socket
-          {:error, _reason} -> socket
-        end
-
-      message ->
-        case Chat.update_message(message, attrs) do
-          {:ok, _message} -> socket
-          {:error, _reason} -> socket
-        end
-    end
-  end
-
-  defp persist_main_stream_cancel(socket, chat_room, streaming_message_id) do
-    cancel_text = "Response cancelled."
-
-    metadata =
-      current_stream_metadata(socket)
-      |> Map.put("error", cancel_text)
-      |> Map.put("cancelled", true)
-
-    content = blank_to_nil(socket.assigns.streaming_content) || cancel_text
-
-    attrs = %{
-      content: content,
-      status: :error,
-      metadata: metadata
-    }
-
-    case streaming_message_id && Chat.get_message_by_id(streaming_message_id) do
-      nil ->
-        agent_id = current_stream_agent_id(socket, chat_room)
-
-        create_attrs =
-          %{
-            role: "assistant",
-            content: content,
-            status: :error,
-            metadata: metadata
-          }
-          |> maybe_put_agent_id(agent_id)
-
-        case Chat.create_message(chat_room, create_attrs) do
-          {:ok, _message} ->
-            socket
-
-          {:error, reason} ->
-            Logger.error("[ChatLive.Show] Failed to save cancelled stream: #{inspect(reason)}")
-
-            put_flash(
-              socket,
-              :error,
-              "Failed to save cancelled response: #{changeset_error(reason)}"
-            )
-        end
-
-      message ->
-        case Chat.update_message(message, attrs) do
-          {:ok, _message} ->
-            socket
-
-          {:error, reason} ->
-            Logger.error("[ChatLive.Show] Failed to update cancelled stream: #{inspect(reason)}")
-
-            put_flash(
-              socket,
-              :error,
-              "Failed to save cancelled response: #{changeset_error(reason)}"
-            )
-        end
-    end
-  end
-
-  defp current_stream_agent_id(socket, chat_room) do
-    case socket.assigns.streaming_message_agent do
-      %{id: agent_id} ->
-        agent_id
-
-      _ ->
-        case active_agent_for_room(chat_room) do
-          %{id: agent_id} -> agent_id
-          _ -> nil
-        end
-    end
-  end
-
-  defp maybe_update_streaming_message(message_id, content, status, metadata) do
-    case Chat.get_message_by_id(message_id) do
-      nil ->
-        :ok
-
-      message ->
-        Chat.update_message(message, %{
-          content: blank_to_nil(content),
-          status: status,
-          metadata: metadata
-        })
-    end
   end
 
   defp maybe_track_agent_stream(socket, %{id: id, status: status} = message)
@@ -879,21 +689,67 @@ defmodule AppWeb.ChatLive.Show do
   defp maybe_put_agent_id(attrs, agent_id), do: Map.put(attrs, :agent_id, agent_id)
 
   defp put_main_stream_tool_response(socket, tool_result) do
-    socket =
-      socket
-      |> update(:streaming_tool_responses, &merge_tool_response(&1, tool_result))
-      |> maybe_stream_main_placeholder()
+    socket
+    |> update(:streaming_tool_responses, &merge_tool_response(&1, tool_result))
+    |> maybe_stream_main_placeholder()
+  end
 
-    if socket.assigns.streaming_message_id do
-      maybe_update_streaming_message(
-        socket.assigns.streaming_message_id,
-        socket.assigns.streaming_content,
-        stream_placeholder_status(socket.assigns.streaming_content),
-        current_stream_metadata(socket)
-      )
+  defp maybe_switch_subscription(socket, chat_room_id) do
+    previous_chat_room_id = socket.assigns.subscribed_chat_room_id
+
+    if previous_chat_room_id && previous_chat_room_id != chat_room_id do
+      Chat.unsubscribe_chat_room(previous_chat_room_id)
     end
 
-    socket
+    if connected?(socket) && previous_chat_room_id != chat_room_id do
+      Chat.subscribe_chat_room(chat_room_id)
+    end
+
+    assign(socket, :subscribed_chat_room_id, chat_room_id)
+  end
+
+  defp sync_main_stream(socket, messages) do
+    case Enum.find(
+           messages,
+           &(assistant_message?(&1) and not delegated_message?(&1) and Chat.stream_running?(&1.id))
+         ) do
+      nil ->
+        reset_main_stream(socket)
+
+      message ->
+        sync_main_stream_from_message(socket, message)
+    end
+  end
+
+  defp sync_main_stream_from_message(socket, %{id: message_id} = message) do
+    if Chat.stream_running?(message_id) do
+      socket
+      |> assign(:streaming_message_id, message.id)
+      |> assign(:streaming_message_agent, message.agent)
+      |> assign(:streaming_message_inserted_at, message.inserted_at)
+      |> assign(:streaming_content, message.content || "")
+      |> assign(:streaming_thinking, message_thinking(message) || "")
+      |> assign(:streaming_tool_responses, tool_responses(message))
+      |> assign(:streaming_active?, true)
+    else
+      reset_main_stream(socket)
+    end
+  end
+
+  defp sync_main_stream_from_message(socket, _message), do: socket
+
+  defp maybe_update_streaming_message(message_id, content, status, metadata) do
+    case Chat.get_message_by_id(message_id) do
+      nil ->
+        :ok
+
+      message ->
+        Chat.update_message(message, %{
+          content: blank_to_nil(content),
+          status: status,
+          metadata: metadata
+        })
+    end
   end
 
   defp merge_tool_response(tool_responses, tool_response) do
@@ -927,11 +783,6 @@ defmodule AppWeb.ChatLive.Show do
 
   defp empty_to_nil([]), do: nil
   defp empty_to_nil(value), do: value
-
-  defp error_message(%{message: message}) when is_binary(message), do: message
-  defp error_message(reason) when is_binary(reason), do: reason
-  defp error_message(reason) when is_atom(reason), do: Phoenix.Naming.humanize(to_string(reason))
-  defp error_message(reason), do: inspect(reason)
 
   defp changeset_error(%Ecto.Changeset{errors: errors}) do
     errors |> Enum.map(fn {k, {msg, _}} -> "#{k}: #{msg}" end) |> Enum.join(", ")

@@ -269,7 +269,10 @@ defmodule App.Agents.Tools do
 
     Req.post(
       url,
-      Keyword.merge(req_options(), headers: headers_list(tool.static_headers), json: remaining_params)
+      Keyword.merge(req_options(),
+        headers: headers_list(tool.static_headers),
+        json: remaining_params
+      )
     )
   end
 
@@ -278,7 +281,10 @@ defmodule App.Agents.Tools do
 
     Req.get(
       url,
-      Keyword.merge(req_options(), headers: headers_list(tool.static_headers), params: remaining_params)
+      Keyword.merge(req_options(),
+        headers: headers_list(tool.static_headers),
+        params: remaining_params
+      )
     )
   end
 

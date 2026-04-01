@@ -136,6 +136,46 @@ defmodule App.Chat do
     end
   end
 
+  def start_stream(%ChatRoom{} = chat_room, messages, %Message{} = message)
+      when is_list(messages) do
+    DynamicSupervisor.start_child(
+      App.Chat.StreamSupervisor,
+      {App.Chat.StreamWorker,
+       chat_room: chat_room,
+       messages: messages,
+       message_id: message.id,
+       content: message.content || "",
+       thinking: message.metadata["thinking"] || "",
+       tool_responses: message.metadata["tool_responses"] || [],
+       metadata: message.metadata || %{}}
+    )
+  end
+
+  def cancel_stream(message_id) do
+    App.Chat.StreamWorker.cancel(message_id)
+  end
+
+  def stream_running?(message_id) do
+    case Registry.lookup(App.Chat.StreamRegistry, message_id) do
+      [{_pid, _value}] -> true
+      [] -> false
+    end
+  end
+
+  def subscribe_chat_room(%ChatRoom{id: chat_room_id}), do: subscribe_chat_room(chat_room_id)
+
+  def subscribe_chat_room(chat_room_id) do
+    Phoenix.PubSub.subscribe(App.PubSub, chat_room_topic(chat_room_id))
+  end
+
+  def unsubscribe_chat_room(%ChatRoom{id: chat_room_id}), do: unsubscribe_chat_room(chat_room_id)
+
+  def unsubscribe_chat_room(chat_room_id) do
+    Phoenix.PubSub.unsubscribe(App.PubSub, chat_room_topic(chat_room_id))
+  end
+
+  def chat_room_topic(chat_room_id), do: "chat_room:" <> chat_room_id
+
   @doc """
   Sets the active agent for a chat room, clearing the active flag from all others.
   """

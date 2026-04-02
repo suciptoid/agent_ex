@@ -133,31 +133,30 @@
                   </div>
 
                   <%= if thinking not in [nil, ""] do %>
-                    <div
+                    <.accordion
+                      variant="unstyled"
                       id={"message-thinking-#{message.id}"}
                       class="w-full max-w-2xl"
-                      data-default-expanded={to_string(thinking_default_expanded?(message))}
-                      data-label-collapsed="Show thinking"
-                      data-label-expanded="Hide thinking"
-                      phx-hook=".CollapsibleSection"
                     >
-                      <button
-                        data-toggle-btn
-                        type="button"
-                        class="flex items-center gap-1.5 text-[11px] font-medium text-sky-700 hover:text-sky-800 dark:text-sky-300 dark:hover:text-sky-200"
+                      <.accordion_item
+                        variant="unstyled"
+                        open={thinking_default_expanded?(message)}
+                        class="overflow-hidden rounded-lg border border-sky-500/20 bg-sky-500/5"
                       >
-                        <.icon
-                          name="hero-chevron-right"
-                          class="size-3 transition-transform duration-200"
-                        />
-                        <span data-label>Show thinking</span>
-                      </button>
-                      <div
-                        data-body
-                        class="mt-1 hidden rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-xs leading-5 text-foreground"
-                        phx-no-format
-                      ><span class="whitespace-pre-line break-words" phx-no-format>{thinking}</span></div>
-                    </div>
+                        <.accordion_trigger
+                          variant="unstyled"
+                          class="flex max-w-full items-center gap-1.5 px-3 py-2 text-[11px] font-medium text-sky-700 hover:text-sky-800 dark:text-sky-300 dark:hover:text-sky-200 [&>span]:flex [&>span]:min-w-0 [&>span]:items-center [&>span]:gap-1.5"
+                        >
+                          <span>Thinking</span>
+                        </.accordion_trigger>
+                        <.accordion_content
+                          variant="unstyled"
+                          class="border-t border-current/10 px-3 py-2 text-xs leading-5 text-foreground"
+                        >
+                          <span class="whitespace-pre-line break-words" phx-no-format>{thinking}</span>
+                        </.accordion_content>
+                      </.accordion_item>
+                    </.accordion>
                   <% end %>
 
                   <%= for {tool_response, index} <- Enum.with_index(responses) do %>

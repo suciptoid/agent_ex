@@ -191,7 +191,13 @@ defmodule AppWeb.ChatLiveTest do
 
       assert assistant_message.metadata["thinking"] == "Planning the lookup"
       assert length(assistant_message.metadata["tool_responses"]) == 1
-      assert has_element?(live_view, "#message-thinking-#{assistant_message.id}")
+
+      assert has_element?(
+               live_view,
+               "#message-thinking-#{assistant_message.id} details summary",
+               "Thinking"
+             )
+
       assert has_element?(live_view, "#message-tool-response-#{assistant_message.id}-0")
 
       assert has_element?(
@@ -202,7 +208,7 @@ defmodule AppWeb.ChatLiveTest do
 
       assert has_element?(
                live_view,
-               "#message-thinking-#{assistant_message.id}[data-default-expanded='false']"
+               "#message-thinking-#{assistant_message.id} details:not([open])"
              )
 
       refute has_element?(

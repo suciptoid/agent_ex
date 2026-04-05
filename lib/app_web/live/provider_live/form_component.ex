@@ -10,61 +10,56 @@ defmodule AppWeb.ProviderLive.FormComponent do
       <.dialog
         id="provider-dialog"
         show={true}
-        variant="unstyled"
-        class="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm"
+        size="md"
+        title={@title}
+        class="bg-black/55 backdrop-blur-sm sm:rounded-3xl sm:border-border/80 sm:px-6 sm:py-6 sm:shadow-2xl sm:shadow-black/20"
         on_cancel={@on_close}
       >
-        <:content :let={{attrs, %{hide: hide}}}>
-          <.focus_wrap {attrs}>
-            <div
-              role="dialog"
-              aria-modal="true"
-              class="fixed inset-0 z-50 flex items-center justify-center p-4"
+        <div class="space-y-5 p-1">
+          <p class="text-sm text-muted-foreground">
+            Save your provider details securely so agents can reuse them across rooms.
+          </p>
+
+          <.form
+            for={@form}
+            id="provider-form"
+            phx-change="validate"
+            phx-submit="save"
+            phx-target={@myself}
+            class="space-y-5"
+          >
+            <.input field={@form[:name]} type="text" label="Name (optional)" />
+
+            <.select
+              field={@form[:provider]}
+              label="Provider"
+              options={[
+                {"openai", "OpenAI"},
+                {"anthropic", "Anthropic"},
+                {"google", "Google"},
+                {"gemini", "Gemini"},
+                {"mistral", "Mistral"},
+                {"cohere", "Cohere"},
+                {"openrouter", "OpenRouter"}
+              ]}
+              placeholder="Select a provider"
+            />
+
+            <.input field={@form[:api_key]} type="password" label="API Key" />
+          </.form>
+        </div>
+        <:footer>
+          <div class="flex justify-end gap-3 pt-2">
+            <.button type="button" variant="outline" phx-click={@on_close}>Cancel</.button>
+            <.button
+              type="button"
+              phx-click={JS.dispatch("submit", to: "#provider-form")}
+              phx-disable-with="Saving..."
             >
-              <div class="w-full max-w-md rounded-3xl border border-border/80 bg-background p-6 shadow-2xl shadow-black/20 sm:p-7">
-                <div class="mb-6 space-y-2">
-                  <h2 class="text-2xl font-semibold text-foreground">{@title}</h2>
-                  <p class="text-sm text-muted-foreground">
-                    Save your provider details securely so agents can reuse them across rooms.
-                  </p>
-                </div>
-
-                <.form
-                  for={@form}
-                  id="provider-form"
-                  phx-change="validate"
-                  phx-submit="save"
-                  phx-target={@myself}
-                  class="space-y-5"
-                >
-                  <.input field={@form[:name]} type="text" label="Name (optional)" />
-
-                  <.select
-                    field={@form[:provider]}
-                    label="Provider"
-                    options={[
-                      {"openai", "OpenAI"},
-                      {"anthropic", "Anthropic"},
-                      {"google", "Google"},
-                      {"gemini", "Gemini"},
-                      {"mistral", "Mistral"},
-                      {"cohere", "Cohere"},
-                      {"openrouter", "OpenRouter"}
-                    ]}
-                    placeholder="Select a provider"
-                  />
-
-                  <.input field={@form[:api_key]} type="password" label="API Key" />
-
-                  <div class="flex justify-end gap-3 pt-2">
-                    <.button type="button" variant="outline" phx-click={hide}>Cancel</.button>
-                    <.button type="submit" phx-disable-with="Saving...">Save Provider</.button>
-                  </div>
-                </.form>
-              </div>
-            </div>
-          </.focus_wrap>
-        </:content>
+              Save Provider
+            </.button>
+          </div>
+        </:footer>
       </.dialog>
     </div>
     """

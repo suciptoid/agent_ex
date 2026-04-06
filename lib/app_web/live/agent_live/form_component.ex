@@ -19,6 +19,7 @@ defmodule AppWeb.AgentLive.FormComponent do
       assigns
       |> assign(:selected_tools, selected_tools)
       |> assign(:provider_options, provider_options)
+      |> assign_new(:model_options, fn -> [] end)
 
     ~H"""
     <div>
@@ -72,11 +73,12 @@ defmodule AppWeb.AgentLive.FormComponent do
                 />
               </div>
 
-              <.input
+              <.select
                 field={@form[:model]}
-                type="text"
                 label="Model"
-                placeholder="anthropic:claude-haiku-4-5"
+                placeholder="Select a model"
+                searchable={true}
+                options={@model_options}
               />
 
               <.textarea
@@ -173,10 +175,13 @@ defmodule AppWeb.AgentLive.FormComponent do
   @impl true
   def update(%{agent: agent} = assigns, socket) do
     changeset = Agents.change_agent(assigns.current_scope, agent)
+    provider_id = Ecto.Changeset.get_field(changeset, :provider_id)
+    model_options = model_options_for_provider(provider_id, assigns.providers)
 
     {:ok,
      socket
      |> assign(assigns)
+     |> assign(:model_options, model_options)
      |> assign_form(changeset)}
   end
 
@@ -186,7 +191,13 @@ defmodule AppWeb.AgentLive.FormComponent do
       Agents.change_agent(socket.assigns.current_scope, socket.assigns.agent, agent_params)
       |> Map.put(:action, :validate)
 
-    {:noreply, assign_form(socket, changeset)}
+    provider_id = Ecto.Changeset.get_field(changeset, :provider_id)
+    model_options = model_options_for_provider(provider_id, socket.assigns.providers)
+
+    {:noreply,
+     socket
+     |> assign(:model_options, model_options)
+     |> assign_form(changeset)}
   end
 
   def handle_event("save", %{"agent" => agent_params}, socket) do
@@ -233,6 +244,20 @@ defmodule AppWeb.AgentLive.FormComponent do
     case provider.name do
       nil -> String.capitalize(provider.provider)
       name -> "#{name} (#{provider.provider})"
+    end
+  end
+
+  defp model_options_for_provider(nil, _providers), do: []
+
+  defp model_options_for_provider(provider_id, providers) do
+    case Enum.find(providers, &(&1.id == provider_id)) do
+      nil ->
+        []
+
+      provider ->
+        provider_atom = String.to_existing_atom(provider.provider)
+
+        ReqLLM.available_models(scope: provider_atom, api_key: provider.api_key)
     end
   end
 end

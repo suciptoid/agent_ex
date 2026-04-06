@@ -7,10 +7,13 @@ defmodule AppWeb.ChatLive.Show do
 
   @impl true
   def mount(_params, _session, socket) do
+    available_agents = App.Agents.list_agents(socket.assigns.current_scope)
+
     {:ok,
      socket
      |> assign(:page_title, "Chat")
      |> assign(:chat_room, nil)
+     |> assign(:available_agents, available_agents)
      |> assign(:agent_message_streams, %{})
      |> assign(:latest_message_id, nil)
      |> assign(:streaming_message_id, nil)
@@ -82,7 +85,8 @@ defmodule AppWeb.ChatLive.Show do
                   {:noreply,
                    socket
                    |> begin_stream(placeholder_message)
-                   |> assign_message_form(%{"content" => ""})}
+                   |> assign_message_form(%{"content" => ""})
+                   |> push_event("scroll-to-bottom", %{})}
 
                 {:error, reason} ->
                   {:noreply,
@@ -146,7 +150,10 @@ defmodule AppWeb.ChatLive.Show do
                   {:stream_updated, placeholder_message}
                 )
 
-                {:noreply, socket |> begin_stream(placeholder_message)}
+                {:noreply,
+                 socket
+                 |> begin_stream(placeholder_message)
+                 |> push_event("scroll-to-bottom", %{})}
 
               {:error, reason} ->
                 {:noreply, put_flash(socket, :error, "Failed to regenerate: #{inspect(reason)}")}
@@ -176,6 +183,34 @@ defmodule AppWeb.ChatLive.Show do
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Failed to stop stream: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("set-active-agent", %{"id" => agent_id}, socket) do
+    {:noreply, set_active_agent(socket, agent_id)}
+  end
+
+  def handle_event("add-agent-to-room", %{"id" => agent_id}, socket) do
+    chat_room = socket.assigns.chat_room
+
+    case Chat.add_agent_to_room(socket.assigns.current_scope, chat_room, agent_id) do
+      {:ok, _} ->
+        {:noreply, load_chat_room(socket, chat_room.id)}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to add agent")}
+    end
+  end
+
+  def handle_event("remove-agent-from-room", %{"id" => agent_id}, socket) do
+    chat_room = socket.assigns.chat_room
+
+    case Chat.remove_agent_from_room(socket.assigns.current_scope, chat_room, agent_id) do
+      {:ok, _} ->
+        {:noreply, load_chat_room(socket, chat_room.id)}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to remove agent")}
     end
   end
 
@@ -241,6 +276,7 @@ defmodule AppWeb.ChatLive.Show do
        socket
        |> maybe_track_agent_stream(message)
        |> assign(:latest_message_id, message.id)
+       |> refresh_sidebar_chat_rooms()
        |> stream_insert_message(message)}
     else
       {:noreply, socket}
@@ -252,6 +288,7 @@ defmodule AppWeb.ChatLive.Show do
       {:noreply,
        socket
        |> assign(:latest_message_id, message.id)
+       |> refresh_sidebar_chat_rooms()
        |> stream_insert_message(message)}
     else
       {:noreply, socket}
@@ -280,6 +317,7 @@ defmodule AppWeb.ChatLive.Show do
        socket
        |> clear_agent_stream(message.id)
        |> assign(:latest_message_id, message.id)
+       |> refresh_sidebar_chat_rooms()
        |> stream_insert_message(message)}
     else
       {:noreply, socket}
@@ -290,12 +328,23 @@ defmodule AppWeb.ChatLive.Show do
     {:noreply, load_chat_room(socket, socket.assigns.chat_room.id)}
   end
 
+  def handle_info({:chatroom_title_updated, title}, socket) do
+    chat_room = %{socket.assigns.chat_room | title: title}
+
+    {:noreply,
+     socket
+     |> assign(:chat_room, chat_room)
+     |> assign(:page_title, title)
+     |> refresh_sidebar_chat_rooms()}
+  end
+
   def handle_info({:stream_updated, message}, socket) do
     if same_chat_room_message?(socket, message) do
       socket =
         socket
         |> clear_agent_stream(message.id)
         |> assign(:latest_message_id, message.id)
+        |> refresh_sidebar_chat_rooms()
         |> stream_insert_message(message)
         |> sync_stream_state_from_update(message)
 
@@ -348,6 +397,7 @@ defmodule AppWeb.ChatLive.Show do
     |> metadata_value("tool_responses")
     |> List.wrap()
     |> Enum.reject(&is_nil/1)
+    |> Enum.reject(&(Map.get(&1, "name") == "update_chatroom_title"))
   end
 
   def tool_response_label(tool_response) do
@@ -386,10 +436,19 @@ defmodule AppWeb.ChatLive.Show do
 
     socket
     |> assign(:chat_room, chat_room)
-    |> assign(:page_title, chat_room.title)
+    |> assign(:page_title, chat_room.title || "Chat")
     |> assign(:latest_message_id, latest_message_id(messages))
+    |> refresh_sidebar_chat_rooms()
     |> stream(:messages, Enum.reverse(messages), reset: true)
     |> sync_main_stream(messages)
+  end
+
+  defp refresh_sidebar_chat_rooms(socket) do
+    assign(
+      socket,
+      :sidebar_chat_rooms,
+      App.Chat.list_chat_rooms_for_sidebar(socket.assigns.current_scope)
+    )
   end
 
   defp assign_message_form(socket, params) do
@@ -404,6 +463,33 @@ defmodule AppWeb.ChatLive.Show do
   end
 
   defp active_agent_for_room(_), do: nil
+
+  def room_agents(%{chat_room_agents: chat_room_agents}) do
+    Enum.map(chat_room_agents, & &1.agent)
+  end
+
+  def room_agents(_chat_room), do: []
+
+  def active_agent_label(chat_room) do
+    case active_agent_for_room(chat_room) do
+      nil -> "Choose an active agent"
+      agent -> agent.name
+    end
+  end
+
+  def active_agent_id(chat_room) do
+    case active_agent_for_room(chat_room) do
+      nil -> nil
+      agent -> agent.id
+    end
+  end
+
+  def agent_count_label(agents) do
+    case length(agents) do
+      1 -> "1 agent"
+      count -> "#{count} agents"
+    end
+  end
 
   defp begin_stream(socket, placeholder_message) do
     streaming_message_id = placeholder_message && placeholder_message.id
@@ -807,6 +893,23 @@ defmodule AppWeb.ChatLive.Show do
 
   defp blank_to_nil(value) when value in [nil, ""], do: nil
   defp blank_to_nil(value), do: value
+
+  defp set_active_agent(socket, agent_id) do
+    chat_room = socket.assigns.chat_room
+
+    if Enum.any?(chat_room.chat_room_agents, &(&1.agent_id == agent_id)) do
+      case Chat.set_active_agent(chat_room, agent_id) do
+        :ok ->
+          Chat.broadcast_chat_room_from(chat_room.id, self(), {:active_agent_changed, agent_id})
+          load_chat_room(socket, chat_room.id)
+
+        {:error, _reason} ->
+          put_flash(socket, :error, "Failed to set active agent")
+      end
+    else
+      socket
+    end
+  end
 
   defp empty_to_nil([]), do: nil
   defp empty_to_nil(value), do: value

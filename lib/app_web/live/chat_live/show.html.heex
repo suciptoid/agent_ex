@@ -1,8 +1,17 @@
-<Layouts.dashboard flash={@flash} current_scope={@current_scope}>
+<Layouts.dashboard
+  flash={@flash}
+  current_scope={@current_scope}
+  sidebar_chat_rooms={@sidebar_chat_rooms}
+>
   <%= if @chat_room do %>
     <div class="flex h-full min-h-0 flex-col">
       <div class="border-b border-border px-4 pb-3 pt-4 sm:px-5 lg:px-6">
-        <div class="flex min-w-0 items-center gap-3">
+        <% agents_in_room = room_agents(@chat_room) %>
+        <% unselected =
+          Enum.reject(@available_agents, fn available_agent ->
+            Enum.any?(@chat_room.chat_room_agents, &(&1.agent_id == available_agent.id))
+          end) %>
+        <div class="flex min-w-0 flex-wrap items-center gap-3">
           <.link
             navigate={~p"/chat"}
             class="inline-flex flex-shrink-0 items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
@@ -10,32 +19,32 @@
             <.icon name="hero-arrow-left" class="size-4" /> Back
           </.link>
 
-          <h1 class="min-w-0 flex-1 truncate text-base font-semibold text-foreground">
-            {@chat_room.title}
+          <h1
+            id="chat-room-title"
+            class="min-w-0 flex-1 truncate text-base font-semibold text-foreground"
+          >
+            {@chat_room.title || ""}
           </h1>
 
-          <div class="flex flex-shrink-0 flex-wrap gap-1.5">
-            <div
-              :for={chat_room_agent <- @chat_room.chat_room_agents}
-              class={[
-                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
-                if(chat_room_agent.is_active,
-                  do: "border-primary/30 bg-primary/10 text-primary",
-                  else: "border-border bg-background text-muted-foreground"
-                )
-              ]}
-            >
-              <.icon name="hero-cpu-chip" class="size-3" />
-              {chat_room_agent.agent.name}
-              <span :if={chat_room_agent.is_active} class="text-[10px] opacity-70">active</span>
-            </div>
+          <div :if={@latest_message_id} class="w-full max-w-md flex-shrink-0">
+            <AppWeb.ChatComponents.chat_agent_selector
+              id="chat-agent-selector"
+              class="justify-end"
+              selected_agents={agents_in_room}
+              unselected_agents={unselected}
+              active_agent_id={active_agent_id(@chat_room)}
+              set_active_event="set-active-agent"
+              remove_event="remove-agent-from-room"
+              add_event="add-agent-to-room"
+              active_label="active"
+            />
           </div>
         </div>
       </div>
 
       <div class="flex min-h-0 flex-1 flex-col px-4 pt-3 sm:px-5 sm:pt-4 lg:px-6">
         <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-card">
-          <div class="relative flex-1 min-h-0">
+          <div class="flex-1 min-h-0">
             <div
               id="chat-messages"
               phx-update="stream"
@@ -223,17 +232,16 @@
                 </div>
               </div>
             </div>
-
-            <button
-              id="scroll-to-bottom-btn"
-              class="absolute bottom-4 right-4 hidden size-10 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-all hover:bg-primary/90"
-              aria-label="Scroll to bottom"
-            >
-              <.icon name="hero-arrow-down" class="size-5" />
-            </button>
           </div>
 
-          <div class="mt-3">
+          <div class="relative mt-3">
+            <button
+              id="scroll-to-bottom-btn"
+              class="absolute -top-8 left-1/2 z-10 hidden -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-background/95 px-3 py-1 text-xs font-medium text-muted-foreground shadow-md backdrop-blur transition-all hover:bg-muted hover:text-foreground"
+              aria-label="Scroll to bottom"
+            >
+              <.icon name="hero-arrow-down" class="size-3.5" /> Scroll to bottom
+            </button>
             <.form
               for={@message_form}
               id="chat-message-form"
@@ -248,14 +256,14 @@
                 rows="2"
                 placeholder="Message… (Enter to send, Shift+Enter for new line)"
                 phx-hook=".ChatInput"
-                class="resize-none pr-12"
+                class="min-h-24 resize-none rounded-2xl px-4 py-4 pr-14"
               />
               <button
                 id="chat-message-submit"
                 type={if @streaming_active?, do: "button", else: "submit"}
                 phx-click={if @streaming_active?, do: "cancel-stream", else: nil}
                 class={[
-                  "group absolute bottom-2 right-2 flex size-8 items-center justify-center rounded-lg bg-primary p-0 text-primary-foreground shadow-sm transition-colors hover:bg-primary/90",
+                  "group absolute bottom-3 right-3 flex size-9 items-center justify-center rounded-xl bg-primary p-0 text-primary-foreground shadow-sm transition-colors hover:bg-primary/90",
                   if(@streaming_active?, do: "hover:bg-destructive", else: "")
                 ]}
                 aria-label={if @streaming_active?, do: "Stop generating", else: "Send message"}
@@ -392,8 +400,14 @@
     export default {
       mounted() {
         this.isNearLatest = true
+        this._programmaticScroll = false
         this.scrollBtn = document.getElementById("scroll-to-bottom-btn")
-        this.onScroll = () => this.checkScrollPosition()
+
+        this.onScroll = () => {
+          if (this._programmaticScroll) return
+          this.checkScrollPosition()
+        }
+
         this.onContentResized = (event) => {
           if (event.detail) {
             this.previousScrollTop = event.detail.scrollTop
@@ -402,10 +416,13 @@
             this.previousScrollTop = this.el.scrollTop
             this.previousScrollHeight = this.el.scrollHeight
           }
-
           this.restoreScrollPosition()
         }
-        this.onScrollButtonClick = () => this.scrollToLatest({ behavior: "smooth" })
+
+        this.onScrollButtonClick = () => {
+          this.isNearLatest = true
+          this.scrollToLatest({ behavior: "smooth" })
+        }
 
         this.el.addEventListener("scroll", this.onScroll)
         this.el.addEventListener("chat:content-resized", this.onContentResized)
@@ -413,9 +430,14 @@
           this.scrollBtn.addEventListener("click", this.onScrollButtonClick)
         }
 
+        this.handleEvent("scroll-to-bottom", () => {
+          this.isNearLatest = true
+          window.requestAnimationFrame(() => this.scrollToLatest())
+        })
+
         window.requestAnimationFrame(() => {
           this.scrollToLatest()
-          this.checkScrollPosition()
+          this.updateButtonVisibility()
         })
       },
 
@@ -431,7 +453,6 @@
       destroyed() {
         this.el.removeEventListener("scroll", this.onScroll)
         this.el.removeEventListener("chat:content-resized", this.onContentResized)
-
         if (this.scrollBtn) {
           this.scrollBtn.removeEventListener("click", this.onScrollButtonClick)
         }
@@ -440,25 +461,33 @@
       checkScrollPosition() {
         const threshold = Math.max(this.el.clientHeight * 0.15, 40)
         this.isNearLatest = this.el.scrollTop <= threshold
+        this.updateButtonVisibility()
+      },
 
+      updateButtonVisibility() {
         if (this.scrollBtn) {
           this.scrollBtn.style.display = this.isNearLatest ? "none" : "flex"
         }
       },
 
       restoreScrollPosition() {
+        this._programmaticScroll = true
         window.requestAnimationFrame(() => {
           if (this.isNearLatest) {
             this.scrollToLatest()
           } else if (
             typeof this.previousScrollTop === "number" &&
-              typeof this.previousScrollHeight === "number"
+            typeof this.previousScrollHeight === "number"
           ) {
             const heightDelta = this.el.scrollHeight - this.previousScrollHeight
             this.el.scrollTop = Math.max(0, this.previousScrollTop + heightDelta)
           }
 
-          this.checkScrollPosition()
+          this.updateButtonVisibility()
+
+          requestAnimationFrame(() => {
+            this._programmaticScroll = false
+          })
         })
       },
 
@@ -468,9 +497,7 @@
           behavior: options.behavior || "auto"
         })
         this.isNearLatest = true
-        if (this.scrollBtn) {
-          this.scrollBtn.style.display = "none"
-        }
+        this.updateButtonVisibility()
       }
     }
   </script>

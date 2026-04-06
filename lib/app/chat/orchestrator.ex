@@ -24,7 +24,14 @@ defmodule App.Chat.Orchestrator do
            {:ok, agent} <- active_agent(chat_room) do
         Logger.debug("[Orchestrator] Running agent #{agent.name} (#{agent.id})")
 
-        run_opts = multi_agent_opts(chat_room, messages, nil)
+        callbacks = [recipient: nil]
+
+        run_opts =
+          chat_room
+          |> multi_agent_opts(messages, callbacks)
+          |> maybe_inject_title_tool(chat_room, callbacks)
+
+        maybe_seed_initial_title(chat_room, messages, callbacks)
 
         case agent_runner().run(agent, messages, run_opts) do
           {:ok, result} ->
@@ -63,6 +70,9 @@ defmodule App.Chat.Orchestrator do
         chat_room
         |> multi_agent_opts(messages, callbacks)
         |> Keyword.merge(callback_run_opts(callbacks))
+        |> maybe_inject_title_tool(chat_room, callbacks)
+
+      maybe_seed_initial_title(chat_room, messages, callbacks)
 
       case agent_runner().run_streaming(agent, messages, callbacks[:recipient], run_opts) do
         {:ok, result} ->
@@ -527,6 +537,133 @@ defmodule App.Chat.Orchestrator do
     do: callback.(arg1, arg2)
 
   defp apply_callback(_callback, _args), do: :ok
+
+  # Injects the update_chatroom_title tool when the chatroom has no title
+  defp maybe_inject_title_tool(opts, %ChatRoom{title: title} = chat_room, callbacks)
+       when title in [nil, ""] do
+    title_tool = build_update_title_tool(chat_room, callbacks)
+    extra_tools = Keyword.get(opts, :extra_tools, []) ++ [title_tool]
+
+    extra_prompt =
+      (Keyword.get(opts, :extra_system_prompt, "") <>
+         """
+
+         ## Auto-Title
+         This is a new conversation without a title. Before responding to the user,
+         call the `update_chatroom_title` tool with a concise title (under 60 chars)
+         that summarizes what the user is asking about. Do not mention this action
+         in your response to the user.
+         """)
+      |> String.trim()
+
+    opts
+    |> Keyword.put(:extra_tools, extra_tools)
+    |> Keyword.put(:extra_system_prompt, extra_prompt)
+  end
+
+  defp maybe_inject_title_tool(opts, _chat_room, _callbacks), do: opts
+
+  defp build_update_title_tool(chat_room, callbacks) do
+    ReqLLM.tool(
+      name: "update_chatroom_title",
+      description:
+        "Set the title of the current conversation. Call once at the start with a concise, descriptive title based on the user's first message.",
+      parameter_schema: [
+        title: [
+          type: :string,
+          required: true,
+          doc: "A concise title (max 60 chars) summarizing the conversation topic"
+        ]
+      ],
+      callback: fn args ->
+        title = Map.get(args, :title) || Map.get(args, "title") || ""
+
+        persist_title_update(chat_room, callbacks, title)
+        {:ok, "Title set to: #{title}"}
+      end
+    )
+  end
+
+  defp maybe_seed_initial_title(%ChatRoom{title: title} = chat_room, messages, callbacks)
+       when title in [nil, ""] do
+    case fallback_title_from_messages(messages) do
+      nil -> :ok
+      generated_title -> persist_title_update(chat_room, callbacks, generated_title)
+    end
+  end
+
+  defp maybe_seed_initial_title(_chat_room, _messages, _callbacks), do: :ok
+
+  defp fallback_title_from_messages(messages) do
+    messages
+    |> Enum.find_value(fn
+      %{role: "user", content: content} when is_binary(content) ->
+        normalize_generated_title(content)
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp normalize_generated_title(content) do
+    content
+    |> String.split(~r/\R+/, trim: true)
+    |> List.first()
+    |> case do
+      nil ->
+        nil
+
+      first_line ->
+        first_line
+        |> String.replace(~r/^\s*[#>*-]+\s*/, "")
+        |> String.replace(~r/\s+/, " ")
+        |> String.trim()
+        |> String.replace(~r/[[:punct:]\s]+$/u, "")
+        |> truncate_generated_title()
+    end
+  end
+
+  defp truncate_generated_title(title) when title in [nil, ""], do: nil
+
+  defp truncate_generated_title(title) do
+    shortened_title =
+      if String.length(title) <= 60 do
+        title
+      else
+        title
+        |> String.slice(0, 60)
+        |> String.replace(~r/\s+\S*$/u, "")
+        |> case do
+          "" -> String.slice(title, 0, 60)
+          value -> value
+        end
+      end
+
+    case String.trim(shortened_title) do
+      "" -> nil
+      value -> value
+    end
+  end
+
+  defp persist_title_update(chat_room, callbacks, title) do
+    if is_function(callbacks[:on_title_updated], 1) or is_pid(callbacks[:recipient]) do
+      notify_title_updated(callbacks, title)
+    else
+      _ = Chat.update_chat_room_title(chat_room, title)
+      :ok
+    end
+  end
+
+  defp notify_title_updated(callbacks, title) do
+    call_callback(
+      callbacks[:on_title_updated],
+      [title],
+      fn recipient ->
+        send(recipient, {:chatroom_title_updated, title})
+      end,
+      callbacks[:recipient]
+    )
+  end
 
   defp agent_runner, do: Application.get_env(:app, :agent_runner, App.Agents.Runner)
 end

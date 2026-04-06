@@ -25,7 +25,6 @@ defmodule App.Chat.ChatRoom do
     |> cast(attrs, [:title, :agent_ids, :active_agent_id])
     |> update_change(:title, &trim_text/1)
     |> update_change(:agent_ids, &normalize_agent_ids/1)
-    |> validate_required([:title])
     |> validate_length(:title, max: 160)
     |> validate_agent_ids()
     |> validate_active_agent()
@@ -34,7 +33,7 @@ defmodule App.Chat.ChatRoom do
 
   defp validate_agent_ids(changeset) do
     case get_field(changeset, :agent_ids, []) do
-      [] -> add_error(changeset, :agent_ids, "select at least one agent")
+      [] -> changeset
       _agent_ids -> changeset
     end
   end

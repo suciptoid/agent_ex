@@ -63,7 +63,11 @@ defmodule AppWeb.ToolLive.Create do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.dashboard flash={@flash} current_scope={@current_scope}>
+    <Layouts.dashboard
+      flash={@flash}
+      current_scope={@current_scope}
+      sidebar_chat_rooms={@sidebar_chat_rooms}
+    >
       <div class="flex h-full min-h-0 flex-col p-4 pt-20 sm:px-5 sm:pb-5 sm:pt-20 lg:p-6">
         <div class="mx-auto flex w-full max-w-6xl flex-col gap-6 xl:flex-row">
           <section class="flex-1 space-y-6">

@@ -1,213 +1,102 @@
-<Layouts.dashboard flash={@flash} current_scope={@current_scope}>
-  <div class="flex h-full min-h-0 flex-col p-4 pt-20 sm:px-5 sm:pb-5 sm:pt-20 lg:p-6">
-    <div class="space-y-6">
-      <div class="border-b border-border pb-6">
-        <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div class="space-y-2">
-            <h1 class="text-3xl font-bold tracking-tight text-foreground">Chat Rooms</h1>
-            <p class="text-sm text-muted-foreground">
-              Group your agents into persistent conversations and keep the context organized.
-            </p>
-          </div>
-
-          <%= if @available_agents == [] do %>
-            <.link id="setup-agent-button" navigate={~p"/agents"}>
-              <.button>Create Agent First</.button>
-            </.link>
-          <% else %>
-            <.link id="new-chat-button" patch={~p"/chat/new"}>
-              <.button>New Chat</.button>
-            </.link>
-          <% end %>
-        </div>
-      </div>
-
+<Layouts.dashboard
+  flash={@flash}
+  current_scope={@current_scope}
+  sidebar_chat_rooms={@sidebar_chat_rooms}
+>
+  <div class="flex h-full min-h-0 flex-col">
+    <%!-- Empty state / welcome --%>
+    <div class="flex flex-1 items-center justify-center p-8">
       <%= if @available_agents == [] do %>
-        <div class="rounded-2xl border border-dashed border-border bg-muted/30 p-6 text-sm text-muted-foreground">
-          Chat rooms need at least one agent. Create an agent first, then return here to start a conversation.
-        </div>
-      <% end %>
-
-      <%= if @live_action == :new and @form do %>
-        <% selected_agent_ids =
-          @form[:agent_ids].value |> List.wrap() |> Enum.reject(&(&1 in [nil, ""])) %>
-        <% selected_active_id = @form[:active_agent_id].value %>
-
-        <.dialog
-          id="chat-room-dialog"
-          show={true}
-          size="xl"
-          title={@page_title}
-          class="bg-black/55 backdrop-blur-sm sm:rounded-3xl sm:border-border/80 sm:px-6 sm:py-6 sm:shadow-2xl sm:shadow-black/20"
-          on_cancel={JS.patch(~p"/chat")}
-        >
-          <div class="space-y-6 p-1">
-            <p class="text-sm text-muted-foreground">
-              Give the room a title, choose the participating agents, and optionally mark which agent is active.
-            </p>
-
-            <.form
-              for={@form}
-              id="chat-room-form"
-              phx-change="validate"
-              phx-submit="save"
-              class="space-y-6"
-            >
-              <.input
-                field={@form[:title]}
-                type="text"
-                label="Title"
-                placeholder="Quarterly planning room"
-              />
-
-              <div class="space-y-3">
-                <div class="space-y-1">
-                  <p class="text-sm font-medium text-foreground">Agents</p>
-                  <p class="text-xs text-muted-foreground">
-                    Pick one or more agents. If no active agent is chosen, the first selected agent will be active.
-                  </p>
-                </div>
-
-                <input type="hidden" name="chat_room[agent_ids][]" value="" />
-
-                <div class="grid gap-3 md:grid-cols-2">
-                  <div
-                    :for={agent <- @available_agents}
-                    class={[
-                      "rounded-2xl border p-4 transition",
-                      if(agent.id in selected_agent_ids,
-                        do: "border-primary bg-primary/5",
-                        else: "border-border hover:border-primary/40"
-                      )
-                    ]}
-                  >
-                    <div class="flex items-start gap-3">
-                      <.checkbox
-                        id={"chat-room-agent-#{agent.id}"}
-                        name="chat_room[agent_ids][]"
-                        value={agent.id}
-                        checked={agent.id in selected_agent_ids}
-                      />
-
-                      <div class="min-w-0 flex-1 space-y-1">
-                        <label
-                          for={"chat-room-agent-#{agent.id}"}
-                          class="block cursor-pointer"
-                        >
-                          <p class="text-sm font-medium text-foreground">{agent.name}</p>
-                          <p class="text-xs text-muted-foreground">{agent.model}</p>
-                        </label>
-                      </div>
-
-                      <label class="flex items-center gap-2 text-xs text-muted-foreground">
-                        <.radio
-                          id={"chat-room-active-#{agent.id}"}
-                          name="chat_room[active_agent_id]"
-                          value={agent.id}
-                          checked={selected_active_id == agent.id}
-                        /> Active
-                      </label>
-                    </div>
-                  </div>
-                </div>
-
-                <p
-                  :for={{message, _opts} <- @form[:agent_ids].errors}
-                  class="text-sm font-medium text-destructive"
-                >
-                  {message}
-                </p>
-                <p
-                  :for={{message, _opts} <- @form[:active_agent_id].errors}
-                  class="text-sm font-medium text-destructive"
-                >
-                  {message}
-                </p>
-              </div>
-            </.form>
+        <div class="text-center space-y-4">
+          <div class="mx-auto flex size-16 items-center justify-center rounded-2xl bg-muted">
+            <.icon name="hero-cpu-chip" class="size-8 text-muted-foreground" />
           </div>
-          <:footer>
-            <div class="flex justify-end gap-3 pt-2">
-              <.button type="button" variant="outline" phx-click={JS.patch(~p"/chat")}>
-                Cancel
-              </.button>
-              <.button
-                type="button"
-                phx-click={JS.dispatch("submit", to: "#chat-room-form")}
-                phx-disable-with="Creating..."
-              >
-                Create Chat
-              </.button>
-            </div>
-          </:footer>
-        </.dialog>
-      <% end %>
-
-      <div id="chat-rooms" phx-update="stream" class="grid gap-4">
-        <div
-          :for={{dom_id, chat_room} <- @streams.chat_rooms}
-          id={dom_id}
-          class="group rounded-2xl border border-border bg-card p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-        >
-          <div class="flex items-start justify-between gap-4">
-            <div class="space-y-4">
-              <div class="space-y-1">
-                <.link
-                  id={"open-chat-room-#{chat_room.id}"}
-                  navigate={~p"/chat/#{chat_room.id}"}
-                  class="text-lg font-semibold text-foreground transition group-hover:text-primary"
-                >
-                  {chat_room.title}
-                </.link>
-                <p class="text-sm text-muted-foreground">{last_message_preview(chat_room)}</p>
-              </div>
-
-              <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <span class="inline-flex items-center rounded-full bg-muted px-2.5 py-1 font-medium text-muted-foreground">
-                  {agent_count(chat_room)} agents
-                </span>
-                <span
-                  :if={active_agent_name(chat_room)}
-                  class="inline-flex items-center rounded-full bg-primary/10 px-2.5 py-1 font-medium text-primary"
-                >
-                  Active: {active_agent_name(chat_room)}
-                </span>
-              </div>
-
-              <div class="flex flex-wrap gap-2">
-                <span
-                  :for={agent <- chat_room.agents}
-                  class="inline-flex items-center rounded-full border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground"
-                >
-                  {agent.name}
-                </span>
-              </div>
-            </div>
-
-            <div class="flex shrink-0 gap-2">
-              <.button
-                id={"delete-chat-room-#{chat_room.id}"}
-                phx-click="delete"
-                phx-value-id={chat_room.id}
-                data-confirm="Are you sure?"
-                variant="outline"
-                size="icon"
-                title="Delete chat room"
-                aria-label="Delete chat room"
-              >
-                <.icon name="hero-trash" class="size-4" />
-              </.button>
-            </div>
+          <div class="space-y-1">
+            <p class="text-lg font-semibold text-foreground">No agents yet</p>
+            <p class="text-sm text-muted-foreground">Create an agent first to start chatting.</p>
+          </div>
+          <.link id="setup-agent-button" navigate={~p"/agents"}>
+            <.button>Create Agent</.button>
+          </.link>
+        </div>
+      <% else %>
+        <% unselected =
+          Enum.reject(@available_agents, fn available_agent ->
+            Enum.any?(@selected_agents, &(&1.id == available_agent.id))
+          end) %>
+        <div class="space-y-2 text-center">
+          <p class="text-2xl font-semibold text-foreground/80">What can I help you with?</p>
+          <p class="text-sm text-muted-foreground">Start typing to begin a new conversation.</p>
+          <div class="pt-2">
+            <AppWeb.ChatComponents.chat_agent_selector
+              id="new-chat-agent-selector"
+              class="justify-center"
+              selected_agents={@selected_agents}
+              unselected_agents={unselected}
+              active_agent_id={@active_agent_id}
+              set_active_event="set-active-agent"
+              remove_event="remove-agent"
+              add_event="add-agent"
+              allow_remove_last={true}
+              active_label="default"
+            />
           </div>
         </div>
-
-        <div
-          id="chat-rooms-empty-state"
-          class="hidden rounded-2xl border border-dashed border-border bg-muted/30 p-10 text-center text-sm text-muted-foreground only:block"
-        >
-          No chat rooms created yet.
-        </div>
-      </div>
+      <% end %>
     </div>
+
+    <%!-- Message input --%>
+    <%= if @available_agents != [] do %>
+      <div class="mx-auto w-full max-w-3xl px-4 pb-4 sm:px-5 sm:pb-5 lg:px-6 lg:pb-6">
+        <.form
+          for={@message_form}
+          id="chat-message-form"
+          phx-change="validate"
+          phx-submit="send"
+          class="relative"
+        >
+          <.textarea
+            field={@message_form[:content]}
+            id="chat-message-input"
+            rows="3"
+            placeholder="Message… (Enter to send, Shift+Enter for new line)"
+            phx-hook=".ChatInput"
+            class="min-h-24 resize-none rounded-2xl px-4 py-4 pr-14"
+          />
+          <button
+            id="chat-message-submit"
+            type="submit"
+            class="group absolute bottom-3 right-3 flex size-9 items-center justify-center rounded-xl bg-primary p-0 text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
+            aria-label="Send message"
+            title="Send message"
+          >
+            <.icon
+              name="hero-paper-airplane"
+              class="size-4 text-current transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
+            />
+          </button>
+        </.form>
+      </div>
+    <% end %>
   </div>
+
+  <script :type={Phoenix.LiveView.ColocatedHook} name=".ChatInput">
+    export default {
+      mounted() {
+        this.el.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            const form = this.el.closest("form");
+            if (!form || form.dataset.streaming === "true") return;
+
+            if (typeof form.requestSubmit === "function") {
+              form.requestSubmit();
+            } else {
+              form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+            }
+          }
+        });
+      }
+    }
+  </script>
 </Layouts.dashboard>

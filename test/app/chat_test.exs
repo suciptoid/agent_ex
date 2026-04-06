@@ -44,6 +44,42 @@ defmodule App.ChatTest do
     end
   end
 
+  describe "list_chat_rooms_for_sidebar/1" do
+    test "marks rooms with pending assistant replies as loading", %{
+      scope: scope,
+      user: user,
+      agent: agent
+    } do
+      loading_room = chat_room_fixture(user, %{title: "Loading Room", agents: [agent]})
+      idle_room = chat_room_fixture(user, %{title: "Idle Room", agents: [agent]})
+
+      _user_message = message_fixture(loading_room, %{role: "user", content: "Working on it"})
+
+      _pending_assistant =
+        message_fixture(loading_room, %{
+          role: "assistant",
+          content: nil,
+          status: :pending,
+          agent_id: agent.id
+        })
+
+      _completed_assistant =
+        message_fixture(idle_room, %{
+          role: "assistant",
+          content: "Done",
+          status: :completed,
+          agent_id: agent.id
+        })
+
+      sidebar_rooms = Chat.list_chat_rooms_for_sidebar(scope)
+      loading_entry = Enum.find(sidebar_rooms, &(&1.id == loading_room.id))
+      idle_entry = Enum.find(sidebar_rooms, &(&1.id == idle_room.id))
+
+      assert loading_entry.loading
+      refute idle_entry.loading
+    end
+  end
+
   describe "create_chat_room/2" do
     test "creates a room with selected agents and commander", %{
       scope: scope,

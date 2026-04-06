@@ -96,7 +96,6 @@ defmodule AppWeb do
       import PUI.Accordion
       import PUI.Components
       import PUI.Container
-
       unquote(verified_routes())
     end
   end

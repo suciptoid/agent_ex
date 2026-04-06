@@ -18,7 +18,11 @@ defmodule AppWeb.ToolLive.Index do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.dashboard flash={@flash} current_scope={@current_scope}>
+    <Layouts.dashboard
+      flash={@flash}
+      current_scope={@current_scope}
+      sidebar_chat_rooms={@sidebar_chat_rooms}
+    >
       <div class="flex h-full min-h-0 flex-col p-4 pt-20 sm:px-5 sm:pb-5 sm:pt-20 lg:p-6">
         <div class="space-y-6">
           <div class="border-b border-border pb-6">

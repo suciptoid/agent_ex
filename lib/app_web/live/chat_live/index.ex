@@ -3,99 +3,182 @@ defmodule AppWeb.ChatLive.Index do
 
   alias App.Agents
   alias App.Chat
-  alias App.Chat.ChatRoom
 
   @impl true
   def mount(_params, _session, socket) do
     available_agents = Agents.list_agents(socket.assigns.current_scope)
-    chat_rooms = Chat.list_chat_rooms(socket.assigns.current_scope)
+    default_agent = List.first(available_agents)
 
     {:ok,
      socket
+     |> assign(:page_title, "New Chat")
      |> assign(:available_agents, available_agents)
-     |> assign(:chat_room, nil)
-     |> assign(:form, nil)
-     |> stream_configure(:chat_rooms, dom_id: &"chat-room-#{&1.id}")
-     |> stream(:chat_rooms, chat_rooms)}
+     |> assign(:selected_agents, if(default_agent, do: [default_agent], else: []))
+     |> assign(:active_agent_id, default_agent && default_agent.id)
+     |> assign_message_form(%{"content" => ""})}
   end
 
   @impl true
-  def handle_params(params, _url, socket) do
-    {:noreply, apply_action(socket, socket.assigns.live_action, params)}
-  end
-
-  defp apply_action(socket, :index, _params) do
-    socket
-    |> assign(:page_title, "Chat")
-    |> assign(:chat_room, nil)
-    |> assign(:form, nil)
-  end
-
-  defp apply_action(socket, :new, _params) do
-    changeset = Chat.change_chat_room(%ChatRoom{})
-
-    socket
-    |> assign(:page_title, "New Chat")
-    |> assign(:chat_room, %ChatRoom{})
-    |> assign_form(changeset)
+  def handle_params(_params, _url, socket) do
+    {:noreply, socket}
   end
 
   @impl true
-  def handle_event("validate", %{"chat_room" => chat_room_params}, socket) do
-    changeset =
-      %ChatRoom{}
-      |> Chat.change_chat_room(chat_room_params)
-      |> Map.put(:action, :validate)
-
-    {:noreply, assign_form(socket, changeset)}
+  def handle_event("validate", %{"message" => message_params}, socket) do
+    {:noreply, assign_message_form(socket, message_params)}
   end
 
-  def handle_event("save", %{"chat_room" => chat_room_params}, socket) do
-    case Chat.create_chat_room(socket.assigns.current_scope, chat_room_params) do
-      {:ok, chat_room} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Chat room created successfully")
-         |> push_navigate(to: ~p"/chat/#{chat_room.id}")}
+  def handle_event("send", %{"message" => %{"content" => content}}, socket) do
+    content = String.trim(content || "")
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        {:noreply, assign_form(socket, changeset)}
-    end
-  end
+    if content == "" do
+      {:noreply, put_flash(socket, :error, "Message cannot be blank")}
+    else
+      selected_agents = socket.assigns.selected_agents
+      active_agent_id = socket.assigns.active_agent_id
 
-  def handle_event("delete", %{"id" => id}, socket) do
-    chat_room = Chat.get_chat_room!(socket.assigns.current_scope, id)
-    {:ok, _chat_room} = Chat.delete_chat_room(socket.assigns.current_scope, chat_room)
+      if selected_agents == [] do
+        {:noreply, put_flash(socket, :error, "Select at least one agent to start chatting")}
+      else
+        agent_ids = Enum.map(selected_agents, & &1.id)
 
-    {:noreply, stream_delete(socket, :chat_rooms, chat_room)}
-  end
+        case Chat.create_chat_room(socket.assigns.current_scope, %{
+               "agent_ids" => agent_ids,
+               "active_agent_id" => active_agent_id
+             }) do
+          {:ok, chat_room} ->
+            case Chat.create_message(chat_room, %{role: "user", content: content}) do
+              {:ok, user_message} ->
+                Chat.broadcast_chat_room(
+                  chat_room.id,
+                  {:user_message_created, user_message}
+                )
 
-  def last_message_preview(%ChatRoom{messages: messages}) do
-    case List.last(messages || []) do
-      nil ->
-        "No messages yet."
+                messages = Chat.list_messages(chat_room)
+                active_agent = active_agent_for_room(chat_room)
 
-      message ->
-        content = message.content || ""
+                case Chat.create_message(chat_room, %{
+                       role: "assistant",
+                       content: nil,
+                       status: :pending,
+                       agent_id: active_agent && active_agent.id,
+                       metadata: %{}
+                     }) do
+                  {:ok, placeholder_message} ->
+                    case Chat.start_stream(chat_room, messages, placeholder_message) do
+                      {:ok, _pid} ->
+                        Chat.broadcast_chat_room(
+                          chat_room.id,
+                          {:agent_message_created, placeholder_message}
+                        )
 
-        if String.length(content) > 120 do
-          String.slice(content, 0, 120) <> "…"
-        else
-          content
+                        {:noreply,
+                         socket
+                         |> put_flash(:info, nil)
+                         |> push_navigate(to: ~p"/chat/#{chat_room.id}")}
+
+                      {:error, reason} ->
+                        {:noreply,
+                         put_flash(
+                           socket,
+                           :error,
+                           "Failed to start stream: #{inspect(reason)}"
+                         )}
+                    end
+
+                  {:error, _reason} ->
+                    {:noreply,
+                     socket
+                     |> push_navigate(to: ~p"/chat/#{chat_room.id}")
+                     |> put_flash(:error, "Failed to prepare assistant response")}
+                end
+
+              {:error, _changeset} ->
+                {:noreply,
+                 socket
+                 |> push_navigate(to: ~p"/chat/#{chat_room.id}")
+                 |> put_flash(:error, "Failed to send message")}
+            end
+
+          {:error, _changeset} ->
+            {:noreply, put_flash(socket, :error, "Failed to create chat room")}
         end
+      end
     end
   end
 
-  def agent_count(%ChatRoom{agents: agents}), do: length(agents || [])
+  def handle_event("add-agent", %{"id" => agent_id}, socket) do
+    agent = Enum.find(socket.assigns.available_agents, &(&1.id == agent_id))
 
-  def active_agent_name(%ChatRoom{chat_room_agents: chat_room_agents}) do
-    case Enum.find(chat_room_agents, & &1.is_active) || List.first(chat_room_agents) do
-      nil -> nil
-      chat_room_agent -> chat_room_agent.agent.name
+    if agent && agent not in socket.assigns.selected_agents do
+      selected = socket.assigns.selected_agents ++ [agent]
+      active_id = socket.assigns.active_agent_id || agent.id
+
+      {:noreply, assign(socket, selected_agents: selected, active_agent_id: active_id)}
+    else
+      {:noreply, socket}
     end
   end
 
-  defp assign_form(socket, %Ecto.Changeset{} = changeset) do
-    assign(socket, :form, to_form(changeset))
+  def handle_event("remove-agent", %{"id" => agent_id}, socket) do
+    selected = Enum.reject(socket.assigns.selected_agents, &(&1.id == agent_id))
+
+    active_id =
+      if socket.assigns.active_agent_id == agent_id do
+        case List.first(selected) do
+          nil -> nil
+          agent -> agent.id
+        end
+      else
+        socket.assigns.active_agent_id
+      end
+
+    {:noreply, assign(socket, selected_agents: selected, active_agent_id: active_id)}
+  end
+
+  def handle_event("set-active-agent", %{"id" => agent_id}, socket) do
+    {:noreply, set_active_agent(socket, agent_id)}
+  end
+
+  defp assign_message_form(socket, params) do
+    assign(socket, :message_form, to_form(params, as: :message))
+  end
+
+  defp active_agent_for_room(%{chat_room_agents: agents}) do
+    case Enum.find(agents, & &1.is_active) || List.first(agents) do
+      %{agent: agent} -> agent
+      _ -> nil
+    end
+  end
+
+  defp active_agent_for_room(_), do: nil
+
+  def active_agent_label(selected_agents, active_agent_id) do
+    case Enum.find(selected_agents, &(&1.id == active_agent_id)) || List.first(selected_agents) do
+      nil -> "Choose a default agent"
+      agent -> agent.name
+    end
+  end
+
+  def agent_count_label(selected_agents) do
+    case length(selected_agents) do
+      1 -> "1 agent"
+      count -> "#{count} agents"
+    end
+  end
+
+  defp set_active_agent(socket, agent_id) do
+    normalized_agent_id =
+      case agent_id do
+        "" -> nil
+        value -> value
+      end
+
+    if is_nil(normalized_agent_id) or
+         Enum.any?(socket.assigns.selected_agents, &(&1.id == normalized_agent_id)) do
+      assign(socket, :active_agent_id, normalized_agent_id)
+    else
+      socket
+    end
   end
 end

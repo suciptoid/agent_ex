@@ -187,6 +187,8 @@ defmodule AppWeb.Layouts do
     default: nil,
     doc: "the current [scope](https://hexdocs.html.pm/phoenix/scopes.html)"
 
+  attr :sidebar_chat_rooms, :list, default: [], doc: "list of chat rooms for the sidebar"
+
   slot :inner_block, required: true
 
   def dashboard(assigns) do
@@ -252,10 +254,10 @@ defmodule AppWeb.Layouts do
         </div>
 
         <%!-- Navigation Links --%>
-        <nav class="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
+        <nav class="px-2 py-3 space-y-0.5">
           <.link
             navigate={~p"/dashboard"}
-            class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+            class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
           >
             <.icon name="hero-home" class="size-5 flex-shrink-0" />
             <span class="[[data-sidebar-collapsed=true]_&]:hidden">Dashboard</span>
@@ -263,7 +265,7 @@ defmodule AppWeb.Layouts do
 
           <.link
             navigate={~p"/providers"}
-            class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+            class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
           >
             <.icon name="hero-server-stack" class="size-5 flex-shrink-0" />
             <span class="[[data-sidebar-collapsed=true]_&]:hidden">Providers</span>
@@ -271,7 +273,7 @@ defmodule AppWeb.Layouts do
 
           <.link
             navigate={~p"/tools/list"}
-            class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+            class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
           >
             <.icon name="hero-wrench-screwdriver" class="size-5 flex-shrink-0" />
             <span class="[[data-sidebar-collapsed=true]_&]:hidden">Tools</span>
@@ -279,20 +281,64 @@ defmodule AppWeb.Layouts do
 
           <.link
             navigate={~p"/agents"}
-            class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+            class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
           >
             <.icon name="hero-cpu-chip" class="size-5 flex-shrink-0" />
             <span class="[[data-sidebar-collapsed=true]_&]:hidden">Agents</span>
           </.link>
+        </nav>
 
+        <%!-- Chat History --%>
+        <div class="flex-1 overflow-y-auto border-t border-border [[data-sidebar-collapsed=true]_&]:hidden">
+          <div class="px-2 pb-1">
+            <div class="sticky top-0 z-10 mb-1 flex items-center justify-between bg-card px-2.5 pb-2 pt-3">
+              <h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Chats
+              </h3>
+              <.link
+                navigate={~p"/chat"}
+                class="inline-flex items-center justify-center size-5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                title="New Chat"
+              >
+                <.icon name="hero-plus" class="size-3.5" />
+              </.link>
+            </div>
+            <div class="space-y-0.5">
+              <.link
+                :for={chat <- @sidebar_chat_rooms}
+                navigate={~p"/chat/#{chat.id}"}
+                class="flex items-center gap-3 px-2.5 py-1.5 text-sm text-foreground/65 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+              >
+                <span class="min-w-0 flex-1 truncate">{chat.title || "Untitled"}</span>
+                <span
+                  :if={chat.loading}
+                  id={"sidebar-chat-loading-#{chat.id}"}
+                  class="inline-flex size-4 flex-shrink-0 items-center justify-center text-muted-foreground"
+                >
+                  <.icon name="hero-arrow-path" class="size-3.5 animate-spin" />
+                </span>
+              </.link>
+
+              <p
+                :if={@sidebar_chat_rooms == []}
+                class="px-2.5 py-1.5 text-xs text-muted-foreground/60"
+              >
+                No conversations yet
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <%!-- Collapsed chat icon --%>
+        <div class="hidden [[data-sidebar-collapsed=true]_&]:flex flex-1 justify-center pt-3 border-t border-border">
           <.link
             navigate={~p"/chat"}
-            class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-muted-foreground rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+            class="p-1.5 text-muted-foreground hover:text-foreground transition-colors"
+            title="Chat"
           >
-            <.icon name="hero-chat-bubble-left-right" class="size-5 flex-shrink-0" />
-            <span class="[[data-sidebar-collapsed=true]_&]:hidden">Chat</span>
+            <.icon name="hero-chat-bubble-left-right" class="size-5" />
           </.link>
-        </nav>
+        </div>
 
         <%!-- User Section (Bottom) — theme toggle hidden inside menu --%>
         <div class="p-3 border-t border-border">

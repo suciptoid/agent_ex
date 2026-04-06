@@ -66,6 +66,9 @@ defmodule App.Chat.StreamWorker do
           on_tool_result: fn tool_result ->
             send(worker_pid, {:stream_tool_result, tool_result})
           end,
+          on_title_updated: fn title ->
+            send(worker_pid, {:title_updated, title})
+          end,
           on_agent_message_created: fn message ->
             broadcast(state.chat_room.id, {:agent_message_created, message})
           end,
@@ -177,6 +180,24 @@ defmodule App.Chat.StreamWorker do
 
     broadcast(state.chat_room.id, {:stream_tool_result, state.message_id, tool_result})
     {:noreply, state}
+  end
+
+  def handle_info({:title_updated, title}, state) do
+    case Chat.update_chat_room_title(state.chat_room, title) do
+      {:ok, chat_room} ->
+        if chat_room.title != state.chat_room.title do
+          broadcast(state.chat_room.id, {:chatroom_title_updated, chat_room.title})
+        end
+
+        {:noreply, %{state | chat_room: chat_room}}
+
+      {:error, :blank_title} ->
+        {:noreply, state}
+
+      {:error, reason} ->
+        Logger.error("[StreamWorker] Failed to update title: #{inspect(reason)}")
+        {:noreply, state}
+    end
   end
 
   def handle_info({ref, {:stream_done, result}}, %{task_ref: ref} = state) do

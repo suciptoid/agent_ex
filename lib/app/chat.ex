@@ -34,22 +34,33 @@ defmodule App.Chat do
     with %{valid?: true} <- changeset,
          agent_ids <- Ecto.Changeset.get_field(changeset, :agent_ids, []),
          active_id <-
-           Ecto.Changeset.get_field(changeset, :active_agent_id) || List.first(agent_ids),
-         {:ok, agents} <- fetch_agents(scope, agent_ids, changeset) do
-      Multi.new()
-      |> Multi.insert(:chat_room, changeset)
-      |> Multi.run(:chat_room_agents, fn repo, %{chat_room: chat_room} ->
-        insert_chat_room_agents(repo, chat_room, agents, active_id)
-      end)
-      |> Repo.transaction()
-      |> case do
-        {:ok, %{chat_room: chat_room}} -> {:ok, get_chat_room!(scope, chat_room.id)}
-        {:error, :chat_room, changeset, _changes} -> {:error, changeset}
-        {:error, :chat_room_agents, changeset, _changes} -> {:error, changeset}
+           Ecto.Changeset.get_field(changeset, :active_agent_id) || List.first(agent_ids) do
+      if agent_ids == [] do
+        case Repo.insert(changeset) do
+          {:ok, chat_room} -> {:ok, get_chat_room!(scope, chat_room.id)}
+          {:error, changeset} -> {:error, changeset}
+        end
+      else
+        case fetch_agents(scope, agent_ids, changeset) do
+          {:ok, agents} ->
+            Multi.new()
+            |> Multi.insert(:chat_room, changeset)
+            |> Multi.run(:chat_room_agents, fn repo, %{chat_room: chat_room} ->
+              insert_chat_room_agents(repo, chat_room, agents, active_id)
+            end)
+            |> Repo.transaction()
+            |> case do
+              {:ok, %{chat_room: chat_room}} -> {:ok, get_chat_room!(scope, chat_room.id)}
+              {:error, :chat_room, changeset, _changes} -> {:error, changeset}
+              {:error, :chat_room_agents, changeset, _changes} -> {:error, changeset}
+            end
+
+          {:error, changeset} ->
+            {:error, changeset}
+        end
       end
     else
       %{valid?: false} -> {:error, changeset}
-      {:error, %Ecto.Changeset{} = changeset} -> {:error, changeset}
     end
   end
 
@@ -335,6 +346,83 @@ defmodule App.Chat do
         where: agent.user_id == ^scope.user.id and agent.id == ^agent_id,
         preload: [:provider]
     )
+  end
+
+  @doc """
+  Returns a lightweight list of chat rooms for the sidebar.
+
+  Each row includes:
+  - `id`
+  - `title`
+  - `updated_at`
+  - `loading` - true while the room has a pending or streaming assistant message
+
+  Limited to 30 most recent.
+  """
+  def list_chat_rooms_for_sidebar(%Scope{} = scope) do
+    chat_rooms =
+      ChatRoom
+      |> where([cr], cr.user_id == ^scope.user.id)
+      |> order_by([cr], desc: cr.updated_at)
+      |> select([cr], map(cr, [:id, :title, :updated_at]))
+      |> limit(30)
+      |> Repo.all()
+
+    loading_ids = sidebar_loading_chat_room_ids(chat_rooms)
+
+    Enum.map(chat_rooms, fn chat_room ->
+      Map.put(chat_room, :loading, MapSet.member?(loading_ids, chat_room.id))
+    end)
+  end
+
+  @doc """
+  Updates just the title of a chat room. Used by the auto-title tool.
+  """
+  def update_chat_room_title(%ChatRoom{} = chat_room, title) when is_binary(title) do
+    case normalize_chat_room_title(title) do
+      nil ->
+        {:error, :blank_title}
+
+      normalized_title when normalized_title == chat_room.title ->
+        {:ok, chat_room}
+
+      normalized_title ->
+        chat_room
+        |> Ecto.Changeset.change(%{title: normalized_title})
+        |> Ecto.Changeset.validate_length(:title, max: 160)
+        |> Repo.update()
+    end
+  end
+
+  def update_chat_room_title(chat_room_id, title) when is_binary(chat_room_id) do
+    case Repo.get(ChatRoom, chat_room_id) do
+      nil -> {:error, :not_found}
+      chat_room -> update_chat_room_title(chat_room, title)
+    end
+  end
+
+  defp normalize_chat_room_title(title) do
+    case String.trim(title) do
+      "" -> nil
+      normalized_title -> normalized_title
+    end
+  end
+
+  defp sidebar_loading_chat_room_ids([]), do: MapSet.new()
+
+  defp sidebar_loading_chat_room_ids(chat_rooms) do
+    chat_room_ids = Enum.map(chat_rooms, & &1.id)
+
+    Message
+    |> where(
+      [message],
+      message.chat_room_id in ^chat_room_ids and message.role == "assistant" and
+        message.status in [:pending, :streaming]
+    )
+    |> distinct([message], message.chat_room_id)
+    |> select([message], message.chat_room_id)
+    |> Repo.all()
+    |> MapSet.new()
   end
 
   defp chat_orchestrator, do: Application.get_env(:app, :chat_orchestrator, App.Chat.Orchestrator)

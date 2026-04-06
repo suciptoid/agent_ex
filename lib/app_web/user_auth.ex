@@ -219,6 +219,11 @@ defmodule AppWeb.UserAuth do
     socket = mount_current_scope(socket, session)
 
     if socket.assigns.current_scope && socket.assigns.current_scope.user do
+      socket =
+        Phoenix.Component.assign_new(socket, :sidebar_chat_rooms, fn ->
+          App.Chat.list_chat_rooms_for_sidebar(socket.assigns.current_scope)
+        end)
+
       {:cont, socket}
     else
       socket =

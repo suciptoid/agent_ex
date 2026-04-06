@@ -14,6 +14,7 @@ defmodule AppWeb.DashboardLive do
     <Layouts.dashboard
       flash={@flash}
       current_scope={@current_scope}
+      sidebar_chat_rooms={@sidebar_chat_rooms}
     >
       <%!-- Dashboard Content --%>
       <div class="flex h-full min-h-0 flex-col p-4 pt-20 sm:px-5 sm:pb-5 sm:pt-20 lg:p-6">

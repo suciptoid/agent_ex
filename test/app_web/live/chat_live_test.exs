@@ -26,50 +26,106 @@ defmodule AppWeb.ChatLiveTest do
   end
 
   describe "chat rooms" do
-    test "lists chat rooms for the current user", %{conn: conn, user: user} do
+    test "renders blank chat room with centered agent selection controls", %{
+      conn: conn,
+      user: user
+    } do
       provider = provider_fixture(user)
-      agent = agent_fixture(user, %{provider: provider, name: "Room Agent"})
-
-      room =
-        chat_room_fixture(user, %{
-          title: "Strategy Room",
-          agents: [agent],
-          active_agent_id: agent.id
-        })
+      _agent = agent_fixture(user, %{provider: provider, name: "Room Agent"})
 
       {:ok, live_view, _html} = live(conn, ~p"/chat")
 
-      assert has_element?(live_view, "#chat-room-#{room.id}")
+      assert has_element?(live_view, "#chat-message-form")
+      assert has_element?(live_view, "#chat-message-input")
+      assert has_element?(live_view, "#new-chat-agent-selector")
+      assert has_element?(live_view, "#new-chat-agent-selector-add-agent-trigger")
     end
 
-    test "creates a chat room", %{conn: conn, user: user, scope: scope} do
+    test "creates a chat room on first message, navigates to it, and auto-generates a title", %{
+      conn: conn,
+      user: user,
+      scope: scope
+    } do
       provider = provider_fixture(user)
-      agent = agent_fixture(user, %{provider: provider, name: "Commander"})
+      _agent = agent_fixture(user, %{provider: provider, name: "Commander"})
 
       {:ok, live_view, _html} = live(conn, ~p"/chat")
 
       live_view
-      |> element("#new-chat-button")
-      |> render_click()
-
-      assert_patch(live_view, ~p"/chat/new")
-
-      live_view
-      |> form("#chat-room-form", %{
-        "chat_room" => %{
-          "title" => "Planning Room",
-          "agent_ids" => ["", agent.id],
-          "active_agent_id" => agent.id
-        }
+      |> form("#chat-message-form", %{
+        "message" => %{"content" => "Hello agent"}
       })
       |> render_submit()
 
-      created_room = Enum.find(Chat.list_chat_rooms(scope), &(&1.title == "Planning Room"))
-      assert_redirect(live_view, ~p"/chat/#{created_room.id}")
+      created_room = List.first(Chat.list_chat_rooms(scope))
+      assert created_room
+
+      path = ~p"/chat/#{created_room.id}"
+      assert_redirect(live_view, path)
+
+      {:ok, show_view, _html} = live(conn, path)
+
+      titled_room =
+        wait_for_chat_room(show_view, scope, created_room.id, fn room ->
+          if room.title not in [nil, ""], do: room
+        end)
+
+      assert titled_room.title == "Hello agent"
+
+      assert_eventually(show_view, fn ->
+        has_element?(show_view, "#chat-room-title", "Hello agent")
+      end)
     end
   end
 
   describe "chat room show" do
+    test "hides the header agent selector until the room has messages", %{
+      conn: conn,
+      user: user
+    } do
+      provider = provider_fixture(user)
+      agent = agent_fixture(user, %{provider: provider, name: "Solo Agent"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Empty Room",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
+
+      refute has_element?(live_view, "#chat-agent-selector")
+    end
+
+    test "renders a sidebar loading spinner for rooms with pending assistant replies", %{
+      conn: conn,
+      user: user
+    } do
+      provider = provider_fixture(user)
+      agent = agent_fixture(user, %{provider: provider, name: "Spinner Agent"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Spinner Room",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      assert {:ok, _pending_message} =
+               Chat.create_message(room, %{
+                 role: "assistant",
+                 content: nil,
+                 status: :pending,
+                 agent_id: agent.id,
+                 metadata: %{}
+               })
+
+      {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
+
+      assert has_element?(live_view, "#sidebar-chat-loading-#{room.id}")
+    end
+
     test "sends a message and streams the assistant reply", %{
       conn: conn,
       user: user,
@@ -105,6 +161,7 @@ defmodule AppWeb.ChatLiveTest do
       assert assistant_message.content == "Lead Agent: Plan next week"
       assert has_element?(live_view, "#message-#{user_message.id}")
       assert has_element?(live_view, "#message-#{assistant_message.id}")
+      assert has_element?(live_view, "#chat-agent-selector")
       assert has_element?(live_view, "#chat-message-submit[aria-label='Send message']")
     end
 
@@ -459,7 +516,7 @@ defmodule AppWeb.ChatLiveTest do
 
       assert {:error, {:live_redirect, %{to: to}}} =
                live_view
-               |> element("a.inline-flex[href='/chat']")
+               |> element("main a.inline-flex[href='/chat']")
                |> render_click()
 
       assert to == "/chat"
@@ -533,6 +590,17 @@ defmodule AppWeb.ChatLiveTest do
         result -> {:halt, result}
       end
     end) || flunk("expected chat messages to reach the desired state")
+  end
+
+  defp wait_for_chat_room(live_view, scope, room_id, callback) do
+    Enum.reduce_while(1..30, nil, fn _, _acc ->
+      if live_view, do: _ = :sys.get_state(live_view.pid)
+
+      case callback.(Chat.get_chat_room!(scope, room_id)) do
+        nil -> {:cont, nil}
+        result -> {:halt, result}
+      end
+    end) || flunk("expected chat room to reach the desired state")
   end
 
   defp assert_eventually(live_view, callback) do

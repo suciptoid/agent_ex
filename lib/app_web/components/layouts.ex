@@ -169,6 +169,15 @@ defmodule AppWeb.Layouts do
     """
   end
 
+  defp sidebar_user_label(%{email: email}) when is_binary(email) do
+    case String.split(email, "@", parts: 2) do
+      [label, _domain] when label != "" -> label
+      _ -> email
+    end
+  end
+
+  defp sidebar_user_label(_user), do: "Account"
+
   @doc """
   Renders the dashboard layout with collapsible sidebar.
   The sidebar contains the hamburger toggle, logo, nav links, and user menu.
@@ -228,9 +237,9 @@ defmodule AppWeb.Layouts do
       <%!-- Sidebar --%>
       <aside class={[
         "fixed inset-y-2 left-2 z-50 flex h-[calc(100vh-1rem)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl transition-all duration-300 ease-in-out",
-        "w-72",
+        "w-[255px]",
         "[[data-sidebar-collapsed=true]_&]:-translate-x-[calc(100%+0.75rem)] lg:[[data-sidebar-collapsed=true]_&]:translate-x-0",
-        "lg:relative lg:inset-y-0 lg:left-0 lg:h-full lg:max-w-none lg:rounded-none lg:border-y-0 lg:border-l-0 lg:shadow-none lg:w-56",
+        "lg:relative lg:inset-y-0 lg:left-0 lg:h-full lg:max-w-none lg:rounded-none lg:border-y-0 lg:border-l-0 lg:shadow-none lg:w-[255px]",
         "lg:[[data-sidebar-collapsed=true]_&]:w-14"
       ]}>
         <%!-- Sidebar top: hamburger + logo --%>
@@ -296,6 +305,7 @@ defmodule AppWeb.Layouts do
                 Chats
               </h3>
               <.link
+                id="sidebar-new-chat-link"
                 navigate={~p"/chat"}
                 class="inline-flex items-center justify-center size-5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                 title="New Chat"
@@ -341,17 +351,20 @@ defmodule AppWeb.Layouts do
         </div>
 
         <%!-- User Section (Bottom) — theme toggle hidden inside menu --%>
-        <div class="p-3 border-t border-border">
-          <div class="[[data-sidebar-collapsed=true]_&]:hidden">
+        <div class="border-t border-border p-1">
+          <div class="[[data-sidebar-collapsed=true]_&]:hidden *:w-full">
             <.menu_button
               id="sidebar-user-menu"
               variant="unstyled"
               content_class="w-56 z-50 bg-popover text-popover-foreground rounded-md border border-border p-1 shadow-md mb-2 aria-hidden:hidden not-aria-hidden:animate-in not-aria-hidden:fade-in-0 not-aria-hidden:zoom-in-95 aria-hidden:animate-out aria-hidden:fade-out-0 aria-hidden:zoom-out-95"
-              class="flex w-full items-center gap-2.5 rounded-xl border border-border bg-background px-2.5 py-2 text-left transition hover:bg-accent/60"
+              class="flex w-full! min-w-0 items-center gap-2.5 overflow-hidden rounded-xl bg-background/70 px-2 py-1.5 text-left shadow-none transition hover:bg-accent/60"
             >
               <.icon name="hero-user-circle" class="size-7 text-muted-foreground shrink-0" />
-              <div class="min-w-0 flex-1">
+              <div class="min-w-0 flex-1 overflow-hidden">
                 <p class="truncate text-sm font-medium text-foreground">
+                  {sidebar_user_label(@current_scope.user)}
+                </p>
+                <p class="truncate text-xs text-muted-foreground">
                   {@current_scope.user.email}
                 </p>
               </div>

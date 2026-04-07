@@ -96,6 +96,13 @@ defmodule AppWeb.ChatLiveTest do
       {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
 
       refute has_element?(live_view, "#chat-agent-selector")
+      refute has_element?(live_view, "a", "Back")
+      assert has_element?(live_view, "#chat-messages")
+      assert has_element?(live_view, "#chat-messages-empty-state.max-w-4xl")
+      assert has_element?(live_view, "#chat-composer-shell")
+      assert has_element?(live_view, "#chat-message-input[data-max-height-vh='50']")
+      assert has_element?(live_view, "#chat-message-controls")
+      assert has_element?(live_view, "#sidebar-user-menu p.truncate", user.email)
     end
 
     test "renders a sidebar loading spinner for rooms with pending assistant replies", %{
@@ -595,7 +602,7 @@ defmodule AppWeb.ChatLiveTest do
 
       assert {:error, {:live_redirect, %{to: to}}} =
                live_view
-               |> element("main a.inline-flex[href='/chat']")
+               |> element("#sidebar-new-chat-link")
                |> render_click()
 
       assert to == "/chat"

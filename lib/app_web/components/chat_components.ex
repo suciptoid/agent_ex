@@ -14,11 +14,11 @@ defmodule AppWeb.ChatComponents do
 
   def chat_agent_selector(assigns) do
     ~H"""
-    <div id={@id} class={["flex flex-wrap items-center gap-2", @class]}>
+    <div id={@id} class={["flex flex-wrap items-center gap-1.5", @class]}>
       <div
         :for={agent <- @selected_agents}
         class={[
-          "group/badge inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
+          "group/badge inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-sm font-medium transition-colors",
           if(agent.id == @active_agent_id,
             do: "border-primary/30 bg-primary/10 text-primary",
             else: "border-border bg-background text-foreground/80"
@@ -30,7 +30,7 @@ defmodule AppWeb.ChatComponents do
           type="button"
           phx-click={@set_active_event}
           phx-value-id={agent.id}
-          class="inline-flex items-center gap-1.5"
+          class="inline-flex items-center gap-1"
           title={if(agent.id == @active_agent_id, do: "Current agent", else: "Set as active")}
         >
           <.icon name="hero-cpu-chip" class="size-3.5" />
@@ -61,7 +61,7 @@ defmodule AppWeb.ChatComponents do
           id={"#{@id}-add-agent"}
           variant="outline"
           content_class="w-56"
-          class="h-auto gap-1.5 rounded-full border-dashed bg-background px-3 py-1.5 text-sm font-normal text-muted-foreground shadow-none transition-colors hover:border-primary/40 hover:bg-background hover:text-foreground"
+          class="h-auto gap-1.5 rounded-full border-dashed bg-background px-2.5 py-1 text-sm font-normal text-muted-foreground shadow-none transition-colors hover:border-primary/40 hover:bg-background hover:text-foreground"
         >
           <.icon name="hero-plus" class="size-3.5" /> Add agent
           <:items>
@@ -80,7 +80,7 @@ defmodule AppWeb.ChatComponents do
           id={"#{@id}-add-agent-trigger"}
           type="button"
           disabled
-          class="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border bg-muted/40 px-3 py-1.5 text-sm text-muted-foreground/70"
+          class="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border bg-muted/40 px-2.5 py-1 text-sm text-muted-foreground/70"
         >
           <.icon name="hero-plus" class="size-3.5" /> Add agent
         </button>

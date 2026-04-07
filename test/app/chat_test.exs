@@ -121,6 +121,66 @@ defmodule App.ChatTest do
     end
   end
 
+  describe "create_message/2" do
+    test "moves conflicting explicit positions forward for delegated tool activity", %{
+      user: user,
+      agent: agent
+    } do
+      room =
+        chat_room_fixture(user, %{
+          title: "Delegation",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      _user_message = message_fixture(room, %{role: "user", content: "Delegate this"})
+
+      parent_message =
+        message_fixture(room, %{
+          role: "assistant",
+          content: nil,
+          status: :pending,
+          agent_id: agent.id
+        })
+
+      assert parent_message.position == 2
+
+      assert {:ok, delegated_placeholder} =
+               Chat.create_message(room, %{
+                 role: "assistant",
+                 content: nil,
+                 status: :pending,
+                 agent_id: agent.id,
+                 metadata: %{"delegated" => true, "tool_name" => "ask_agent"}
+               })
+
+      assert delegated_placeholder.position == 3
+
+      assert {:ok, tool_message} =
+               Chat.create_message(room, %{
+                 role: "tool",
+                 content: "Asked the delegated agent to continue.",
+                 name: "ask_agent",
+                 tool_call_id: "tool_ask_agent",
+                 parent_message_id: parent_message.id,
+                 position: 3
+               })
+
+      assert tool_message.position == 4
+
+      assert {:ok, final_assistant_message} =
+               Chat.create_message(room, %{
+                 role: "assistant",
+                 content: "Delegation complete.",
+                 agent_id: agent.id,
+                 position: 4
+               })
+
+      assert final_assistant_message.position == 5
+      assert Enum.map(Chat.list_messages(room), & &1.position) == [1, 2, 3, 4, 5]
+    end
+  end
+
   describe "add_agent_to_room/4" do
     test "adds a new commander to an existing room", %{
       scope: scope,
@@ -284,6 +344,69 @@ defmodule App.ChatTest do
                Enum.at(messages, 0).id,
                delegated_message.id
              ]
+    end
+
+    test "keeps streaming tool and delegated placeholder positions unique during ask_agent", %{
+      user: user,
+      provider: provider
+    } do
+      previous_runner = Application.get_env(:app, :agent_runner)
+      Application.put_env(:app, :agent_runner, App.TestSupport.AskAgentStreamingRunnerStub)
+
+      on_exit(fn ->
+        restore_app_env(:agent_runner, previous_runner)
+      end)
+
+      lead_agent = agent_fixture(user, %{provider: provider, name: "Lead Agent"})
+      research_agent = agent_fixture(user, %{provider: provider, name: "Research Agent"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Delegation Stream",
+          agents: [lead_agent, research_agent],
+          active_agent_id: lead_agent.id
+        })
+
+      Chat.subscribe_chat_room(room)
+
+      assert {:ok, _user_message} =
+               Chat.create_message(room, %{role: "user", content: "Delegate this task"})
+
+      messages = Chat.list_messages(room)
+
+      assert {:ok, placeholder_message} =
+               Chat.create_message(room, %{
+                 role: "assistant",
+                 content: nil,
+                 status: :pending,
+                 agent_id: lead_agent.id,
+                 metadata: %{}
+               })
+
+      assert {:ok, worker_pid} = Chat.start_stream(room, messages, placeholder_message)
+
+      worker_ref = Process.monitor(worker_pid)
+
+      assert_receive {:agent_message_created, delegated_placeholder}
+      assert delegated_placeholder.position == 3
+
+      assert_receive {:agent_message_updated, delegated_message}
+      assert delegated_message.id == delegated_placeholder.id
+      assert delegated_message.status == :completed
+
+      assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, :normal}
+
+      persisted_messages = Chat.list_messages(room)
+      positions = Enum.map(persisted_messages, & &1.position)
+      tool_message = Enum.find(persisted_messages, &(&1.role == "tool"))
+      final_assistant_message = List.last(persisted_messages)
+
+      assert positions == [1, 2, 3, 4, 5]
+      assert placeholder_message.id != final_assistant_message.id
+      assert tool_message.position == 4
+      assert final_assistant_message.role == "assistant"
+      assert final_assistant_message.status == :completed
+      assert final_assistant_message.position == 5
     end
   end
 

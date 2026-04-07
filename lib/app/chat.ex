@@ -134,15 +134,29 @@ defmodule App.Chat do
   end
 
   def create_message(%ChatRoom{} = chat_room, attrs) do
-    %Message{chat_room_id: chat_room.id, position: next_message_position(chat_room)}
-    |> Message.changeset(attrs)
-    |> Repo.insert()
+    Repo.transaction(fn ->
+      lock_chat_room!(chat_room.id)
+
+      attrs =
+        attrs
+        |> ensure_message_position(chat_room.id)
+
+      case %Message{chat_room_id: chat_room.id}
+           |> Message.changeset(attrs)
+           |> Repo.insert() do
+        {:ok, message} ->
+          touch_chat_room(chat_room)
+          message
+
+        {:error, changeset} ->
+          Repo.rollback(changeset)
+      end
+    end)
     |> case do
       {:ok, message} ->
-        touch_chat_room(chat_room)
         {:ok, Repo.preload(message, message_preloads())}
 
-      {:error, _} = error ->
+      {:error, _reason} = error ->
         error
     end
   end
@@ -330,7 +344,67 @@ defmodule App.Chat do
     )
   end
 
-  defp next_message_position(%ChatRoom{id: chat_room_id}) do
+  defp lock_chat_room!(chat_room_id) do
+    Repo.one!(
+      from(chat_room in ChatRoom,
+        where: chat_room.id == ^chat_room_id,
+        lock: "FOR UPDATE",
+        select: chat_room.id
+      )
+    )
+  end
+
+  defp ensure_message_position(attrs, chat_room_id) when is_map(attrs) do
+    case message_position(attrs) do
+      nil ->
+        put_message_position(attrs, next_message_position(chat_room_id))
+
+      position when is_integer(position) and position > 0 ->
+        put_message_position(attrs, next_available_position(chat_room_id, position))
+
+      _other ->
+        attrs
+    end
+  end
+
+  defp ensure_message_position(attrs, _chat_room_id), do: attrs
+
+  defp message_position(attrs) when is_map(attrs),
+    do: Map.get(attrs, :position) || Map.get(attrs, "position")
+
+  defp put_message_position(attrs, position) when is_map(attrs) do
+    if Map.has_key?(attrs, "position") do
+      Map.put(attrs, "position", position)
+    else
+      Map.put(attrs, :position, position)
+    end
+  end
+
+  defp next_available_position(chat_room_id, minimum_position) do
+    from(
+      message in Message,
+      where: message.chat_room_id == ^chat_room_id and message.position >= ^minimum_position,
+      order_by: [asc: message.position],
+      select: message.position
+    )
+    |> Repo.all()
+    |> Enum.reduce_while(minimum_position, fn position, expected_position ->
+      cond do
+        position == expected_position ->
+          {:cont, expected_position + 1}
+
+        position > expected_position ->
+          {:halt, expected_position}
+
+        true ->
+          {:cont, expected_position}
+      end
+    end)
+  end
+
+  defp next_message_position(%ChatRoom{id: chat_room_id}), do: next_message_position(chat_room_id)
+
+  defp next_message_position(chat_room_id) do
     from(
       message in Message,
       where: message.chat_room_id == ^chat_room_id,

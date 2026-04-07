@@ -481,7 +481,7 @@ defmodule App.Chat.StreamWorker do
           nil ->
             case Chat.create_message(state.chat_room, attrs) do
               {:ok, tool_message} ->
-                {:ok, %{state | next_tool_position: state.next_tool_position + 1}, tool_message}
+                {:ok, %{state | next_tool_position: tool_message.position + 1}, tool_message}
 
               {:error, _reason} = error ->
                 error

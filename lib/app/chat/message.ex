@@ -51,6 +51,8 @@ defmodule App.Chat.Message do
     |> foreign_key_constraint(:chat_room_id)
     |> foreign_key_constraint(:agent_id)
     |> foreign_key_constraint(:parent_message_id)
+    |> unique_constraint(:position, name: :chat_messages_chat_room_id_position_index)
+    |> unique_constraint(:tool_call_id, name: :chat_messages_parent_tool_call_id_index)
   end
 
   def thinking(%__MODULE__{} = message), do: metadata_value(message, "thinking")

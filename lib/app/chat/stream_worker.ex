@@ -43,6 +43,7 @@ defmodule App.Chat.StreamWorker do
       thinking: Keyword.get(opts, :thinking, "") || "",
       tool_responses: Keyword.get(opts, :tool_responses, []),
       metadata: Keyword.get(opts, :metadata, %{}) || %{},
+      run_opts: Keyword.get(opts, :run_opts, []),
       token_count: 0,
       task: nil,
       task_ref: nil
@@ -92,7 +93,11 @@ defmodule App.Chat.StreamWorker do
           end
         ]
 
-        case Orchestrator.stream_message(state.chat_room, state.messages, callbacks) do
+        case Orchestrator.stream_message(
+               state.chat_room,
+               state.messages,
+               callbacks ++ state.run_opts
+             ) do
           {:ok, result} -> {:stream_done, {:ok, result}}
           {:error, reason} -> {:stream_done, {:error, reason}}
         end

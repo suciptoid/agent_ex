@@ -126,6 +126,85 @@ defmodule AppWeb.ChatLiveTest do
       assert has_element?(live_view, "#sidebar-chat-loading-#{room.id}")
     end
 
+    test "shows reasoning controls for supported models and forwards the selected effort", %{
+      conn: conn,
+      user: user,
+      scope: scope
+    } do
+      previous_stub_config = Application.get_env(:app, App.TestSupport.AgentRunnerStub)
+      Application.put_env(:app, App.TestSupport.AgentRunnerStub, notify_pid: self())
+
+      on_exit(fn ->
+        if previous_stub_config do
+          Application.put_env(:app, App.TestSupport.AgentRunnerStub, previous_stub_config)
+        else
+          Application.delete_env(:app, App.TestSupport.AgentRunnerStub)
+        end
+      end)
+
+      provider =
+        provider_fixture(user, %{
+          name: "My Anthropic",
+          provider: "anthropic",
+          api_key: "sk-ant-test"
+        })
+
+      agent =
+        agent_fixture(user, %{
+          provider: provider,
+          name: "Reasoner",
+          model: "anthropic:claude-haiku-4-5"
+        })
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Reasoning Room",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
+
+      assert has_element?(live_view, "#chat-reasoning-effort-menu")
+
+      render_click(live_view, "set-reasoning-effort", %{"value" => "none"})
+
+      live_view
+      |> form("#chat-message-form", %{
+        "message" => %{"content" => "Keep it concise"}
+      })
+      |> render_submit()
+
+      assert_receive {:agent_runner_streaming_opts, opts}
+      assert opts[:reasoning_effort] == :none
+
+      assistant_message =
+        wait_for_messages(live_view, scope, room.id, fn messages ->
+          Enum.find(messages, &(&1.role == "assistant" && &1.status == :completed))
+        end)
+
+      assert assistant_message.content == "Reasoner: Keep it concise"
+    end
+
+    test "hides reasoning controls for models without reasoning support", %{
+      conn: conn,
+      user: user
+    } do
+      provider = provider_fixture(user)
+      agent = agent_fixture(user, %{provider: provider, model: "openai:gpt-4.1-mini"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Fast Room",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
+
+      refute has_element?(live_view, "#chat-reasoning-effort-menu")
+    end
+
     test "sends a message and streams the assistant reply", %{
       conn: conn,
       user: user,

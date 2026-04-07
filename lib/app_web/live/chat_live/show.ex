@@ -4,6 +4,23 @@ defmodule AppWeb.ChatLive.Show do
   alias App.Chat
 
   @stream_db_write_every 10
+  @reasoning_effort_options [
+    {"default", "Auto"},
+    {"none", "Disabled"},
+    {"minimal", "Minimal"},
+    {"low", "Low"},
+    {"medium", "Medium"},
+    {"high", "High"},
+    {"xhigh", "X-High"}
+  ]
+  @reasoning_effort_atoms %{
+    "none" => :none,
+    "minimal" => :minimal,
+    "low" => :low,
+    "medium" => :medium,
+    "high" => :high,
+    "xhigh" => :xhigh
+  }
 
   @impl true
   def mount(_params, _session, socket) do
@@ -24,6 +41,8 @@ defmodule AppWeb.ChatLive.Show do
      |> assign(:streaming_tool_responses, [])
      |> assign(:streaming_token_count, 0)
      |> assign(:streaming_active?, false)
+     |> assign(:reasoning_effort, "default")
+     |> assign(:reasoning_supported?, false)
      |> assign(:subscribed_chat_room_id, nil)
      |> assign_message_form(%{"content" => ""})
      |> stream_configure(:messages, dom_id: &"message-#{&1.id}")
@@ -38,6 +57,14 @@ defmodule AppWeb.ChatLive.Show do
   @impl true
   def handle_event("validate", %{"message" => message_params}, socket) do
     {:noreply, assign_message_form(socket, message_params)}
+  end
+
+  def handle_event("set-reasoning-effort", %{"value" => value}, socket) do
+    if reasoning_effort_value?(value) do
+      {:noreply, assign(socket, :reasoning_effort, value)}
+    else
+      {:noreply, put_flash(socket, :error, "Unsupported reasoning level")}
+    end
   end
 
   def handle_event("send", _params, %{assigns: %{streaming_active?: true}} = socket) do
@@ -74,7 +101,12 @@ defmodule AppWeb.ChatLive.Show do
                  metadata: %{}
                }) do
             {:ok, placeholder_message} ->
-              case Chat.start_stream(chat_room, messages, placeholder_message) do
+              case Chat.start_stream(
+                     chat_room,
+                     messages,
+                     placeholder_message,
+                     reasoning_stream_opts(socket)
+                   ) do
                 {:ok, _pid} ->
                   Chat.broadcast_chat_room_from(
                     chat_room.id,
@@ -142,7 +174,12 @@ defmodule AppWeb.ChatLive.Show do
 
         case Chat.update_message(message, attrs) do
           {:ok, placeholder_message} ->
-            case Chat.start_stream(chat_room, prior_messages, placeholder_message) do
+            case Chat.start_stream(
+                   chat_room,
+                   prior_messages,
+                   placeholder_message,
+                   reasoning_stream_opts(socket)
+                 ) do
               {:ok, _pid} ->
                 Chat.broadcast_chat_room_from(
                   chat_room.id,
@@ -380,6 +417,8 @@ defmodule AppWeb.ChatLive.Show do
 
   def streaming_message?(%{status: status}), do: status in [:pending, :streaming]
 
+  def reasoning_effort_options, do: @reasoning_effort_options
+
   def speaker_name(%{role: "user"}), do: "You"
   def speaker_name(%{agent: %{name: name}}), do: name
   def speaker_name(_message), do: "Assistant"
@@ -438,8 +477,9 @@ defmodule AppWeb.ChatLive.Show do
     |> assign(:chat_room, chat_room)
     |> assign(:page_title, chat_room.title || "Chat")
     |> assign(:latest_message_id, latest_message_id(messages))
+    |> assign_reasoning_state(chat_room)
     |> refresh_sidebar_chat_rooms()
-    |> stream(:messages, Enum.reverse(messages), reset: true)
+    |> stream(:messages, messages, reset: true)
     |> sync_main_stream(messages)
   end
 
@@ -463,6 +503,35 @@ defmodule AppWeb.ChatLive.Show do
   end
 
   defp active_agent_for_room(_), do: nil
+
+  defp assign_reasoning_state(socket, chat_room) do
+    assign(socket, :reasoning_supported?, reasoning_supported_for_chat_room?(chat_room))
+  end
+
+  defp reasoning_supported_for_chat_room?(chat_room) do
+    chat_room
+    |> active_agent_for_room()
+    |> reasoning_supported_for_agent?()
+  end
+
+  defp reasoning_supported_for_agent?(%{model: model}) when is_binary(model) do
+    case ReqLLM.model(model) do
+      {:ok, llm_model} -> ReqLLM.ModelHelpers.reasoning_enabled?(llm_model)
+      _ -> false
+    end
+  end
+
+  defp reasoning_supported_for_agent?(_agent), do: false
+
+  def reasoning_effort_label(value) do
+    Enum.find_value(@reasoning_effort_options, "Auto", fn {option_value, label} ->
+      if option_value == value, do: label
+    end)
+  end
+
+  def reasoning_button_label(value) do
+    "Reasoning #{String.downcase(reasoning_effort_label(value))}"
+  end
 
   def room_agents(%{chat_room_agents: chat_room_agents}) do
     Enum.map(chat_room_agents, & &1.agent)
@@ -513,6 +582,18 @@ defmodule AppWeb.ChatLive.Show do
     |> assign(:streaming_tool_responses, streaming_tool_responses)
     |> assign(:streaming_token_count, 0)
     |> assign(:streaming_active?, true)
+  end
+
+  defp reasoning_stream_opts(socket) do
+    case {socket.assigns.reasoning_supported?,
+          Map.get(@reasoning_effort_atoms, socket.assigns.reasoning_effort)} do
+      {true, effort} when is_atom(effort) -> [reasoning_effort: effort]
+      _ -> []
+    end
+  end
+
+  defp reasoning_effort_value?(value) do
+    Enum.any?(@reasoning_effort_options, fn {option_value, _label} -> option_value == value end)
   end
 
   defp reset_main_stream(socket) do
@@ -886,7 +967,7 @@ defmodule AppWeb.ChatLive.Show do
   end
 
   defp stream_insert_message(socket, message) do
-    stream_insert(socket, :messages, message, at: 0)
+    stream_insert(socket, :messages, message, at: -1)
   end
 
   defp append_text(current, token), do: (current || "") <> token

@@ -69,6 +69,7 @@ defmodule App.Chat.Orchestrator do
       run_opts =
         chat_room
         |> multi_agent_opts(messages, callbacks)
+        |> Keyword.merge(forwarded_stream_run_opts(callbacks))
         |> Keyword.merge(callback_run_opts(callbacks))
         |> maybe_inject_title_tool(chat_room, callbacks)
 
@@ -442,6 +443,24 @@ defmodule App.Chat.Orchestrator do
       on_tool_result: callbacks[:on_tool_result]
     ]
     |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+  end
+
+  defp forwarded_stream_run_opts(callbacks) do
+    Keyword.drop(callbacks, [
+      :recipient,
+      :on_result,
+      :on_thinking,
+      :on_tool_start,
+      :on_tool_result,
+      :on_title_updated,
+      :on_agent_message_created,
+      :on_agent_message_stream_chunk,
+      :on_agent_message_thinking_chunk,
+      :on_agent_message_tool_started,
+      :on_agent_message_tool_result,
+      :on_agent_message_updated,
+      :on_active_agent_changed
+    ])
   end
 
   defp notify_active_agent_changed(callbacks, agent_id) do

@@ -49,7 +49,7 @@
               id="chat-messages"
               phx-update="stream"
               phx-hook=".ChatMessages"
-              class="flex h-full min-h-full flex-1 flex-col-reverse overflow-y-auto"
+              class="flex h-full min-h-full flex-1 flex-col overflow-y-auto overscroll-contain"
             >
               <div
                 id="chat-messages-empty-state"
@@ -234,7 +234,7 @@
             </div>
           </div>
 
-          <div class="relative mt-3">
+          <div class="relative mx-auto mt-4 w-full max-w-4xl px-1 sm:px-2">
             <button
               id="scroll-to-bottom-btn"
               class="absolute -top-8 left-1/2 z-10 hidden -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-background/95 px-3 py-1 text-xs font-medium text-muted-foreground shadow-md backdrop-blur transition-all hover:bg-muted hover:text-foreground"
@@ -250,13 +250,42 @@
               data-streaming={to_string(@streaming_active?)}
               class="relative"
             >
+              <%= if @reasoning_supported? do %>
+                <.menu_button
+                  id="chat-reasoning-effort-menu"
+                  variant="outline"
+                  content_class="w-44"
+                  class="absolute bottom-3 left-3 z-10 h-9 gap-1.5 rounded-xl border-border/80 bg-background/95 px-3 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <.icon name="hero-sparkles" class="size-3.5" />
+                  {reasoning_button_label(@reasoning_effort)}
+                  <:items>
+                    <.menu_item
+                      :for={{value, label} <- reasoning_effort_options()}
+                      id={"chat-reasoning-effort-option-#{value}"}
+                      phx-click="set-reasoning-effort"
+                      phx-value-value={value}
+                    >
+                      <span class="flex-1">{label}</span>
+                      <.icon
+                        :if={@reasoning_effort == value}
+                        name="hero-check"
+                        class="size-4"
+                      />
+                    </.menu_item>
+                  </:items>
+                </.menu_button>
+              <% end %>
               <.textarea
                 field={@message_form[:content]}
                 id="chat-message-input"
                 rows="2"
                 placeholder="Message… (Enter to send, Shift+Enter for new line)"
                 phx-hook=".ChatInput"
-                class="min-h-24 resize-none rounded-2xl px-4 py-4 pr-14"
+                class={
+                    "min-h-24 resize-none rounded-2xl py-4 pr-14 " <>
+                      if(@reasoning_supported?, do: "pl-36 sm:pl-40", else: "px-4")
+                  }
               />
               <button
                 id="chat-message-submit"
@@ -314,109 +343,52 @@
     }
   </script>
 
-  <script :type={Phoenix.LiveView.ColocatedHook} name=".CollapsibleSection">
-    export default {
-      mounted() {
-        this.userToggled = false;
-        this.unbind();
-        this.bind();
-        this.applyDefault();
-      },
-
-      updated() {
-        this.unbind();
-        this.bind();
-        if (!this.userToggled) {
-          this.applyDefault();
-        } else {
-          this.render();
-        }
-      },
-
-      destroyed() {
-        this.unbind();
-      },
-
-      bind() {
-        this.btn = this.el.querySelector("[data-toggle-btn]");
-        this.body = this.el.querySelector("[data-body]");
-        this.icon = this.btn && this.btn.querySelector("svg");
-        this.label = this.btn && this.btn.querySelector("[data-label]");
-
-        if (!this.btn || !this.body) return;
-
-        this.onClick = () => {
-          this.userToggled = true;
-          this.expanded = !this.expanded;
-          this.render();
-        };
-
-        this.btn.addEventListener("click", this.onClick);
-      },
-
-      unbind() {
-        if (this.btn && this.onClick) {
-          this.btn.removeEventListener("click", this.onClick);
-        }
-      },
-
-      applyDefault() {
-        this.expanded = this.el.dataset.defaultExpanded === "true";
-        this.render();
-      },
-
-      render() {
-        if (!this.btn || !this.body) return;
-
-        const expandedLabel = this.el.dataset.labelExpanded || "Hide details";
-        const collapsedLabel = this.el.dataset.labelCollapsed || "Show details";
-        const scrollContainer = document.getElementById("chat-messages");
-        const previousMetrics = scrollContainer ? {
-          scrollTop: scrollContainer.scrollTop,
-          scrollHeight: scrollContainer.scrollHeight
-        } : null;
-
-        this.btn.setAttribute("aria-expanded", this.expanded ? "true" : "false");
-
-        if (this.expanded) {
-          this.body.classList.remove("hidden");
-          if (this.label) this.label.textContent = expandedLabel;
-          if (this.icon) this.icon.style.transform = "rotate(90deg)";
-        } else {
-          this.body.classList.add("hidden");
-          if (this.label) this.label.textContent = collapsedLabel;
-          if (this.icon) this.icon.style.transform = "rotate(0deg)";
-        }
-
-        this.el.dispatchEvent(new CustomEvent("chat:content-resized", {
-          bubbles: true,
-          detail: previousMetrics
-        }));
-      }
-    }
-  </script>
-
   <script :type={Phoenix.LiveView.ColocatedHook} name=".ChatMessages">
     export default {
       mounted() {
         this.isNearLatest = true
         this._programmaticScroll = false
         this.scrollBtn = document.getElementById("scroll-to-bottom-btn")
+        this.pendingAccordionAnchor = null
 
         this.onScroll = () => {
           if (this._programmaticScroll) return
           this.checkScrollPosition()
         }
 
-        this.onContentResized = (event) => {
-          if (event.detail) {
-            this.previousScrollTop = event.detail.scrollTop
-            this.previousScrollHeight = event.detail.scrollHeight
-          } else {
-            this.previousScrollTop = this.el.scrollTop
-            this.previousScrollHeight = this.el.scrollHeight
+        this.onSummaryClick = (event) => {
+          const summary = event.target.closest("summary")
+          if (!summary || !this.el.contains(summary)) return
+
+          this.pendingAccordionAnchor = {
+            summary,
+            top: summary.getBoundingClientRect().top
           }
-          this.restoreScrollPosition()
+        }
+
+        this.onAccordionToggle = (event) => {
+          const details = event.target.closest("details")
+          if (!details || !this.el.contains(details)) return
+
+          const anchor = this.pendingAccordionAnchor
+          this.pendingAccordionAnchor = null
+
+          window.requestAnimationFrame(() => {
+            this.withProgrammaticScroll(() => {
+              if (this.isNearLatest) {
+                this.scrollToLatest()
+                return
+              }
+
+              if (!anchor || !anchor.summary?.isConnected) return
+
+              const delta = anchor.summary.getBoundingClientRect().top - anchor.top
+
+              if (delta !== 0) {
+                this.el.scrollTop += delta
+              }
+            })
+          })
         }
 
         this.onScrollButtonClick = () => {
@@ -425,7 +397,8 @@
         }
 
         this.el.addEventListener("scroll", this.onScroll)
-        this.el.addEventListener("chat:content-resized", this.onContentResized)
+        this.el.addEventListener("click", this.onSummaryClick)
+        this.el.addEventListener("toggle", this.onAccordionToggle, true)
         if (this.scrollBtn) {
           this.scrollBtn.addEventListener("click", this.onScrollButtonClick)
         }
@@ -441,26 +414,31 @@
         })
       },
 
-      beforeUpdate() {
-        this.previousScrollTop = this.el.scrollTop
-        this.previousScrollHeight = this.el.scrollHeight
-      },
-
       updated() {
-        this.restoreScrollPosition()
+        if (this.isNearLatest) {
+          window.requestAnimationFrame(() => {
+            this.withProgrammaticScroll(() => this.scrollToLatest())
+          })
+        } else {
+          this.updateButtonVisibility()
+        }
       },
 
       destroyed() {
         this.el.removeEventListener("scroll", this.onScroll)
-        this.el.removeEventListener("chat:content-resized", this.onContentResized)
+        this.el.removeEventListener("click", this.onSummaryClick)
+        this.el.removeEventListener("toggle", this.onAccordionToggle, true)
         if (this.scrollBtn) {
           this.scrollBtn.removeEventListener("click", this.onScrollButtonClick)
         }
       },
 
       checkScrollPosition() {
-        const threshold = Math.max(this.el.clientHeight * 0.15, 40)
-        this.isNearLatest = this.el.scrollTop <= threshold
+        const threshold = Math.max(this.el.clientHeight * 0.1, 72)
+        const distanceFromBottom =
+          this.el.scrollHeight - this.el.clientHeight - this.el.scrollTop
+
+        this.isNearLatest = distanceFromBottom <= threshold
         this.updateButtonVisibility()
       },
 
@@ -470,30 +448,18 @@
         }
       },
 
-      restoreScrollPosition() {
+      withProgrammaticScroll(callback) {
         this._programmaticScroll = true
+        callback()
         window.requestAnimationFrame(() => {
-          if (this.isNearLatest) {
-            this.scrollToLatest()
-          } else if (
-            typeof this.previousScrollTop === "number" &&
-            typeof this.previousScrollHeight === "number"
-          ) {
-            const heightDelta = this.el.scrollHeight - this.previousScrollHeight
-            this.el.scrollTop = Math.max(0, this.previousScrollTop + heightDelta)
-          }
-
-          this.updateButtonVisibility()
-
-          requestAnimationFrame(() => {
-            this._programmaticScroll = false
-          })
+          this._programmaticScroll = false
+          this.checkScrollPosition()
         })
       },
 
       scrollToLatest(options = {}) {
         this.el.scrollTo({
-          top: 0,
+          top: this.el.scrollHeight,
           behavior: options.behavior || "auto"
         })
         this.isNearLatest = true

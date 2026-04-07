@@ -14,6 +14,12 @@ defmodule App.TestSupport.AgentRunnerStub do
 
   def run_streaming(agent, messages, recipient, opts \\ []) do
     content = stub_content(agent, messages)
+    config = Application.get_env(:app, __MODULE__, [])
+    notify_pid = Keyword.get(config, :notify_pid)
+
+    if is_pid(notify_pid) do
+      send(notify_pid, {:agent_runner_streaming_opts, opts})
+    end
 
     emit_chunk =
       stream_callback(recipient, opts, :on_result, fn token -> {:stream_chunk, token} end)

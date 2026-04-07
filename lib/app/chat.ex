@@ -147,7 +147,7 @@ defmodule App.Chat do
     end
   end
 
-  def start_stream(%ChatRoom{} = chat_room, messages, %Message{} = message)
+  def start_stream(%ChatRoom{} = chat_room, messages, %Message{} = message, opts \\ [])
       when is_list(messages) do
     DynamicSupervisor.start_child(
       App.Chat.StreamSupervisor,
@@ -158,7 +158,8 @@ defmodule App.Chat do
        content: message.content || "",
        thinking: message.metadata["thinking"] || "",
        tool_responses: message.metadata["tool_responses"] || [],
-       metadata: message.metadata || %{}}
+       metadata: message.metadata || %{},
+       run_opts: Keyword.take(opts, [:reasoning_effort])}
     )
   end
 

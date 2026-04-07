@@ -1,0 +1,1 @@
+- Enabled searchable mode on the provider dropdown so users can type to narrow the library-backed provider list.

@@ -48,6 +48,13 @@ defmodule App.ProvidersTest do
     end
   end
 
+  describe "provider_options/0" do
+    test "returns library-backed provider options" do
+      assert {"openai", "OpenAI"} in Providers.provider_options()
+      assert {"github_copilot", "GitHub Copilot"} in Providers.provider_options()
+    end
+  end
+
   describe "delete_provider/2" do
     test "deletes provider owned by user", %{scope: scope, user: user} do
       provider = provider_fixture(user)

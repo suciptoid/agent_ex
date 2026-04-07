@@ -33,15 +33,8 @@ defmodule AppWeb.ProviderLive.FormComponent do
             <.select
               field={@form[:provider]}
               label="Provider"
-              options={[
-                {"openai", "OpenAI"},
-                {"anthropic", "Anthropic"},
-                {"google", "Google"},
-                {"gemini", "Gemini"},
-                {"mistral", "Mistral"},
-                {"cohere", "Cohere"},
-                {"openrouter", "OpenRouter"}
-              ]}
+              options={@provider_options}
+              searchable={true}
               placeholder="Select a provider"
             />
 
@@ -72,6 +65,7 @@ defmodule AppWeb.ProviderLive.FormComponent do
     {:ok,
      socket
      |> assign(assigns)
+     |> assign(:provider_options, Providers.provider_options())
      |> assign_form(changeset)}
   end
 

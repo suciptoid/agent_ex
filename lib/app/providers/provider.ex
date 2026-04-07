@@ -14,13 +14,11 @@ defmodule App.Providers.Provider do
     timestamps(type: :utc_datetime)
   end
 
-  @valid_providers ~w(openai anthropic google gemini mistral cohere openrouter)
-
   def changeset(provider, attrs) do
     provider
     |> cast(attrs, [:name, :provider, :api_key])
     |> validate_required([:provider, :api_key])
-    |> validate_inclusion(:provider, @valid_providers)
+    |> validate_inclusion(:provider, App.Providers.valid_provider_values())
     |> foreign_key_constraint(:user_id)
   end
 end

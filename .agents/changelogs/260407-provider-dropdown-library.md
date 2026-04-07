@@ -1,0 +1,2 @@
+- Replaced the hardcoded provider dropdown source with library-backed provider options from ReqLLM/LLMDB.
+- Updated provider validation to use the same provider catalog so the form and schema stay aligned.

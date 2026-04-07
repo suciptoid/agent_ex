@@ -18,3 +18,5 @@
 - the persisted transcript now stores the real tool loop as `assistant(tool_calls) -> tool -> assistant(final)` in both non-streaming and streaming paths
 - the stream worker hands off the active registry key to the final assistant turn, preserves ordered positions, and stops the UI from reintroducing legacy `tool_responses` metadata during streaming
 - chat LiveView and chat tests now read/render the real transcript rows directly, while legacy metadata helpers remain as fallback for older records
+- the UI now hides internal title tools, groups tool results into the assistant tool-call block, keeps streaming status inside the message body, and reloads visible rows from persisted order on structural updates
+- each tool call now renders as a single accordion block with the response-style header, using a spinner while the tool is running and a tool icon once it completes

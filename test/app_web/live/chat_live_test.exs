@@ -362,11 +362,11 @@ defmodule AppWeb.ChatLiveTest do
                "Thinking"
              )
 
-      assert has_element?(live_view, "#message-tool-call-#{tool_call_message.id}-0")
+      assert has_element?(live_view, "#message-tool-#{tool_call_message.id}-0")
 
       assert has_element?(
                live_view,
-               "#message-tool-call-#{tool_call_message.id}-0 details summary",
+               "#message-tool-#{tool_call_message.id}-0 details summary",
                "web_fetch"
              )
 
@@ -375,7 +375,7 @@ defmodule AppWeb.ChatLiveTest do
                "#message-thinking-#{tool_call_message.id} details:not([open])"
              )
 
-      assert has_element?(live_view, "#message-#{tool_message.id}", "sample payload")
+      refute has_element?(live_view, "#message-#{tool_message.id}")
 
       assert has_element?(
                live_view,
@@ -472,9 +472,22 @@ defmodule AppWeb.ChatLiveTest do
           Enum.find(messages, &(&1.role == "tool" && &1.status == :completed))
         end)
 
+      tool_call_message =
+        wait_for_messages(nil, scope, room.id, fn messages ->
+          Enum.find(messages, fn message ->
+            message.role == "assistant" and length(message.metadata["tool_calls"] || []) == 1
+          end)
+        end)
+
       assert_eventually(second_tab, fn ->
-        has_element?(second_tab, "#message-#{tool_message.id}", "live payload")
+        has_element?(
+          second_tab,
+          "#message-tool-#{tool_call_message.id}-0 details summary",
+          "web_fetch"
+        )
       end)
+
+      refute has_element?(second_tab, "#message-#{tool_message.id}")
 
       refute Chat.get_chat_room!(scope, room.id)
              |> Chat.list_messages()
@@ -642,6 +655,101 @@ defmodule AppWeb.ChatLiveTest do
       assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, _reason}
       assert completed_message.content == "Slow Agent: Finish even if I leave"
       assert completed_message.agent_id == agent.id
+    end
+
+    test "hides internal title tools and merges tool results into the assistant block", %{
+      conn: conn,
+      user: user
+    } do
+      provider = provider_fixture(user)
+      agent = agent_fixture(user, %{provider: provider, name: "Mini"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Grouped Tools",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      _user_message = message_fixture(room, %{role: "user", content: "run df -h on shell"})
+
+      internal_tool_call_message =
+        message_fixture(room, %{
+          role: "assistant",
+          agent_id: agent.id,
+          content: nil,
+          status: :completed,
+          metadata: %{
+            "tool_calls" => [
+              %{
+                "id" => "title_1",
+                "name" => "update_chatroom_title",
+                "arguments" => %{"title" => "Run df -h"}
+              }
+            ]
+          }
+        })
+
+      internal_tool_message =
+        message_fixture(room, %{
+          role: "tool",
+          name: "update_chatroom_title",
+          tool_call_id: "title_1",
+          parent_message_id: internal_tool_call_message.id,
+          content: "Title set to: Run df -h",
+          metadata: %{"arguments" => %{"title" => "Run df -h"}}
+        })
+
+      visible_tool_call_message =
+        message_fixture(room, %{
+          role: "assistant",
+          agent_id: agent.id,
+          content: nil,
+          status: :completed,
+          metadata: %{
+            "tool_calls" => [
+              %{
+                "id" => "shell_1",
+                "name" => "shell",
+                "arguments" => %{"command" => "df -h"}
+              }
+            ]
+          }
+        })
+
+      visible_tool_message =
+        message_fixture(room, %{
+          role: "tool",
+          name: "shell",
+          tool_call_id: "shell_1",
+          parent_message_id: visible_tool_call_message.id,
+          content: "Filesystem output",
+          metadata: %{"arguments" => %{"command" => "df -h"}}
+        })
+
+      final_message =
+        message_fixture(room, %{
+          role: "assistant",
+          agent_id: agent.id,
+          content: "Here's the output of df -h from the shell you requested."
+        })
+
+      {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
+
+      refute has_element?(live_view, "#message-#{internal_tool_call_message.id}")
+      refute has_element?(live_view, "#message-#{internal_tool_message.id}")
+      refute render(live_view) =~ "update_chatroom_title"
+
+      assert has_element?(live_view, "#message-tool-#{visible_tool_call_message.id}-0")
+
+      assert has_element?(
+               live_view,
+               "#message-tool-#{visible_tool_call_message.id}-0 details summary",
+               "shell"
+             )
+
+      refute has_element?(live_view, "#message-#{visible_tool_message.id}")
+      assert has_element?(live_view, "#message-#{final_message.id}")
     end
 
     test "renders delegated agent streaming updates", %{conn: conn, user: user} do

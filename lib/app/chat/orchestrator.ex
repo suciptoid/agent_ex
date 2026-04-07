@@ -760,9 +760,11 @@ defmodule App.Chat.Orchestrator do
          """
 
          ## Auto-Title
-         This is a new conversation without a title. Before responding to the user,
+         This is a new conversation without a title. Before your final response,
          call the `update_chatroom_title` tool with a concise title (under 60 chars)
-         that summarizes what the user is asking about. Do not mention this action
+         that summarizes what the user is asking about. If you are already calling
+         other tools, include `update_chatroom_title` in the same tool-call batch
+         instead of creating a separate tool-only turn. Do not mention this action
          in your response to the user.
          """)
       |> String.trim()

@@ -25,3 +25,26 @@ Changes
 Validation
 - `mix test test/app/chat_test.exs test/app_web/live/chat_live_test.exs` ✅
 - `mix precommit` ⚠️ still blocked only by the same unrelated baseline failures in `AppWeb.UserAuthTest`, `AppWeb.UserLive.LoginTest`, and `App.UsersTest`
+
+Single-block tool UI
+
+Changes
+- collapsed the separate tool request and tool response accordions into one derived tool-entry block per tool call
+- switched the header to the response-style treatment the user asked for: spinner while the tool is pending, tool icon once the result lands, and no extra `Call`/`Response` label text
+- updated the chat LiveView tests to assert the new unified tool block selectors
+
+Validation
+- `mix test test/app/chat_test.exs test/app_web/live/chat_live_test.exs` ✅
+- `mix precommit` ⚠️ still blocked only by the same unrelated baseline failures in `AppWeb.UserAuthTest`, `AppWeb.UserLive.LoginTest`, and `App.UsersTest`
+
+Transcript UI polish
+
+Changes
+- preloaded assistant `tool_messages` so tool results can render inside the assistant tool-call block while tool rows stay hidden in the visible transcript
+- reloaded the visible transcript from persisted message order on structural PubSub updates, fixing the out-of-order live view that previously only corrected itself after refresh
+- filtered internal `update_chatroom_title` calls/results out of the rendered transcript and adjusted the auto-title prompt so title updates are batched with other tool calls instead of encouraging a separate visible tool-only turn
+- removed the assistant-level tools badge, moved the streaming indicator into the assistant content area, and added a focused LiveView test that covers hidden internal title tools plus grouped visible tool results
+
+Validation
+- `mix test test/app/chat_test.exs test/app_web/live/chat_live_test.exs` ✅
+- `mix precommit` ⚠️ still blocked only by the same unrelated baseline failures in `AppWeb.UserAuthTest`, `AppWeb.UserLive.LoginTest`, and `App.UsersTest`

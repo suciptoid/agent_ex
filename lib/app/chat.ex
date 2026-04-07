@@ -258,9 +258,12 @@ defmodule App.Chat do
   end
 
   defp message_preloads do
-    [
-      :agent
-    ]
+    tool_message_query =
+      from tool_message in Message,
+        where: tool_message.role == "tool",
+        order_by: [asc: tool_message.position]
+
+    [:agent, tool_messages: tool_message_query]
   end
 
   defp fetch_agents(%Scope{} = scope, agent_ids, %Ecto.Changeset{} = changeset) do

@@ -21,6 +21,7 @@ defmodule AppWeb.ChatLive.Show do
     "high" => :high,
     "xhigh" => :xhigh
   }
+  @hidden_tool_names ["update_chatroom_title"]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -316,12 +317,7 @@ defmodule AppWeb.ChatLive.Show do
 
   def handle_info({:agent_message_created, message}, socket) do
     if same_chat_room_message?(socket, message) do
-      {:noreply,
-       socket
-       |> maybe_track_agent_stream(message)
-       |> assign(:latest_message_id, message.id)
-       |> refresh_sidebar_chat_rooms()
-       |> stream_insert_message(message)}
+      {:noreply, refresh_chat_messages(socket)}
     else
       {:noreply, socket}
     end
@@ -329,11 +325,7 @@ defmodule AppWeb.ChatLive.Show do
 
   def handle_info({:user_message_created, message}, socket) do
     if same_chat_room_message?(socket, message) do
-      {:noreply,
-       socket
-       |> assign(:latest_message_id, message.id)
-       |> refresh_sidebar_chat_rooms()
-       |> stream_insert_message(message)}
+      {:noreply, refresh_chat_messages(socket)}
     else
       {:noreply, socket}
     end
@@ -357,12 +349,7 @@ defmodule AppWeb.ChatLive.Show do
 
   def handle_info({:agent_message_updated, message}, socket) do
     if same_chat_room_message?(socket, message) do
-      {:noreply,
-       socket
-       |> clear_agent_stream(message.id)
-       |> assign(:latest_message_id, message.id)
-       |> refresh_sidebar_chat_rooms()
-       |> stream_insert_message(message)}
+      {:noreply, socket |> clear_agent_stream(message.id) |> refresh_chat_messages()}
     else
       {:noreply, socket}
     end
@@ -384,15 +371,7 @@ defmodule AppWeb.ChatLive.Show do
 
   def handle_info({:stream_updated, message}, socket) do
     if same_chat_room_message?(socket, message) do
-      socket =
-        socket
-        |> clear_agent_stream(message.id)
-        |> assign(:latest_message_id, message.id)
-        |> refresh_sidebar_chat_rooms()
-        |> stream_insert_message(message)
-        |> sync_stream_state_from_update(message)
-
-      {:noreply, socket}
+      {:noreply, socket |> clear_agent_stream(message.id) |> refresh_chat_messages()}
     else
       {:noreply, socket}
     end
@@ -402,7 +381,6 @@ defmodule AppWeb.ChatLive.Show do
 
   def user_message?(message), do: message.role == "user"
   def assistant_message?(message), do: message.role == "assistant"
-  def tool_message?(message), do: message.role == "tool"
   def latest_message?(message, latest_message_id), do: message.id == latest_message_id
   def message_has_content?(message), do: (Map.get(message, :content) || "") != ""
 
@@ -444,7 +422,7 @@ defmodule AppWeb.ChatLive.Show do
   def tool_responses(%Message{} = message) do
     message
     |> Message.tool_responses()
-    |> Enum.reject(&(Map.get(&1, "name") == "update_chatroom_title"))
+    |> Enum.reject(&hidden_tool_response?/1)
   end
 
   def tool_responses(message) do
@@ -452,7 +430,7 @@ defmodule AppWeb.ChatLive.Show do
     |> metadata_value("tool_responses")
     |> List.wrap()
     |> Enum.reject(&is_nil/1)
-    |> Enum.reject(&(Map.get(&1, "name") == "update_chatroom_title"))
+    |> Enum.reject(&hidden_tool_response?/1)
   end
 
   def tool_response_label(tool_response) do
@@ -472,18 +450,79 @@ defmodule AppWeb.ChatLive.Show do
     end
   end
 
-  def assistant_tool_calls(%Message{} = message), do: Message.tool_calls(message)
+  def assistant_tool_calls(%Message{} = message) do
+    message
+    |> Message.tool_calls()
+    |> Enum.reject(&hidden_tool_call?/1)
+  end
 
   def assistant_tool_calls(message) do
     message
     |> metadata_value("tool_calls")
     |> List.wrap()
     |> Enum.reject(&is_nil/1)
+    |> Enum.reject(&hidden_tool_call?/1)
+  end
+
+  def assistant_tool_entries(message) do
+    tool_calls = assistant_tool_calls(message)
+    tool_responses = tool_responses(message)
+
+    {entries, used_response_ids} =
+      Enum.map_reduce(tool_calls, MapSet.new(), fn tool_call, used_response_ids ->
+        tool_call_id = tool_call_id(tool_call)
+        tool_response = Enum.find(tool_responses, &(tool_response_id(&1) == tool_call_id))
+
+        used_response_ids =
+          if is_binary(tool_call_id) and tool_call_id != "" do
+            MapSet.put(used_response_ids, tool_call_id)
+          else
+            used_response_ids
+          end
+
+        {%{tool_call: tool_call, tool_response: tool_response}, used_response_ids}
+      end)
+
+    extra_entries =
+      tool_responses
+      |> Enum.reject(&(tool_response_id(&1) in used_response_ids))
+      |> Enum.map(fn tool_response ->
+        %{tool_call: nil, tool_response: tool_response}
+      end)
+
+    entries ++ extra_entries
   end
 
   def tool_call_label(tool_call) do
     Map.get(tool_call, "name") || Map.get(tool_call, :name) || "tool"
   end
+
+  def tool_entry_label(%{tool_response: tool_response}) when is_map(tool_response),
+    do: tool_response_label(tool_response)
+
+  def tool_entry_label(%{tool_call: tool_call}) when is_map(tool_call),
+    do: tool_call_label(tool_call)
+
+  def tool_entry_label(_tool_entry), do: "tool"
+
+  def tool_entry_error?(%{tool_response: tool_response}) when is_map(tool_response),
+    do: tool_response_error?(tool_response)
+
+  def tool_entry_error?(_tool_entry), do: false
+
+  def tool_entry_running?(%{tool_response: nil}), do: true
+
+  def tool_entry_running?(%{tool_response: tool_response}) when is_map(tool_response),
+    do: tool_response_running?(tool_response)
+
+  def tool_entry_running?(_tool_entry), do: false
+
+  def tool_entry_content(%{tool_response: nil}), do: "Waiting for tool output..."
+
+  def tool_entry_content(%{tool_response: tool_response}) when is_map(tool_response),
+    do: tool_response_content(tool_response)
+
+  def tool_entry_content(_tool_entry), do: ""
 
   def tool_call_arguments_text(tool_call) do
     case Map.get(tool_call, "arguments") || Map.get(tool_call, :arguments) do
@@ -491,13 +530,6 @@ defmodule AppWeb.ChatLive.Show do
       arguments -> inspect(arguments, pretty: true, limit: :infinity, width: 80)
     end
   end
-
-  def tool_message_content(%{content: nil} = message) do
-    if streaming_message?(message), do: "Waiting for tool output...", else: ""
-  end
-
-  def tool_message_content(%{content: content}) when is_binary(content), do: content
-  def tool_message_content(_message), do: ""
 
   def thinking_default_expanded?(message) do
     streaming_message?(message) and not message_has_content?(message)
@@ -512,17 +544,42 @@ defmodule AppWeb.ChatLive.Show do
     end
   end
 
+  def visible_message?(%{role: "tool"}), do: false
+
+  def visible_message?(message) do
+    not assistant_message?(message) or
+      delegated_message?(message) or
+      streaming_message?(message) or
+      message_has_content?(message) or
+      assistant_tool_calls(message) != [] or
+      tool_responses(message) != []
+  end
+
   defp load_chat_room(socket, id) do
     chat_room = Chat.get_chat_room!(socket.assigns.current_scope, id)
     messages = Chat.list_messages(chat_room)
+    visible_messages = visible_messages(messages)
 
     socket
     |> assign(:chat_room, chat_room)
     |> assign(:page_title, chat_room.title || "Chat")
-    |> assign(:latest_message_id, latest_message_id(messages))
+    |> assign(:latest_message_id, latest_message_id(visible_messages))
     |> assign_reasoning_state(chat_room)
     |> refresh_sidebar_chat_rooms()
-    |> stream(:messages, messages, reset: true)
+    |> stream(:messages, visible_messages, reset: true)
+    |> sync_main_stream(messages)
+  end
+
+  defp refresh_chat_messages(socket) do
+    chat_room = Chat.get_chat_room!(socket.assigns.current_scope, socket.assigns.chat_room.id)
+    messages = Chat.list_messages(chat_room)
+    visible_messages = visible_messages(messages)
+
+    socket
+    |> assign(:chat_room, chat_room)
+    |> assign(:latest_message_id, latest_message_id(visible_messages))
+    |> refresh_sidebar_chat_rooms()
+    |> stream(:messages, visible_messages, reset: true)
     |> sync_main_stream(messages)
   end
 
@@ -674,23 +731,6 @@ defmodule AppWeb.ChatLive.Show do
   defp current_stream_metadata(socket) do
     build_message_metadata(%{}, socket.assigns.streaming_thinking, [])
   end
-
-  defp maybe_track_agent_stream(socket, %{id: id, status: status} = message)
-       when status in [:pending, :streaming] do
-    update(socket, :agent_message_streams, fn streams ->
-      Map.put(streams, id, %{
-        content: message.content || "",
-        thinking: message_thinking(message) || "",
-        tool_responses: tool_responses(message),
-        token_count: 0,
-        inserted_at: message.inserted_at,
-        agent: message.agent,
-        metadata: message.metadata || %{}
-      })
-    end)
-  end
-
-  defp maybe_track_agent_stream(socket, _message), do: socket
 
   defp clear_agent_stream(socket, message_id) do
     update(socket, :agent_message_streams, &Map.delete(&1, message_id))
@@ -929,24 +969,6 @@ defmodule AppWeb.ChatLive.Show do
 
   defp sync_main_stream_from_message(socket, _message), do: socket
 
-  defp sync_stream_state_from_update(socket, %{status: status} = message)
-       when status in [:completed, :error] do
-    socket =
-      if socket.assigns.streaming_message_id == message.id do
-        reset_main_stream(socket)
-      else
-        socket
-      end
-
-    maybe_track_agent_stream(socket, message)
-  end
-
-  defp sync_stream_state_from_update(socket, message) do
-    socket
-    |> sync_main_stream_from_message(message)
-    |> maybe_track_agent_stream(message)
-  end
-
   defp merge_tool_response(tool_responses, tool_response) do
     case Map.get(tool_response, "id") do
       nil ->
@@ -970,6 +992,35 @@ defmodule AppWeb.ChatLive.Show do
   defp stream_insert_message(socket, message) do
     stream_insert(socket, :messages, message, at: -1)
   end
+
+  defp visible_messages(messages) do
+    Enum.filter(messages, &visible_message?/1)
+  end
+
+  defp tool_call_id(tool_call) when is_map(tool_call) do
+    Map.get(tool_call, "id") || Map.get(tool_call, :id)
+  end
+
+  defp tool_response_id(tool_response) when is_map(tool_response) do
+    Map.get(tool_response, "id") || Map.get(tool_response, :id)
+  end
+
+  defp tool_response_id(_tool_response), do: nil
+
+  defp hidden_tool_call?(tool_call) do
+    tool_call
+    |> Map.get("name", Map.get(tool_call, :name))
+    |> hidden_tool_name?()
+  end
+
+  defp hidden_tool_response?(tool_response) do
+    tool_response
+    |> Map.get("name", Map.get(tool_response, :name))
+    |> hidden_tool_name?()
+  end
+
+  defp hidden_tool_name?(name) when is_binary(name), do: name in @hidden_tool_names
+  defp hidden_tool_name?(_name), do: false
 
   defp append_text(current, token), do: (current || "") <> token
 

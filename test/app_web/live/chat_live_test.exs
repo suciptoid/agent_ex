@@ -100,7 +100,8 @@ defmodule AppWeb.ChatLiveTest do
       assert has_element?(live_view, "#chat-messages")
       assert has_element?(live_view, "#chat-messages-empty-state.max-w-4xl")
       assert has_element?(live_view, "#chat-composer-shell")
-      assert has_element?(live_view, "#chat-message-input[data-max-height-vh='50']")
+      assert has_element?(live_view, "#chat-message-input.field-sizing-content")
+      refute has_element?(live_view, "#chat-message-input[data-max-height-vh]")
       assert has_element?(live_view, "#chat-message-controls")
       assert has_element?(live_view, "#sidebar-user-menu p.truncate", user.email)
     end

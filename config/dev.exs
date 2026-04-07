@@ -7,6 +7,7 @@ config :app, App.Repo,
   hostname: "localhost",
   database: "agent_dev",
   stacktrace: true,
+  log: false,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
 

@@ -6,11 +6,11 @@ defmodule App.Agents.Runner do
   require Logger
 
   alias App.Agents.Agent
+  alias App.Agents.Runner.DoomLoop
   alias App.Chat.Message
   alias App.Providers.Provider
 
   @default_system_prompt "You are a helpful assistant."
-  @max_tool_iterations 5
   @supported_extra_params %{
     "temperature" => :temperature,
     "max_tokens" => :max_tokens
@@ -73,95 +73,102 @@ defmodule App.Agents.Runner do
          tools,
          llm_opts,
          callbacks,
-         iteration \\ 0,
          result_state \\ initial_result_state()
        ) do
-    if iteration >= @max_tool_iterations do
-      Logger.warning("[Runner] Max tool iterations (#{@max_tool_iterations}) reached")
-      {:error, "Maximum tool call iterations reached (#{@max_tool_iterations})"}
-    else
-      case stream_response(model, context, llm_opts, callbacks) do
-        {:ok, response} ->
-          %{
-            type: type,
-            text: text,
-            thinking: thinking,
-            tool_calls: tool_calls,
-            finish_reason: finish_reason
-          } =
-            ReqLLM.Response.classify(response)
+    case stream_response(model, context, llm_opts, callbacks) do
+      {:ok, response} ->
+        %{
+          type: type,
+          text: text,
+          thinking: thinking,
+          tool_calls: tool_calls,
+          finish_reason: finish_reason
+        } =
+          ReqLLM.Response.classify(response)
 
-          usage = normalize_metadata(ReqLLM.Response.usage(response))
-          provider_meta = normalize_metadata(response.provider_meta)
+        usage = normalize_metadata(ReqLLM.Response.usage(response))
+        provider_meta = normalize_metadata(response.provider_meta)
 
-          base_result_state =
-            result_state
-            |> merge_usage(usage)
-            |> put_provider_meta(provider_meta)
-            |> put_finish_reason(finish_reason)
+        base_result_state =
+          result_state
+          |> merge_usage(usage)
+          |> put_provider_meta(provider_meta)
+          |> put_finish_reason(finish_reason)
 
-          case {type, tool_calls} do
-            {:tool_calls, []} ->
-              Logger.error("[Runner] Stream finished with tool_calls but no tool payload")
-              {:error, "The model requested a tool call without any tool data"}
+        case {type, tool_calls} do
+          {:tool_calls, []} ->
+            Logger.error("[Runner] Stream finished with tool_calls but no tool payload")
+            {:error, "The model requested a tool call without any tool data"}
 
-            {:tool_calls, tool_calls} ->
-              names = Enum.map(tool_calls, & &1.name)
-              tool_call_turn = build_tool_call_turn(text, thinking, tool_calls)
+          {:tool_calls, tool_calls} ->
+            names = Enum.map(tool_calls, & &1.name)
+            tool_call_turn = build_tool_call_turn(text, thinking, tool_calls)
 
-              Logger.info(
-                "[Runner] LLM requested tools (iteration #{iteration + 1}): #{inspect(names)}"
-              )
+            Logger.info("[Runner] LLM requested tools: #{inspect(names)}")
+            callbacks.on_tool_calls.(tool_call_turn)
 
-              callbacks.on_tool_calls.(tool_call_turn)
-
-              with {:ok, %{messages: tool_messages, results: tool_results}} <-
-                     App.Agents.Tools.execute_all(tool_calls, tools,
-                       on_tool_start: callbacks.on_tool_start
-                     ) do
-                Enum.each(tool_results, callbacks.on_tool_result)
-
-                new_context =
-                  response.context
-                  |> ReqLLM.Context.append(response.message)
-                  |> ReqLLM.Context.append(tool_messages)
-
-                run_with_tool_loop(
-                  model,
-                  new_context,
-                  tools,
-                  llm_opts,
-                  callbacks,
-                  iteration + 1,
-                  base_result_state
-                  |> append_tool_call_turn(tool_call_turn)
-                  |> append_tool_responses(tool_results)
+            case DoomLoop.detect(result_state.tool_call_turns, tool_calls) do
+              {:doom_loop, %{name: tool_name, arguments: arguments}} ->
+                Logger.warning(
+                  "[Runner] Tool doom loop detected for #{inspect(tool_name)} with arguments #{inspect(arguments)}"
                 )
-              end
 
-            {:final_answer, _tool_calls} ->
-              final_result_state =
-                base_result_state
-                |> append_text(text)
-                |> append_thinking(thinking)
+                {:error, doom_loop_error(tool_name)}
 
-              final_content =
-                if blank?(final_result_state.content),
-                  do: "The agent returned an empty response.",
-                  else: final_result_state.content
+              :ok ->
+                with {:ok, %{messages: tool_messages, results: tool_results}} <-
+                       App.Agents.Tools.execute_all(tool_calls, tools,
+                         on_tool_start: callbacks.on_tool_start
+                       ) do
+                  Enum.each(tool_results, callbacks.on_tool_result)
 
-              Logger.debug(
-                "[Runner] Final answer received, length: #{String.length(final_content)}"
-              )
+                  new_context =
+                    response.context
+                    |> ReqLLM.Context.append(response.message)
+                    |> ReqLLM.Context.append(tool_messages)
 
-              {:ok, %{final_result_state | content: final_content}}
-          end
+                  run_with_tool_loop(
+                    model,
+                    new_context,
+                    tools,
+                    llm_opts,
+                    callbacks,
+                    base_result_state
+                    |> append_tool_call_turn(tool_call_turn)
+                    |> append_tool_responses(tool_results)
+                  )
+                end
+            end
 
-        {:error, reason} ->
-          Logger.error("[Runner] LLM call failed: #{inspect(reason)}")
-          {:error, reason}
-      end
+          {:final_answer, _tool_calls} ->
+            final_result_state =
+              base_result_state
+              |> append_text(text)
+              |> append_thinking(thinking)
+
+            final_content =
+              if blank?(final_result_state.content),
+                do: "The agent returned an empty response.",
+                else: final_result_state.content
+
+            Logger.debug(
+              "[Runner] Final answer received, length: #{String.length(final_content)}"
+            )
+
+            {:ok, %{final_result_state | content: final_content}}
+        end
+
+      {:error, reason} ->
+        Logger.error("[Runner] LLM call failed: #{inspect(reason)}")
+        {:error, reason}
     end
+  end
+
+  defp doom_loop_error(nil),
+    do: "Detected repeated identical tool calls. Stopping to avoid a doom loop."
+
+  defp doom_loop_error(tool_name) do
+    "Detected repeated #{inspect(tool_name)} tool calls with identical arguments. Stopping to avoid a doom loop."
   end
 
   defp build_context(agent, messages, opts) do

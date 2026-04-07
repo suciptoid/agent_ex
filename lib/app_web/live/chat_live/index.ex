@@ -72,10 +72,7 @@ defmodule AppWeb.ChatLive.Index do
                           {:agent_message_created, placeholder_message}
                         )
 
-                        {:noreply,
-                         socket
-                         |> put_flash(:info, nil)
-                         |> push_navigate(to: ~p"/chat/#{chat_room.id}")}
+                        {:noreply, push_navigate(socket, to: ~p"/chat/#{chat_room.id}")}
 
                       {:error, reason} ->
                         {:noreply,

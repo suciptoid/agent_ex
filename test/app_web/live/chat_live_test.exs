@@ -54,19 +54,20 @@ defmodule AppWeb.ChatLiveTest do
 
       {:ok, live_view, _html} = live(conn, ~p"/chat")
 
-      live_view
-      |> form("#chat-message-form", %{
-        "message" => %{"content" => "Hello agent"}
-      })
-      |> render_submit()
+      submit_result =
+        live_view
+        |> form("#chat-message-form", %{
+          "message" => %{"content" => "Hello agent"}
+        })
+        |> render_submit()
 
       created_room = List.first(Chat.list_chat_rooms(scope))
       assert created_room
 
       path = ~p"/chat/#{created_room.id}"
-      assert_redirect(live_view, path)
+      assert assert_redirect(live_view, path) == %{}
 
-      {:ok, show_view, _html} = live(conn, path)
+      {:ok, show_view, _html} = follow_redirect(submit_result, conn, path)
 
       titled_room =
         wait_for_chat_room(show_view, scope, created_room.id, fn room ->

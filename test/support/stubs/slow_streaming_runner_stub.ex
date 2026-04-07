@@ -24,6 +24,11 @@ defmodule App.TestSupport.SlowStreamingRunnerStub do
         {:stream_tool_result, tool_result}
       end)
 
+    emit_tool_calls =
+      stream_callback(recipient, opts, :on_tool_calls, fn tool_call_turn ->
+        {:stream_tool_calls, tool_call_turn}
+      end)
+
     config = Application.get_env(:app, __MODULE__, [])
     notify_pid = Keyword.get(config, :notify_pid)
     thinking = Keyword.get(config, :thinking)
@@ -38,6 +43,8 @@ defmodule App.TestSupport.SlowStreamingRunnerStub do
     end
 
     if is_map(tool_response) do
+      emit_tool_calls.(tool_call_turn(tool_response, thinking))
+
       running_tool =
         tool_response
         |> Map.put("content", nil)
@@ -62,18 +69,19 @@ defmodule App.TestSupport.SlowStreamingRunnerStub do
         |> Enum.drop(1)
         |> Enum.each(emit_chunk)
 
-        {:ok, result(content)}
+        {:ok, result(content, tool_call_turns(tool_response, thinking))}
     after
       5_000 ->
         {:error, "slow stream timed out"}
     end
   end
 
-  defp result(content) do
+  defp result(content, tool_call_turns \\ []) do
     %{
       content: content,
       usage: %{"input_tokens" => 1, "output_tokens" => 1, "total_tokens" => 2},
       thinking: nil,
+      tool_call_turns: tool_call_turns,
       tool_responses: [],
       finish_reason: "stop",
       provider_meta: %{}
@@ -87,6 +95,22 @@ defmodule App.TestSupport.SlowStreamingRunnerStub do
       nil -> "#{agent.name} is ready."
       message -> "#{agent.name}: #{message.content}"
     end
+  end
+
+  defp tool_call_turns(nil, _thinking), do: []
+  defp tool_call_turns(tool_response, thinking), do: [tool_call_turn(tool_response, thinking)]
+
+  defp tool_call_turn(tool_response, thinking) do
+    %{
+      "thinking" => thinking,
+      "tool_calls" => [
+        %{
+          "id" => tool_response["id"],
+          "name" => tool_response["name"],
+          "arguments" => tool_response["arguments"]
+        }
+      ]
+    }
   end
 
   defp stream_callback(recipient, opts, key, default_message_builder) do

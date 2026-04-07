@@ -180,6 +180,42 @@ defmodule App.ChatTest do
       assert assistant_message.content == "Lead Agent: Plan next week"
       assert assistant_message.agent_id == agent.id
     end
+
+    test "persists tool results as child tool messages", %{scope: scope, user: user, agent: agent} do
+      previous_runner = Application.get_env(:app, :agent_runner)
+      Application.put_env(:app, :agent_runner, App.TestSupport.StreamingMetadataRunnerStub)
+
+      on_exit(fn ->
+        restore_app_env(:agent_runner, previous_runner)
+      end)
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Tool History",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      assert {:ok, assistant_message} = Chat.send_message(scope, room, "Fetch the data")
+
+      messages = Chat.list_messages(room)
+
+      assert Enum.map(messages, & &1.role) == ["user", "assistant", "tool", "assistant"]
+      [user_message, tool_call_message, tool_message, final_assistant_message] = messages
+
+      assert user_message.content == "Fetch the data"
+      assert tool_call_message.metadata["thinking"] == "Planning the lookup"
+      assert length(tool_call_message.metadata["tool_calls"]) == 1
+      assert tool_message.role == "tool"
+      assert tool_message.parent_message_id == tool_call_message.id
+      assert tool_message.name == "web_fetch"
+      assert tool_message.tool_call_id == "tool_1"
+      assert tool_message.content == "sample payload"
+      assert tool_message.metadata["arguments"] == %{"url" => "https://example.com/data.txt"}
+      assert is_nil(tool_message.metadata["thinking"])
+      assert assistant_message.id == final_assistant_message.id
+      assert final_assistant_message.metadata["thinking"] == "Summarizing the fetched payload"
+    end
   end
 
   describe "stream_message/3" do

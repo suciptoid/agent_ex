@@ -2,8 +2,8 @@ defmodule AppWeb.ChatLive.Show do
   use AppWeb, :live_view
 
   alias App.Chat
+  alias App.Chat.Message
 
-  @stream_db_write_every 10
   @reasoning_effort_options [
     {"default", "Auto"},
     {"none", "Disabled"},
@@ -174,26 +174,33 @@ defmodule AppWeb.ChatLive.Show do
 
         case Chat.update_message(message, attrs) do
           {:ok, placeholder_message} ->
-            case Chat.start_stream(
-                   chat_room,
-                   prior_messages,
-                   placeholder_message,
-                   reasoning_stream_opts(socket)
-                 ) do
-              {:ok, _pid} ->
-                Chat.broadcast_chat_room_from(
-                  chat_room.id,
-                  self(),
-                  {:stream_updated, placeholder_message}
-                )
+            case Chat.delete_tool_messages(placeholder_message) do
+              {_count, nil} ->
+                case Chat.start_stream(
+                       chat_room,
+                       prior_messages,
+                       placeholder_message,
+                       reasoning_stream_opts(socket)
+                     ) do
+                  {:ok, _pid} ->
+                    Chat.broadcast_chat_room_from(
+                      chat_room.id,
+                      self(),
+                      {:stream_updated, placeholder_message}
+                    )
 
-                {:noreply,
-                 socket
-                 |> begin_stream(placeholder_message)
-                 |> push_event("scroll-to-bottom", %{})}
+                    {:noreply,
+                     socket
+                     |> begin_stream(placeholder_message)
+                     |> push_event("scroll-to-bottom", %{})}
 
-              {:error, reason} ->
-                {:noreply, put_flash(socket, :error, "Failed to regenerate: #{inspect(reason)}")}
+                  {:error, reason} ->
+                    {:noreply,
+                     put_flash(socket, :error, "Failed to regenerate: #{inspect(reason)}")}
+                end
+
+              {_count, _rows} ->
+                {:noreply, put_flash(socket, :error, "Failed to clear tool history")}
             end
 
           {:error, changeset} ->
@@ -395,6 +402,7 @@ defmodule AppWeb.ChatLive.Show do
 
   def user_message?(message), do: message.role == "user"
   def assistant_message?(message), do: message.role == "assistant"
+  def tool_message?(message), do: message.role == "tool"
   def latest_message?(message, latest_message_id), do: message.id == latest_message_id
   def message_has_content?(message), do: (Map.get(message, :content) || "") != ""
 
@@ -420,6 +428,7 @@ defmodule AppWeb.ChatLive.Show do
   def reasoning_effort_options, do: @reasoning_effort_options
 
   def speaker_name(%{role: "user"}), do: "You"
+  def speaker_name(%{role: "tool", name: name}) when is_binary(name) and name != "", do: name
   def speaker_name(%{agent: %{name: name}}), do: name
   def speaker_name(_message), do: "Assistant"
 
@@ -429,7 +438,14 @@ defmodule AppWeb.ChatLive.Show do
   def message_icon(%{role: "tool"}), do: "hero-wrench-screwdriver"
   def message_icon(_message), do: "hero-wrench-screwdriver"
 
+  def message_thinking(%Message{} = message), do: Message.thinking(message)
   def message_thinking(message), do: metadata_value(message, "thinking")
+
+  def tool_responses(%Message{} = message) do
+    message
+    |> Message.tool_responses()
+    |> Enum.reject(&(Map.get(&1, "name") == "update_chatroom_title"))
+  end
 
   def tool_responses(message) do
     message
@@ -455,6 +471,33 @@ defmodule AppWeb.ChatLive.Show do
         content
     end
   end
+
+  def assistant_tool_calls(%Message{} = message), do: Message.tool_calls(message)
+
+  def assistant_tool_calls(message) do
+    message
+    |> metadata_value("tool_calls")
+    |> List.wrap()
+    |> Enum.reject(&is_nil/1)
+  end
+
+  def tool_call_label(tool_call) do
+    Map.get(tool_call, "name") || Map.get(tool_call, :name) || "tool"
+  end
+
+  def tool_call_arguments_text(tool_call) do
+    case Map.get(tool_call, "arguments") || Map.get(tool_call, :arguments) do
+      nil -> ""
+      arguments -> inspect(arguments, pretty: true, limit: :infinity, width: 80)
+    end
+  end
+
+  def tool_message_content(%{content: nil} = message) do
+    if streaming_message?(message), do: "Waiting for tool output...", else: ""
+  end
+
+  def tool_message_content(%{content: content}) when is_binary(content), do: content
+  def tool_message_content(_message), do: ""
 
   def thinking_default_expanded?(message) do
     streaming_message?(message) and not message_has_content?(message)
@@ -629,11 +672,7 @@ defmodule AppWeb.ChatLive.Show do
   end
 
   defp current_stream_metadata(socket) do
-    build_message_metadata(
-      %{},
-      socket.assigns.streaming_thinking,
-      socket.assigns.streaming_tool_responses
-    )
+    build_message_metadata(%{}, socket.assigns.streaming_thinking, [])
   end
 
   defp maybe_track_agent_stream(socket, %{id: id, status: status} = message)
@@ -675,19 +714,6 @@ defmodule AppWeb.ChatLive.Show do
             build_agent_stream_message(socket, message_id, stream_state)
           )
 
-        if rem(new_count, @stream_db_write_every) == 0 do
-          maybe_update_streaming_message(
-            message_id,
-            new_content,
-            stream_placeholder_status(new_content),
-            build_message_metadata(
-              stream_state.metadata,
-              stream_state.thinking,
-              stream_state.tool_responses
-            )
-          )
-        end
-
         socket
     end
   end
@@ -724,17 +750,6 @@ defmodule AppWeb.ChatLive.Show do
             socket,
             build_agent_stream_message(socket, message_id, updated_state)
           )
-
-        maybe_update_streaming_message(
-          message_id,
-          updated_state.content,
-          stream_placeholder_status(updated_state.content),
-          build_message_metadata(
-            updated_state.metadata,
-            updated_state.thinking,
-            updated_state.tool_responses
-          )
-        )
 
         socket
     end
@@ -844,6 +859,7 @@ defmodule AppWeb.ChatLive.Show do
     |> Map.drop([
       "usage",
       "thinking",
+      "tool_call_turns",
       "tool_responses",
       "finish_reason",
       "provider_meta",
@@ -865,9 +881,8 @@ defmodule AppWeb.ChatLive.Show do
   defp maybe_put_agent_id(attrs, agent_id), do: Map.put(attrs, :agent_id, agent_id)
 
   defp put_main_stream_tool_response(socket, tool_result) do
+    _ = tool_result
     socket
-    |> update(:streaming_tool_responses, &merge_tool_response(&1, tool_result))
-    |> maybe_stream_main_placeholder()
   end
 
   defp maybe_switch_subscription(socket, chat_room_id) do
@@ -905,7 +920,7 @@ defmodule AppWeb.ChatLive.Show do
       |> assign(:streaming_message_inserted_at, message.inserted_at)
       |> assign(:streaming_content, message.content || "")
       |> assign(:streaming_thinking, message_thinking(message) || "")
-      |> assign(:streaming_tool_responses, tool_responses(message))
+      |> assign(:streaming_tool_responses, [])
       |> assign(:streaming_active?, true)
     else
       reset_main_stream(socket)
@@ -930,20 +945,6 @@ defmodule AppWeb.ChatLive.Show do
     socket
     |> sync_main_stream_from_message(message)
     |> maybe_track_agent_stream(message)
-  end
-
-  defp maybe_update_streaming_message(message_id, content, status, metadata) do
-    case Chat.get_message_by_id(message_id) do
-      nil ->
-        :ok
-
-      message ->
-        Chat.update_message(message, %{
-          content: blank_to_nil(content),
-          status: status,
-          metadata: metadata
-        })
-    end
   end
 
   defp merge_tool_response(tool_responses, tool_response) do

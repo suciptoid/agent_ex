@@ -331,40 +331,59 @@ defmodule AppWeb.ChatLiveTest do
       })
       |> render_submit()
 
-      assistant_message =
+      {tool_call_message, tool_message, final_assistant_message} =
         wait_for_messages(live_view, scope, room.id, fn messages ->
-          Enum.find(messages, &(&1.role == "assistant" && &1.status == :completed))
+          tool_call_message =
+            Enum.find(messages, fn message ->
+              message.role == "assistant" and length(message.metadata["tool_calls"] || []) == 1
+            end)
+
+          tool_message = Enum.find(messages, &(&1.role == "tool" && &1.status == :completed))
+
+          final_assistant_message =
+            Enum.find(messages, fn message ->
+              message.role == "assistant" and message.status == :completed and
+                message.content == "Research Agent: Fetch the data"
+            end)
+
+          if tool_call_message && tool_message && final_assistant_message do
+            {tool_call_message, tool_message, final_assistant_message}
+          end
         end)
 
-      assert assistant_message.metadata["thinking"] == "Planning the lookup"
-      assert length(assistant_message.metadata["tool_responses"]) == 1
+      assert tool_call_message.metadata["thinking"] == "Planning the lookup"
+      assert length(tool_call_message.metadata["tool_calls"]) == 1
+      assert is_nil(tool_message.metadata["thinking"])
+      assert final_assistant_message.metadata["thinking"] == "Summarizing the fetched payload"
 
       assert has_element?(
                live_view,
-               "#message-thinking-#{assistant_message.id} details summary",
+               "#message-thinking-#{tool_call_message.id} details summary",
                "Thinking"
              )
 
-      assert has_element?(live_view, "#message-tool-response-#{assistant_message.id}-0")
+      assert has_element?(live_view, "#message-tool-call-#{tool_call_message.id}-0")
 
       assert has_element?(
                live_view,
-               "#message-tool-response-#{assistant_message.id}-0 details summary",
+               "#message-tool-call-#{tool_call_message.id}-0 details summary",
                "web_fetch"
              )
 
       assert has_element?(
                live_view,
-               "#message-thinking-#{assistant_message.id} details:not([open])"
+               "#message-thinking-#{tool_call_message.id} details:not([open])"
              )
 
-      refute has_element?(
+      assert has_element?(live_view, "#message-#{tool_message.id}", "sample payload")
+
+      assert has_element?(
                live_view,
-               "#message-tool-response-#{assistant_message.id}-0",
-               "https://example.com/data.txt"
+               "#message-thinking-#{final_assistant_message.id} details summary",
+               "Thinking"
              )
 
-      assert has_element?(live_view, "#message-cost-#{assistant_message.id}")
+      assert has_element?(live_view, "#message-cost-#{final_assistant_message.id}")
     end
 
     test "broadcasts assistant streaming updates to another open tab before completion", %{
@@ -448,25 +467,21 @@ defmodule AppWeb.ChatLiveTest do
         has_element?(second_tab, "#message-#{assistant_message.id}", "S")
       end)
 
-      assert_eventually(second_tab, fn ->
-        has_element?(
-          second_tab,
-          "#message-tool-response-#{assistant_message.id}-0 details summary",
-          "web_fetch"
-        )
-      end)
+      tool_message =
+        wait_for_messages(nil, scope, room.id, fn messages ->
+          Enum.find(messages, &(&1.role == "tool" && &1.status == :completed))
+        end)
 
       assert_eventually(second_tab, fn ->
-        has_element?(
-          second_tab,
-          "#message-tool-response-#{assistant_message.id}-0",
-          "live payload"
-        )
+        has_element?(second_tab, "#message-#{tool_message.id}", "live payload")
       end)
 
       refute Chat.get_chat_room!(scope, room.id)
              |> Chat.list_messages()
-             |> Enum.any?(&(&1.role == "assistant" && &1.status == :completed))
+             |> Enum.any?(fn message ->
+               message.role == "assistant" and message.status == :completed and
+                 is_binary(message.content) and message.content != ""
+             end)
 
       ref = Process.monitor(runner_pid)
       send(runner_pid, :continue)
@@ -474,7 +489,10 @@ defmodule AppWeb.ChatLiveTest do
 
       completed_message =
         wait_for_messages(nil, scope, room.id, fn messages ->
-          Enum.find(messages, &(&1.role == "assistant" && &1.status == :completed))
+          Enum.find(messages, fn message ->
+            message.role == "assistant" and message.status == :completed and
+              message.content == "Sync Agent: Sync this now"
+          end)
         end)
 
       assert completed_message.content == "Sync Agent: Sync this now"
@@ -602,6 +620,9 @@ defmodule AppWeb.ChatLiveTest do
           Enum.find(messages, &(&1.role == "assistant" && &1.status == :pending))
         end)
 
+      [{worker_pid, _value}] = Registry.lookup(App.Chat.StreamRegistry, assistant_message.id)
+      worker_ref = Process.monitor(worker_pid)
+
       assert has_element?(live_view, "#message-#{assistant_message.id}")
 
       assert {:error, {:live_redirect, %{to: to}}} =
@@ -618,6 +639,7 @@ defmodule AppWeb.ChatLiveTest do
           Enum.find(messages, &(&1.id == assistant_message.id && &1.status == :completed))
         end)
 
+      assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, _reason}
       assert completed_message.content == "Slow Agent: Finish even if I leave"
       assert completed_message.agent_id == agent.id
     end
@@ -670,7 +692,7 @@ defmodule AppWeb.ChatLiveTest do
   end
 
   defp wait_for_messages(live_view, scope, room_id, callback) do
-    Enum.reduce_while(1..30, nil, fn _, _acc ->
+    Enum.reduce_while(1..100, nil, fn _, _acc ->
       if live_view, do: _ = :sys.get_state(live_view.pid)
       reloaded_room = Chat.get_chat_room!(scope, room_id)
       messages = Chat.list_messages(reloaded_room)

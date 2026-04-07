@@ -19,6 +19,11 @@ defmodule App.TestSupport.StreamingMetadataRunnerStub do
         {:stream_tool_result, tool_result}
       end)
 
+    emit_tool_calls =
+      stream_callback(recipient, opts, :on_tool_calls, fn tool_call_turn ->
+        {:stream_tool_calls, tool_call_turn}
+      end)
+
     emit_tool_start =
       stream_callback(recipient, opts, :on_tool_start, fn tool_result ->
         {:stream_tool_started, tool_result}
@@ -30,9 +35,11 @@ defmodule App.TestSupport.StreamingMetadataRunnerStub do
       |> Map.put("content", nil)
       |> Map.put("status", "running")
 
-    emit_thinking.(response.thinking)
+    emit_thinking.(tool_call_turn_thinking(response))
+    emit_tool_calls.(List.first(response.tool_call_turns))
     emit_tool_start.(running_tool)
     Enum.each(response.tool_responses, emit_tool_result)
+    emit_thinking.(response.thinking)
 
     response.content
     |> String.graphemes()
@@ -61,11 +68,32 @@ defmodule App.TestSupport.StreamingMetadataRunnerStub do
         "total_tokens" => 2,
         "total_cost" => 0.0123
       },
-      thinking: "Planning the lookup",
+      thinking: "Summarizing the fetched payload",
+      tool_call_turns: [
+        %{
+          "thinking" => "Planning the lookup",
+          "tool_calls" => [
+            %{
+              "id" => tool_result["id"],
+              "name" => tool_result["name"],
+              "arguments" => tool_result["arguments"]
+            }
+          ]
+        }
+      ],
       tool_responses: [tool_result],
       finish_reason: "stop",
       provider_meta: %{}
     }
+  end
+
+  defp tool_call_turn_thinking(response) do
+    response.tool_call_turns
+    |> List.first()
+    |> case do
+      %{"thinking" => thinking} -> thinking
+      _other -> nil
+    end
   end
 
   defp stream_callback(recipient, opts, key, default_message_builder) do

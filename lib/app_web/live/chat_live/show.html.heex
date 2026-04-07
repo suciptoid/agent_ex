@@ -78,6 +78,7 @@
                   if(user_message?(message), do: "items-end", else: "items-start")
                 ]}>
                   <% thinking = message_thinking(message) %>
+                  <% tool_calls = assistant_tool_calls(message) %>
                   <% responses = tool_responses(message) %>
                   <% estimated_cost = estimated_cost_label(message) %>
 
@@ -90,7 +91,7 @@
                       {Calendar.strftime(message.inserted_at, "%H:%M")}
                     </span>
 
-                    <%= if responses != [] do %>
+                    <%= if tool_calls != [] or responses != [] do %>
                       <span class="inline-flex items-center gap-1 rounded-full border border-amber-500/20 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
                         <.icon name="hero-wrench-screwdriver" class="size-3" /> tools
                       </span>
@@ -165,6 +166,35 @@
                     </.accordion>
                   <% end %>
 
+                  <%= for {tool_call, index} <- Enum.with_index(tool_calls) do %>
+                    <.accordion
+                      variant="unstyled"
+                      id={"message-tool-call-#{message.id}-#{index}"}
+                      class="w-full max-w-2xl"
+                    >
+                      <.accordion_item
+                        variant="unstyled"
+                        class="overflow-hidden rounded-lg border border-indigo-500/20 bg-indigo-500/5"
+                      >
+                        <.accordion_trigger
+                          variant="unstyled"
+                          class="flex max-w-full items-center gap-1.5 px-3 py-2 text-[11px] font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-300 dark:hover:text-indigo-200 [&>span]:flex [&>span]:min-w-0 [&>span]:items-center [&>span]:gap-1.5"
+                        >
+                          <span class="shrink-0">Call</span>
+                          <span class="truncate">{tool_call_label(tool_call)}</span>
+                        </.accordion_trigger>
+                        <.accordion_content
+                          variant="unstyled"
+                          class="border-t border-current/10 px-3 py-2 text-xs leading-5 text-foreground"
+                        >
+                          <span class="whitespace-pre-line break-words" phx-no-format>
+                            {tool_call_arguments_text(tool_call)}
+                          </span>
+                        </.accordion_content>
+                      </.accordion_item>
+                    </.accordion>
+                  <% end %>
+
                   <%= for {tool_response, index} <- Enum.with_index(responses) do %>
                     <.accordion
                       variant="unstyled"
@@ -213,7 +243,20 @@
                     </.accordion>
                   <% end %>
 
-                  <%= if message_has_content?(message) do %>
+                  <%= if tool_message?(message) do %>
+                    <div class="w-full max-w-2xl overflow-hidden rounded-xl border border-amber-500/20 bg-amber-500/5">
+                      <div class="border-b border-current/10 px-3 py-2 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                        Result
+                      </div>
+                      <div class="px-3 py-2 text-xs leading-5 text-foreground">
+                        <span class="whitespace-pre-line break-words" phx-no-format>
+                          {tool_message_content(message)}
+                        </span>
+                      </div>
+                    </div>
+                  <% end %>
+
+                  <%= if message_has_content?(message) and not tool_message?(message) do %>
                     <%= if user_message?(message) do %>
                       <p
                         class="max-w-2xl whitespace-pre-line break-words rounded-2xl rounded-tr-sm bg-primary px-3 py-1.5 text-sm leading-6 text-primary-foreground"

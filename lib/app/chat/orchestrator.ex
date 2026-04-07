@@ -6,7 +6,7 @@ defmodule App.Chat.Orchestrator do
   require Logger
 
   alias App.Chat
-  alias App.Chat.{ChatRoom, ChatRoomAgent}
+  alias App.Chat.{ChatRoom, ChatRoomAgent, Message}
 
   def send_message(_scope, %ChatRoom{} = chat_room, content) when is_binary(content) do
     content = String.trim(content)
@@ -41,12 +41,7 @@ defmodule App.Chat.Orchestrator do
               "[Orchestrator] Got response, length: #{String.length(assistant_content)}"
             )
 
-            Chat.create_message(chat_room, %{
-              role: "assistant",
-              content: assistant_content,
-              agent_id: agent.id,
-              metadata: response_metadata(result)
-            })
+            persist_agent_result(chat_room, agent.id, result)
 
           {:error, reason} ->
             Logger.error("[Orchestrator] Agent run failed: #{inspect(reason)}")
@@ -321,6 +316,7 @@ defmodule App.Chat.Orchestrator do
             metadata: metadata,
             agent_id: target_agent.id
           },
+          Map.get(result, :tool_responses, []),
           callbacks
         )
 
@@ -345,17 +341,26 @@ defmodule App.Chat.Orchestrator do
             metadata: metadata,
             agent_id: target_agent.id
           },
+          [],
           callbacks
         )
     end
   end
 
-  defp persist_delegated_message(chat_room, placeholder_message, attrs, callbacks) do
+  defp persist_delegated_message(chat_room, placeholder_message, attrs, tool_responses, callbacks) do
     case Chat.get_message_by_id(placeholder_message.id) do
       nil ->
         case Chat.create_message(chat_room, Map.put_new(attrs, :role, "assistant")) do
           {:ok, message} ->
-            notify_agent_message_created(callbacks, message)
+            case persist_tool_messages(chat_room, message, tool_responses) do
+              {:ok, reloaded_message} ->
+                notify_agent_message_created(callbacks, reloaded_message)
+
+              {:error, reason} ->
+                Logger.error(
+                  "[Orchestrator] Failed to persist delegated tool messages #{placeholder_message.id}: #{inspect(reason)}"
+                )
+            end
 
           {:error, reason} ->
             Logger.error(
@@ -366,7 +371,15 @@ defmodule App.Chat.Orchestrator do
       existing_message ->
         case Chat.update_message(existing_message, attrs) do
           {:ok, message} ->
-            notify_agent_message_updated(callbacks, message)
+            case persist_tool_messages(chat_room, message, tool_responses) do
+              {:ok, reloaded_message} ->
+                notify_agent_message_updated(callbacks, reloaded_message)
+
+              {:error, reason} ->
+                Logger.error(
+                  "[Orchestrator] Failed to persist delegated tool messages #{placeholder_message.id}: #{inspect(reason)}"
+                )
+            end
 
           {:error, reason} ->
             Logger.error(
@@ -401,11 +414,10 @@ defmodule App.Chat.Orchestrator do
 
   defp response_metadata(result) do
     %{}
-    |> maybe_put_metadata("usage", result.usage)
-    |> maybe_put_metadata("thinking", blank_to_nil(result.thinking))
-    |> maybe_put_metadata("tool_responses", empty_list_to_nil(result.tool_responses))
-    |> maybe_put_metadata("finish_reason", result.finish_reason)
-    |> maybe_put_metadata("provider_meta", normalize_metadata(result.provider_meta))
+    |> maybe_put_metadata("usage", Map.get(result, :usage))
+    |> maybe_put_metadata("thinking", blank_to_nil(Map.get(result, :thinking)))
+    |> maybe_put_metadata("finish_reason", Map.get(result, :finish_reason))
+    |> maybe_put_metadata("provider_meta", normalize_metadata(Map.get(result, :provider_meta)))
   end
 
   defp normalize_metadata(nil), do: nil
@@ -417,6 +429,49 @@ defmodule App.Chat.Orchestrator do
   defp empty_list_to_nil([]), do: nil
   defp empty_list_to_nil(value), do: value
 
+  defp tool_call_turns(result) do
+    case Map.get(result, :tool_call_turns, []) do
+      [] -> tool_call_turns_from_tool_responses(Map.get(result, :tool_responses, []))
+      tool_call_turns -> tool_call_turns
+    end
+  end
+
+  defp tool_call_turns_from_tool_responses([]), do: []
+
+  defp tool_call_turns_from_tool_responses(tool_responses) do
+    [
+      %{
+        "tool_calls" =>
+          Enum.map(tool_responses, fn tool_response ->
+            %{}
+            |> maybe_put_metadata("id", Map.get(tool_response, "id"))
+            |> maybe_put_metadata("name", Map.get(tool_response, "name"))
+            |> maybe_put_metadata(
+              "arguments",
+              normalize_metadata(Map.get(tool_response, "arguments"))
+            )
+          end)
+      }
+    ]
+  end
+
+  defp turn_content(%{} = tool_call_turn) do
+    Map.get(tool_call_turn, "content") || Map.get(tool_call_turn, :content)
+  end
+
+  defp turn_thinking(%{} = tool_call_turn) do
+    Map.get(tool_call_turn, "thinking") || Map.get(tool_call_turn, :thinking)
+  end
+
+  defp turn_tool_calls(%{} = tool_call_turn) do
+    tool_call_turn
+    |> Map.get("tool_calls", Map.get(tool_call_turn, :tool_calls, []))
+    |> List.wrap()
+  end
+
+  defp tool_call_id(%{} = tool_call), do: Map.get(tool_call, "id") || Map.get(tool_call, :id)
+  defp tool_call_id(_tool_call), do: nil
+
   defp blank?(value), do: value in [nil, ""]
 
   defp normalize_stream_callbacks(recipient) when is_pid(recipient) do
@@ -424,6 +479,7 @@ defmodule App.Chat.Orchestrator do
       recipient: recipient,
       on_result: nil,
       on_thinking: nil,
+      on_tool_calls: nil,
       on_tool_start: nil,
       on_tool_result: nil
     ]
@@ -439,6 +495,7 @@ defmodule App.Chat.Orchestrator do
     [
       on_result: callbacks[:on_result],
       on_thinking: callbacks[:on_thinking],
+      on_tool_calls: callbacks[:on_tool_calls],
       on_tool_start: callbacks[:on_tool_start],
       on_tool_result: callbacks[:on_tool_result]
     ]
@@ -450,6 +507,7 @@ defmodule App.Chat.Orchestrator do
       :recipient,
       :on_result,
       :on_thinking,
+      :on_tool_calls,
       :on_tool_start,
       :on_tool_result,
       :on_title_updated,
@@ -461,6 +519,140 @@ defmodule App.Chat.Orchestrator do
       :on_agent_message_updated,
       :on_active_agent_changed
     ])
+  end
+
+  defp persist_tool_messages(_chat_room, %Message{} = message, []),
+    do: {:ok, Chat.get_message_by_id(message.id) || message}
+
+  defp persist_tool_messages(%ChatRoom{} = chat_room, %Message{} = message, tool_responses) do
+    Enum.reduce_while(tool_responses, :ok, fn tool_response, :ok ->
+      case Chat.create_message(chat_room, tool_message_attrs(message, tool_response)) do
+        {:ok, _tool_message} -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      :ok -> {:ok, Chat.get_message_by_id(message.id) || message}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp tool_message_attrs(%Message{id: parent_message_id}, tool_response) do
+    %{
+      role: "tool",
+      content: blank_to_nil(Map.get(tool_response, "content")),
+      name: Map.get(tool_response, "name"),
+      tool_call_id: Map.get(tool_response, "id"),
+      status: tool_message_status(tool_response),
+      metadata: tool_message_metadata(tool_response),
+      parent_message_id: parent_message_id
+    }
+  end
+
+  defp tool_message_status(%{"status" => "error"}), do: :error
+  defp tool_message_status(%{"status" => "running"}), do: :pending
+  defp tool_message_status(_tool_response), do: :completed
+
+  defp tool_message_metadata(tool_response) do
+    %{}
+    |> maybe_put_metadata("arguments", normalize_metadata(Map.get(tool_response, "arguments")))
+    |> maybe_put_metadata("tool_status", Map.get(tool_response, "status"))
+  end
+
+  defp persist_agent_result(%ChatRoom{} = chat_room, agent_id, result) do
+    case tool_call_turns(result) do
+      [] ->
+        Chat.create_message(chat_room, %{
+          role: "assistant",
+          content: normalized_final_content(result),
+          agent_id: agent_id,
+          metadata: response_metadata(result)
+        })
+
+      tool_call_turns ->
+        with {:ok, _remaining_tool_responses} <-
+               persist_tool_call_turns(
+                 chat_room,
+                 agent_id,
+                 tool_call_turns,
+                 Map.get(result, :tool_responses, [])
+               ) do
+          Chat.create_message(chat_room, %{
+            role: "assistant",
+            content: normalized_final_content(result),
+            agent_id: agent_id,
+            metadata: response_metadata(result)
+          })
+        end
+    end
+  end
+
+  defp persist_tool_call_turns(chat_room, agent_id, tool_call_turns, tool_responses) do
+    Enum.reduce_while(tool_call_turns, {:ok, tool_responses}, fn tool_call_turn,
+                                                                 {:ok, remaining_tool_responses} ->
+      with {:ok, assistant_message} <-
+             Chat.create_message(chat_room, %{
+               role: "assistant",
+               content: blank_to_nil(turn_content(tool_call_turn)),
+               agent_id: agent_id,
+               metadata: tool_call_message_metadata(tool_call_turn)
+             }),
+           {:ok, next_remaining_tool_responses} <-
+             persist_tool_messages_for_turn(
+               chat_room,
+               assistant_message,
+               remaining_tool_responses,
+               turn_tool_calls(tool_call_turn)
+             ) do
+        {:cont, {:ok, next_remaining_tool_responses}}
+      else
+        {:error, reason} ->
+          {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  defp persist_tool_messages_for_turn(chat_room, assistant_message, tool_responses, tool_calls) do
+    {selected_tool_responses, remaining_tool_responses} =
+      split_tool_responses_for_turn(tool_responses, tool_calls)
+
+    case persist_tool_messages(chat_room, assistant_message, selected_tool_responses) do
+      {:ok, _assistant_message} -> {:ok, remaining_tool_responses}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp split_tool_responses_for_turn(tool_responses, tool_calls) do
+    case tool_calls |> Enum.map(&tool_call_id/1) |> Enum.reject(&blank?/1) do
+      [] ->
+        {tool_responses, []}
+
+      tool_call_ids ->
+        selected_tool_responses =
+          tool_call_ids
+          |> Enum.map(fn tool_call_id ->
+            Enum.find(tool_responses, &(Map.get(&1, "id") == tool_call_id))
+          end)
+          |> Enum.reject(&is_nil/1)
+
+        remaining_tool_responses =
+          Enum.reject(tool_responses, &(Map.get(&1, "id") in tool_call_ids))
+
+        {selected_tool_responses, remaining_tool_responses}
+    end
+  end
+
+  defp tool_call_message_metadata(tool_call_turn) do
+    %{}
+    |> maybe_put_metadata("thinking", blank_to_nil(turn_thinking(tool_call_turn)))
+    |> maybe_put_metadata("tool_calls", empty_list_to_nil(turn_tool_calls(tool_call_turn)))
+  end
+
+  defp normalized_final_content(result) do
+    case blank_to_nil(Map.get(result, :content)) do
+      nil -> "The agent returned an empty response."
+      content -> content
+    end
   end
 
   defp notify_active_agent_changed(callbacks, agent_id) do

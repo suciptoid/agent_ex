@@ -94,10 +94,8 @@ defmodule App.Agents.Runner do
           usage = normalize_metadata(ReqLLM.Response.usage(response))
           provider_meta = normalize_metadata(response.provider_meta)
 
-          result_state =
+          base_result_state =
             result_state
-            |> append_text(text)
-            |> append_thinking(thinking)
             |> merge_usage(usage)
             |> put_provider_meta(provider_meta)
             |> put_finish_reason(finish_reason)
@@ -109,10 +107,13 @@ defmodule App.Agents.Runner do
 
             {:tool_calls, tool_calls} ->
               names = Enum.map(tool_calls, & &1.name)
+              tool_call_turn = build_tool_call_turn(text, thinking, tool_calls)
 
               Logger.info(
                 "[Runner] LLM requested tools (iteration #{iteration + 1}): #{inspect(names)}"
               )
+
+              callbacks.on_tool_calls.(tool_call_turn)
 
               with {:ok, %{messages: tool_messages, results: tool_results}} <-
                      App.Agents.Tools.execute_all(tool_calls, tools,
@@ -132,21 +133,28 @@ defmodule App.Agents.Runner do
                   llm_opts,
                   callbacks,
                   iteration + 1,
-                  append_tool_responses(result_state, tool_results)
+                  base_result_state
+                  |> append_tool_call_turn(tool_call_turn)
+                  |> append_tool_responses(tool_results)
                 )
               end
 
             {:final_answer, _tool_calls} ->
+              final_result_state =
+                base_result_state
+                |> append_text(text)
+                |> append_thinking(thinking)
+
               final_content =
-                if blank?(result_state.content),
+                if blank?(final_result_state.content),
                   do: "The agent returned an empty response.",
-                  else: result_state.content
+                  else: final_result_state.content
 
               Logger.debug(
                 "[Runner] Final answer received, length: #{String.length(final_content)}"
               )
 
-              {:ok, %{result_state | content: final_content}}
+              {:ok, %{final_result_state | content: final_content}}
           end
 
         {:error, reason} ->
@@ -171,22 +179,48 @@ defmodule App.Agents.Runner do
 
     messages =
       [ReqLLM.Context.system(system_prompt)] ++
-        Enum.map(messages, &to_req_llm_message/1)
+        (messages
+         |> Enum.flat_map(&expand_history_message/1)
+         |> Enum.map(&to_req_llm_message/1))
 
     ReqLLM.Context.new(messages)
   end
 
-  defp to_req_llm_message(%Message{role: role, content: content}) do
-    req_llm_message(role, content)
+  defp to_req_llm_message(%Message{role: role, content: content} = message) do
+    req_llm_message(role, content,
+      name: message.name,
+      tool_call_id: message.tool_call_id,
+      tool_calls: Message.tool_calls(message)
+    )
   end
 
-  defp to_req_llm_message(%{role: role, content: content}) do
-    req_llm_message(role, content)
+  defp to_req_llm_message(%{role: role} = message) do
+    req_llm_message(role, message_content(message),
+      name: Map.get(message, :name) || Map.get(message, "name"),
+      tool_call_id: Map.get(message, :tool_call_id) || Map.get(message, "tool_call_id"),
+      tool_calls: message_tool_calls(message)
+    )
   end
 
-  defp req_llm_message("assistant", content), do: ReqLLM.Context.assistant(content || "")
-  defp req_llm_message("system", content), do: ReqLLM.Context.system(content || "")
-  defp req_llm_message(_role, content), do: ReqLLM.Context.user(content || "")
+  defp req_llm_message("assistant", content, opts) do
+    case Keyword.get(opts, :tool_calls, []) do
+      [] -> ReqLLM.Context.assistant(content || "")
+      tool_calls -> ReqLLM.Context.assistant(content || "", tool_calls: tool_calls)
+    end
+  end
+
+  defp req_llm_message("system", content, _opts), do: ReqLLM.Context.system(content || "")
+
+  defp req_llm_message("tool", content, opts) do
+    tool_call_id = Keyword.get(opts, :tool_call_id) || ""
+
+    case Keyword.get(opts, :name) do
+      nil -> ReqLLM.Context.tool_result(tool_call_id, content || "")
+      name -> ReqLLM.Context.tool_result(tool_call_id, name, content || "")
+    end
+  end
+
+  defp req_llm_message(_role, content, _opts), do: ReqLLM.Context.user(content || "")
 
   defp merge_extra_params(opts, nil), do: opts
   defp merge_extra_params(opts, extra_params) when extra_params == %{}, do: opts
@@ -201,6 +235,8 @@ defmodule App.Agents.Runner do
   end
 
   defp blank?(value), do: value in [nil, ""]
+  defp blank_to_nil(value) when value in [nil, ""], do: nil
+  defp blank_to_nil(value), do: value
 
   defp stream_response(model, context, llm_opts, callbacks) do
     case ReqLLM.stream_text(model, context, llm_opts) do
@@ -237,6 +273,12 @@ defmodule App.Agents.Runner do
           recipient,
           fn tool_result -> {:stream_tool_result, tool_result} end
         ),
+      on_tool_calls:
+        resolve_callback(
+          Keyword.get(opts, :on_tool_calls),
+          recipient,
+          fn tool_call_turn -> {:stream_tool_calls, tool_call_turn} end
+        ),
       on_tool_start:
         resolve_callback(
           Keyword.get(opts, :on_tool_start),
@@ -250,6 +292,7 @@ defmodule App.Agents.Runner do
     %{
       on_result: fn _token -> :ok end,
       on_thinking: fn _token -> :ok end,
+      on_tool_calls: fn _tool_call_turn -> :ok end,
       on_tool_start: fn _tool_result -> :ok end,
       on_tool_result: fn _tool_result -> :ok end
     }
@@ -270,6 +313,7 @@ defmodule App.Agents.Runner do
       :extra_system_prompt,
       :on_result,
       :on_thinking,
+      :on_tool_calls,
       :on_tool_start,
       :on_tool_result
     ])
@@ -279,6 +323,7 @@ defmodule App.Agents.Runner do
     %{
       content: "",
       thinking: "",
+      tool_call_turns: [],
       tool_responses: [],
       usage: nil,
       finish_reason: nil,
@@ -301,6 +346,10 @@ defmodule App.Agents.Runner do
 
   defp append_tool_responses(result_state, tool_responses) do
     %{result_state | tool_responses: result_state.tool_responses ++ tool_responses}
+  end
+
+  defp append_tool_call_turn(result_state, tool_call_turn) do
+    %{result_state | tool_call_turns: result_state.tool_call_turns ++ [tool_call_turn]}
   end
 
   defp merge_usage(result_state, usage) do
@@ -334,4 +383,106 @@ defmodule App.Agents.Runner do
 
   defp normalize_metadata(nil), do: nil
   defp normalize_metadata(value), do: value |> Jason.encode!() |> Jason.decode!()
+
+  defp expand_history_message(%Message{role: "assistant"} = message) do
+    tool_call_turns = Message.tool_call_turns(message)
+
+    if tool_call_turns == [] do
+      [message]
+    else
+      tool_messages = history_tool_messages(message)
+      tool_messages_by_call_id = Enum.group_by(tool_messages, &tool_call_message_id/1)
+
+      {expanded_turns, used_tool_call_ids} =
+        Enum.map_reduce(tool_call_turns, MapSet.new(), fn tool_call_turn, used_ids ->
+          tool_calls = turn_tool_calls(tool_call_turn)
+
+          related_tool_messages =
+            tool_calls
+            |> Enum.flat_map(fn tool_call ->
+              Map.get(tool_messages_by_call_id, tool_call_id(tool_call), [])
+            end)
+
+          updated_used_ids =
+            Enum.reduce(related_tool_messages, used_ids, fn related_message, acc ->
+              MapSet.put(acc, tool_call_message_id(related_message))
+            end)
+
+          {[build_tool_call_turn_message(tool_call_turn) | related_tool_messages],
+           updated_used_ids}
+        end)
+
+      extra_tool_messages =
+        Enum.reject(tool_messages, fn tool_message ->
+          MapSet.member?(used_tool_call_ids, tool_call_message_id(tool_message))
+        end)
+
+      List.flatten(expanded_turns) ++ extra_tool_messages ++ [message]
+    end
+  end
+
+  defp expand_history_message(%Message{} = message), do: [message]
+  defp expand_history_message(%{} = message), do: [message]
+
+  defp history_tool_messages(%Message{tool_messages: tool_messages})
+       when is_list(tool_messages) and tool_messages != [],
+       do: tool_messages
+
+  defp history_tool_messages(%Message{} = message) do
+    Enum.map(Message.tool_responses(message), &build_virtual_tool_message/1)
+  end
+
+  defp build_tool_call_turn(text, thinking, tool_calls) do
+    %{}
+    |> maybe_put_map_value("content", blank_to_nil(text))
+    |> maybe_put_map_value("thinking", blank_to_nil(thinking))
+    |> Map.put("tool_calls", normalize_metadata(tool_calls) || [])
+  end
+
+  defp build_tool_call_turn_message(tool_call_turn) do
+    %{
+      role: "assistant",
+      content: turn_content(tool_call_turn),
+      tool_calls: turn_tool_calls(tool_call_turn)
+    }
+  end
+
+  defp build_virtual_tool_message(tool_response) do
+    %{
+      role: "tool",
+      content: Map.get(tool_response, "content"),
+      name: Map.get(tool_response, "name"),
+      tool_call_id: Map.get(tool_response, "id")
+    }
+  end
+
+  defp turn_content(%{} = tool_call_turn) do
+    Map.get(tool_call_turn, "content") || Map.get(tool_call_turn, :content)
+  end
+
+  defp turn_tool_calls(%{} = tool_call_turn) do
+    tool_call_turn
+    |> Map.get("tool_calls", Map.get(tool_call_turn, :tool_calls, []))
+    |> List.wrap()
+  end
+
+  defp message_tool_calls(%{} = message) do
+    message
+    |> Map.get(:tool_calls, Map.get(message, "tool_calls", []))
+    |> List.wrap()
+  end
+
+  defp message_content(%{} = message),
+    do: Map.get(message, :content) || Map.get(message, "content")
+
+  defp tool_call_message_id(%Message{} = message), do: message.tool_call_id
+
+  defp tool_call_message_id(%{} = message),
+    do: Map.get(message, :tool_call_id) || Map.get(message, "tool_call_id")
+
+  defp tool_call_id(%{} = tool_call), do: Map.get(tool_call, :id) || Map.get(tool_call, "id")
+  defp tool_call_id(_tool_call), do: nil
+
+  defp maybe_put_map_value(map, _key, nil), do: map
+  defp maybe_put_map_value(map, key, value), do: Map.put(map, key, value)
 end

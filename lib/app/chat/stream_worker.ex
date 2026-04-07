@@ -8,6 +8,7 @@ defmodule App.Chat.StreamWorker do
   require Logger
 
   alias App.Chat
+  alias App.Chat.Message
   alias App.Chat.Orchestrator
 
   @stream_db_write_every 10
@@ -39,8 +40,11 @@ defmodule App.Chat.StreamWorker do
       chat_room: Keyword.fetch!(opts, :chat_room),
       messages: Keyword.fetch!(opts, :messages),
       message_id: Keyword.fetch!(opts, :message_id),
+      agent_id: Keyword.get(opts, :agent_id),
       content: Keyword.get(opts, :content, "") || "",
       thinking: Keyword.get(opts, :thinking, "") || "",
+      next_tool_position: nil,
+      tool_parent_message_id: nil,
       tool_responses: Keyword.get(opts, :tool_responses, []),
       metadata: Keyword.get(opts, :metadata, %{}) || %{},
       run_opts: Keyword.get(opts, :run_opts, []),
@@ -61,6 +65,9 @@ defmodule App.Chat.StreamWorker do
         callbacks = [
           on_result: fn token -> send(worker_pid, {:stream_chunk, token}) end,
           on_thinking: fn token -> send(worker_pid, {:stream_thinking_chunk, token}) end,
+          on_tool_calls: fn tool_call_turn ->
+            send(worker_pid, {:stream_tool_calls, tool_call_turn})
+          end,
           on_tool_start: fn tool_result ->
             send(worker_pid, {:stream_tool_started, tool_result})
           end,
@@ -121,7 +128,7 @@ defmodule App.Chat.StreamWorker do
         state.content,
         state.metadata,
         state.thinking,
-        state.tool_responses
+        state
       )
 
     if persisted? do
@@ -144,7 +151,7 @@ defmodule App.Chat.StreamWorker do
         state.message_id,
         new_content,
         stream_placeholder_status(new_content),
-        build_message_metadata(state.metadata, state.thinking, state.tool_responses)
+        build_message_metadata(state.metadata, state.thinking)
       )
     end
 
@@ -157,34 +164,47 @@ defmodule App.Chat.StreamWorker do
     {:noreply, state}
   end
 
+  def handle_info({:stream_tool_calls, tool_call_turn}, state) do
+    case split_assistant_turn(state, tool_call_turn) do
+      {:ok, state} ->
+        {:noreply, state}
+
+      {:error, reason} ->
+        Logger.error("[StreamWorker] Failed to split assistant turn: #{inspect(reason)}")
+        {:noreply, state}
+    end
+  end
+
   def handle_info({:stream_tool_started, tool_result}, state) do
     tool_responses = merge_tool_response(state.tool_responses, tool_result)
     state = %{state | tool_responses: tool_responses}
 
-    maybe_update_streaming_message(
-      state.message_id,
-      state.content,
-      stream_placeholder_status(state.content),
-      build_message_metadata(state.metadata, state.thinking, tool_responses)
-    )
+    case persist_tool_message(state, tool_result) do
+      {:ok, state, tool_message} ->
+        broadcast_message_update(state.chat_room.id, tool_message.id)
+        broadcast(state.chat_room.id, {:stream_tool_started, state.message_id, tool_result})
+        {:noreply, state}
 
-    broadcast(state.chat_room.id, {:stream_tool_started, state.message_id, tool_result})
-    {:noreply, state}
+      {:error, _reason} ->
+        broadcast(state.chat_room.id, {:stream_tool_started, state.message_id, tool_result})
+        {:noreply, state}
+    end
   end
 
   def handle_info({:stream_tool_result, tool_result}, state) do
     tool_responses = merge_tool_response(state.tool_responses, tool_result)
     state = %{state | tool_responses: tool_responses}
 
-    maybe_update_streaming_message(
-      state.message_id,
-      state.content,
-      stream_placeholder_status(state.content),
-      build_message_metadata(state.metadata, state.thinking, tool_responses)
-    )
+    case persist_tool_message(state, tool_result) do
+      {:ok, state, tool_message} ->
+        broadcast_message_update(state.chat_room.id, tool_message.id)
+        broadcast(state.chat_room.id, {:stream_tool_result, state.message_id, tool_result})
+        {:noreply, state}
 
-    broadcast(state.chat_room.id, {:stream_tool_result, state.message_id, tool_result})
-    {:noreply, state}
+      {:error, _reason} ->
+        broadcast(state.chat_room.id, {:stream_tool_result, state.message_id, tool_result})
+        {:noreply, state}
+    end
   end
 
   def handle_info({:title_updated, title}, state) do
@@ -210,7 +230,7 @@ defmodule App.Chat.StreamWorker do
 
     case result do
       {:ok, %{content: content, agent_id: agent_id, metadata: metadata}} ->
-        persist_success(state.chat_room, state.message_id, content, agent_id, metadata)
+        persist_success(state.chat_room, state.message_id, content, agent_id, metadata, state)
 
       {:error, reason} ->
         error_text = error_message(reason)
@@ -233,40 +253,52 @@ defmodule App.Chat.StreamWorker do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
-  defp persist_success(chat_room, message_id, content, agent_id, metadata) do
-    attrs = %{
-      content: content,
-      agent_id: agent_id,
-      metadata: metadata,
-      status: :completed
-    }
+  defp persist_success(chat_room, message_id, content, agent_id, metadata, state) do
+    attrs =
+      %{
+        content: content,
+        agent_id: agent_id,
+        metadata: metadata,
+        status: :completed
+      }
+      |> maybe_put_position(final_message_position(state))
 
     persist_message(chat_room, message_id, attrs)
   end
 
   defp persist_error(chat_room, message_id, error_text, state) do
     metadata =
-      build_message_metadata(state.metadata, state.thinking, state.tool_responses)
+      build_message_metadata(state.metadata, state.thinking)
       |> Map.put("error", error_text)
 
-    persist_message(chat_room, message_id, %{
-      content: error_text,
-      status: :error,
-      metadata: metadata
-    })
+    persist_message(
+      chat_room,
+      message_id,
+      %{
+        content: error_text,
+        status: :error,
+        metadata: metadata
+      }
+      |> maybe_put_position(final_message_position(state))
+    )
   end
 
-  defp persist_cancel(chat_room, message_id, content, metadata, thinking, tool_responses) do
+  defp persist_cancel(chat_room, message_id, content, metadata, thinking, state) do
     cancel_text = "Response cancelled."
 
-    persist_message(chat_room, message_id, %{
-      content: blank_to_nil(content) || cancel_text,
-      status: :error,
-      metadata:
-        build_message_metadata(metadata, thinking, tool_responses)
-        |> Map.put("error", cancel_text)
-        |> Map.put("cancelled", true)
-    })
+    persist_message(
+      chat_room,
+      message_id,
+      %{
+        content: blank_to_nil(content) || cancel_text,
+        status: :error,
+        metadata:
+          build_message_metadata(metadata, thinking)
+          |> Map.put("error", cancel_text)
+          |> Map.put("cancelled", true)
+      }
+      |> maybe_put_position(final_message_position(state))
+    )
   end
 
   defp persist_message(chat_room, message_id, attrs) do
@@ -323,11 +355,90 @@ defmodule App.Chat.StreamWorker do
     Chat.broadcast_chat_room(chat_room_id, message)
   end
 
-  defp build_message_metadata(existing_metadata, thinking, tool_responses) do
+  defp split_assistant_turn(state, tool_call_turn) do
+    tool_parent_message_id = state.message_id
+
+    case Chat.get_message_by_id(tool_parent_message_id) do
+      nil ->
+        {:error, :missing_assistant_message}
+
+      message ->
+        completed_position = completed_turn_position(state, message.position)
+        next_tool_position = completed_position + 1
+
+        with {:ok, _message} <-
+               Chat.update_message(
+                 message,
+                 tool_call_message_attrs(state, tool_call_turn, completed_position)
+               ),
+             {:ok, next_message} <-
+               create_followup_assistant_message(
+                 state,
+                 reserved_message_position(completed_position)
+               ),
+             :ok <- switch_stream_message(tool_parent_message_id, next_message.id) do
+          broadcast_message_update(state.chat_room.id, tool_parent_message_id)
+          broadcast_message_update(state.chat_room.id, next_message.id)
+
+          {:ok,
+           %{
+             state
+             | message_id: next_message.id,
+               content: next_message.content || "",
+               thinking: Message.thinking(next_message) || "",
+               metadata: next_message.metadata || %{},
+               token_count: 0,
+               next_tool_position: next_tool_position,
+               tool_parent_message_id: tool_parent_message_id,
+               tool_responses: [],
+               agent_id: next_message.agent_id || state.agent_id
+           }}
+        else
+          {:error, _reason} = error ->
+            error
+        end
+    end
+  end
+
+  defp tool_call_message_attrs(state, tool_call_turn, position) do
+    %{
+      content: blank_to_nil(turn_content(tool_call_turn)),
+      position: position,
+      status: :completed,
+      metadata: tool_call_message_metadata(state.metadata, state.thinking, tool_call_turn)
+    }
+  end
+
+  defp create_followup_assistant_message(state, position) do
+    Chat.create_message(state.chat_room, %{
+      role: "assistant",
+      content: nil,
+      position: position,
+      status: :pending,
+      agent_id: state.agent_id,
+      metadata: carry_forward_metadata(state.metadata)
+    })
+  end
+
+  defp switch_stream_message(previous_message_id, next_message_id)
+       when previous_message_id == next_message_id,
+       do: :ok
+
+  defp switch_stream_message(previous_message_id, next_message_id) do
+    case Registry.register(App.Chat.StreamRegistry, next_message_id, nil) do
+      {:ok, _value} ->
+        Registry.unregister(App.Chat.StreamRegistry, previous_message_id)
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp build_message_metadata(existing_metadata, thinking) do
     existing_metadata
-    |> normalize_metadata_map()
+    |> carry_forward_metadata()
     |> put_metadata_value("thinking", blank_to_nil(thinking))
-    |> put_metadata_value("tool_responses", empty_to_nil(tool_responses))
   end
 
   defp put_metadata_value(metadata, key, nil), do: Map.delete(metadata, key)
@@ -356,6 +467,115 @@ defmodule App.Chat.StreamWorker do
         end
     end
   end
+
+  defp persist_tool_message(state, tool_result) do
+    parent_message_id = tool_parent_message_id(state)
+
+    case {Map.get(tool_result, "id"), Map.get(tool_result, "name")} do
+      {tool_call_id, tool_name}
+      when is_binary(tool_call_id) and tool_call_id != "" and is_binary(tool_name) and
+             tool_name != "" ->
+        attrs = tool_message_attrs(parent_message_id, tool_result, state.next_tool_position)
+
+        case Chat.get_tool_message(parent_message_id, tool_call_id) do
+          nil ->
+            case Chat.create_message(state.chat_room, attrs) do
+              {:ok, tool_message} ->
+                {:ok, %{state | next_tool_position: state.next_tool_position + 1}, tool_message}
+
+              {:error, _reason} = error ->
+                error
+            end
+
+          tool_message ->
+            case Chat.update_message(
+                   tool_message,
+                   Map.drop(attrs, [:role, :parent_message_id, :position])
+                 ) do
+              {:ok, updated_tool_message} -> {:ok, state, updated_tool_message}
+              {:error, _reason} = error -> error
+            end
+        end
+
+      _other ->
+        {:error, :invalid_tool_result}
+    end
+  end
+
+  defp tool_message_attrs(parent_message_id, tool_result, position) do
+    %{
+      role: "tool",
+      content: blank_to_nil(Map.get(tool_result, "content")),
+      name: Map.get(tool_result, "name"),
+      tool_call_id: Map.get(tool_result, "id"),
+      position: position,
+      status: tool_message_status(tool_result),
+      metadata: tool_message_metadata(tool_result),
+      parent_message_id: parent_message_id
+    }
+  end
+
+  defp tool_message_status(%{"status" => "error"}), do: :error
+  defp tool_message_status(%{"status" => "running"}), do: :pending
+  defp tool_message_status(_tool_result), do: :completed
+
+  defp tool_message_metadata(tool_result) do
+    %{}
+    |> put_metadata_value("arguments", Map.get(tool_result, "arguments"))
+    |> put_metadata_value("tool_status", Map.get(tool_result, "status"))
+  end
+
+  defp tool_parent_message_id(%{tool_parent_message_id: nil, message_id: message_id}),
+    do: message_id
+
+  defp tool_parent_message_id(%{tool_parent_message_id: tool_parent_message_id}),
+    do: tool_parent_message_id
+
+  defp tool_call_message_metadata(existing_metadata, thinking, tool_call_turn) do
+    existing_metadata
+    |> carry_forward_metadata()
+    |> put_metadata_value("thinking", blank_to_nil(thinking))
+    |> put_metadata_value("tool_calls", empty_to_nil(turn_tool_calls(tool_call_turn)))
+  end
+
+  defp carry_forward_metadata(existing_metadata) do
+    existing_metadata
+    |> normalize_metadata_map()
+    |> Map.drop([
+      "usage",
+      "thinking",
+      "tool_calls",
+      "tool_call_turns",
+      "tool_responses",
+      "finish_reason",
+      "provider_meta",
+      "error",
+      "cancelled"
+    ])
+  end
+
+  defp turn_content(%{} = tool_call_turn) do
+    Map.get(tool_call_turn, "content") || Map.get(tool_call_turn, :content)
+  end
+
+  defp turn_tool_calls(%{} = tool_call_turn) do
+    tool_call_turn
+    |> Map.get("tool_calls", Map.get(tool_call_turn, :tool_calls, []))
+    |> List.wrap()
+  end
+
+  defp completed_turn_position(%{next_tool_position: nil}, current_position), do: current_position
+
+  defp completed_turn_position(%{next_tool_position: next_tool_position}, _current_position),
+    do: next_tool_position
+
+  defp reserved_message_position(completed_position), do: completed_position + 1000
+
+  defp final_message_position(%{next_tool_position: nil}), do: nil
+  defp final_message_position(%{next_tool_position: next_tool_position}), do: next_tool_position
+
+  defp maybe_put_position(attrs, nil), do: attrs
+  defp maybe_put_position(attrs, position), do: Map.put(attrs, :position, position)
 
   defp stream_placeholder_status(content) when content in [nil, ""], do: :pending
   defp stream_placeholder_status(_content), do: :streaming

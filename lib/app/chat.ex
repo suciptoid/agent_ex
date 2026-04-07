@@ -113,14 +113,24 @@ defmodule App.Chat do
     Message
     |> where([message], message.chat_room_id == ^chat_room.id)
     |> order_by([message], asc: message.position)
-    |> preload([:agent])
+    |> preload(^message_preloads())
     |> Repo.all()
   end
 
   def get_message_by_id(id) do
     Message
-    |> preload([:agent])
+    |> preload(^message_preloads())
     |> Repo.get(id)
+  end
+
+  def get_tool_message(parent_message_id, tool_call_id) do
+    Message
+    |> where(
+      [message],
+      message.parent_message_id == ^parent_message_id and message.tool_call_id == ^tool_call_id
+    )
+    |> preload(^message_preloads())
+    |> Repo.one()
   end
 
   def create_message(%ChatRoom{} = chat_room, attrs) do
@@ -130,7 +140,7 @@ defmodule App.Chat do
     |> case do
       {:ok, message} ->
         touch_chat_room(chat_room)
-        {:ok, Repo.preload(message, [:agent])}
+        {:ok, Repo.preload(message, message_preloads())}
 
       {:error, _} = error ->
         error
@@ -142,7 +152,7 @@ defmodule App.Chat do
     |> Message.changeset(attrs)
     |> Repo.update()
     |> case do
-      {:ok, message} -> {:ok, Repo.preload(message, [:agent])}
+      {:ok, message} -> {:ok, Repo.preload(message, message_preloads())}
       {:error, _} = error -> error
     end
   end
@@ -155,12 +165,19 @@ defmodule App.Chat do
        chat_room: chat_room,
        messages: messages,
        message_id: message.id,
+       agent_id: message.agent_id,
        content: message.content || "",
-       thinking: message.metadata["thinking"] || "",
-       tool_responses: message.metadata["tool_responses"] || [],
+       thinking: Message.thinking(message) || "",
+       tool_responses: Message.tool_responses(message),
+       tool_call_turns: Message.tool_call_turns(message),
        metadata: message.metadata || %{},
        run_opts: Keyword.take(opts, [:reasoning_effort])}
     )
+  end
+
+  def delete_tool_messages(%Message{id: message_id}) do
+    from(message in Message, where: message.parent_message_id == ^message_id)
+    |> Repo.delete_all()
   end
 
   def cancel_stream(message_id) do
@@ -235,9 +252,15 @@ defmodule App.Chat do
     message_query =
       from message in Message,
         order_by: [asc: message.position],
-        preload: [:agent]
+        preload: ^message_preloads()
 
     [chat_room_agents: [agent: :provider], agents: [:provider], messages: message_query]
+  end
+
+  defp message_preloads do
+    [
+      :agent
+    ]
   end
 
   defp fetch_agents(%Scope{} = scope, agent_ids, %Ecto.Changeset{} = changeset) do

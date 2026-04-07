@@ -47,56 +47,9 @@
 
     <%!-- Message input --%>
     <%= if @available_agents != [] do %>
-      <div class="mx-auto w-full max-w-3xl px-4 pb-4 sm:px-5 sm:pb-5 lg:px-6 lg:pb-6">
-        <.form
-          for={@message_form}
-          id="chat-message-form"
-          phx-change="validate"
-          phx-submit="send"
-          class="relative"
-        >
-          <.textarea
-            field={@message_form[:content]}
-            id="chat-message-input"
-            rows="3"
-            placeholder="Message… (Enter to send, Shift+Enter for new line)"
-            phx-hook=".ChatInput"
-            class="min-h-24 resize-none rounded-2xl px-4 py-4 pr-14"
-          />
-          <button
-            id="chat-message-submit"
-            type="submit"
-            class="group absolute bottom-3 right-3 flex size-9 items-center justify-center rounded-xl bg-primary p-0 text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
-            aria-label="Send message"
-            title="Send message"
-          >
-            <.icon
-              name="hero-paper-airplane"
-              class="size-4 text-current transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
-            />
-          </button>
-        </.form>
+      <div class="mx-auto w-full max-w-4xl px-4 sm:px-5 lg:px-6">
+        <AppWeb.ChatComponents.chat_message_composer form={@message_form} />
       </div>
     <% end %>
   </div>
-
-  <script :type={Phoenix.LiveView.ColocatedHook} name=".ChatInput">
-    export default {
-      mounted() {
-        this.el.addEventListener("keydown", (e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            const form = this.el.closest("form");
-            if (!form || form.dataset.streaming === "true") return;
-
-            if (typeof form.requestSubmit === "function") {
-              form.requestSubmit();
-            } else {
-              form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-            }
-          }
-        });
-      }
-    }
-  </script>
 </Layouts.dashboard>

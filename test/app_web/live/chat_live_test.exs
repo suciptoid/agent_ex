@@ -36,7 +36,10 @@ defmodule AppWeb.ChatLiveTest do
       {:ok, live_view, _html} = live(conn, ~p"/chat")
 
       assert has_element?(live_view, "#chat-message-form")
+      assert has_element?(live_view, "#chat-composer-shell")
       assert has_element?(live_view, "#chat-message-input")
+      assert has_element?(live_view, "#chat-message-input.field-sizing-content")
+      assert has_element?(live_view, "#chat-message-controls")
       assert has_element?(live_view, "#new-chat-agent-selector")
       assert has_element?(live_view, "#new-chat-agent-selector-add-agent-trigger")
     end

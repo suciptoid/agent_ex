@@ -19,7 +19,7 @@
               <.button>Add Provider First</.button>
             </.link>
           <% else %>
-            <.link id="new-agent-button" patch={~p"/agents/new"}>
+            <.link id="new-agent-button" navigate={~p"/agents/new"}>
               <.button>New Agent</.button>
             </.link>
           <% end %>
@@ -32,10 +32,10 @@
         </div>
       <% end %>
 
-      <%= if @live_action in [:new, :edit] do %>
+      <%= if @live_action == :edit do %>
         <.live_component
           module={AppWeb.AgentLive.FormComponent}
-          id={@agent.id || :new}
+          id={@agent.id}
           title={@page_title}
           action={@live_action}
           agent={@agent}
@@ -46,31 +46,39 @@
         />
       <% end %>
 
-      <div id="agents" phx-update="stream" class="grid gap-4 lg:grid-cols-2">
+      <div id="agents" phx-update="stream" class="space-y-3" data-layout="single-column">
         <div
           :for={{dom_id, agent} <- @streams.agents}
           id={dom_id}
           data-agent-id={agent.id}
-          class="rounded-2xl border border-border bg-card p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+          class="rounded-2xl border border-border bg-card p-5 shadow-sm transition hover:border-primary/30"
         >
-          <div class="flex items-start justify-between gap-4">
-            <div class="space-y-2">
-              <div>
-                <h2 class="text-lg font-semibold text-foreground">{agent.name}</h2>
-                <p class="text-sm text-muted-foreground">{provider_label(agent)}</p>
+          <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div class="min-w-0 space-y-3">
+              <div class="space-y-1">
+                <div>
+                  <h2 class="text-lg font-semibold text-foreground">{agent.name}</h2>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                  <span id={"agent-provider-#{agent.id}"}>{provider_label(agent)}</span>
+                  <span aria-hidden="true">&bull;</span>
+                  <span id={"agent-model-#{agent.id}"} class="truncate">{model_name(agent)}</span>
+                </div>
               </div>
 
-              <div class="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                <span class="inline-flex items-center rounded-full bg-primary/10 px-2.5 py-1 font-medium text-primary">
-                  {agent.model}
-                </span>
-                <span class="inline-flex items-center rounded-full bg-muted px-2.5 py-1 font-medium text-muted-foreground">
-                  {tools_summary(agent)}
+              <div class="inline-flex items-center gap-2 rounded-full border border-border bg-muted/50 px-3 py-1.5 text-xs font-medium text-foreground">
+                <.icon name="hero-wrench-screwdriver" class="size-3.5 text-muted-foreground" />
+                <span>{tool_count_label(agent)}</span>
+                <span
+                  id={"agent-tools-count-#{agent.id}"}
+                  class="inline-flex min-w-5 items-center justify-center rounded-full bg-background px-1.5 py-0.5 text-[11px] font-semibold text-foreground"
+                >
+                  {tool_count(agent)}
                 </span>
               </div>
             </div>
 
-            <div class="flex shrink-0 items-center gap-2">
+            <div class="flex shrink-0 items-center gap-2 self-end sm:self-auto">
               <.link id={"edit-agent-#{agent.id}"} patch={~p"/agents/#{agent.id}/edit"}>
                 <.button
                   variant="outline"

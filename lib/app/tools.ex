@@ -16,6 +16,10 @@ defmodule App.Tools do
     |> Repo.all()
   end
 
+  def count_tools(%Scope{} = scope) do
+    Repo.aggregate(from(tool in Tool, where: tool.user_id == ^scope.user.id), :count, :id)
+  end
+
   def list_tool_names(%Scope{} = scope) do
     Tool
     |> where([tool], tool.user_id == ^scope.user.id)

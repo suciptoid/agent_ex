@@ -19,6 +19,23 @@ defmodule App.Chat do
     |> Repo.all()
   end
 
+  def count_chat_rooms(%Scope{} = scope) do
+    Repo.aggregate(
+      from(chat_room in ChatRoom, where: chat_room.user_id == ^scope.user.id),
+      :count,
+      :id
+    )
+  end
+
+  def list_recent_chat_rooms(%Scope{} = scope, limit \\ 5) when is_integer(limit) and limit > 0 do
+    ChatRoom
+    |> where([chat_room], chat_room.user_id == ^scope.user.id)
+    |> order_by([chat_room], desc: chat_room.updated_at, desc: chat_room.inserted_at)
+    |> limit(^limit)
+    |> preload([:agents])
+    |> Repo.all()
+  end
+
   def get_chat_room!(%Scope{} = scope, id) do
     ChatRoom
     |> where([chat_room], chat_room.user_id == ^scope.user.id and chat_room.id == ^id)

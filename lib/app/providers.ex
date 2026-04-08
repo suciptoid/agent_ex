@@ -14,6 +14,10 @@ defmodule App.Providers do
     Repo.all(from p in Provider, where: p.user_id == ^scope.user.id)
   end
 
+  def count_providers(%Scope{} = scope) do
+    Repo.aggregate(from(p in Provider, where: p.user_id == ^scope.user.id), :count, :id)
+  end
+
   def get_provider!(%Scope{} = scope, id) do
     Repo.get_by!(Provider, id: id, user_id: scope.user.id)
   end

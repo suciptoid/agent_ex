@@ -19,6 +19,19 @@ defmodule App.Agents do
     |> Repo.all()
   end
 
+  def count_agents(%Scope{} = scope) do
+    Repo.aggregate(from(agent in Agent, where: agent.user_id == ^scope.user.id), :count, :id)
+  end
+
+  def list_recent_agents(%Scope{} = scope, limit \\ 5) when is_integer(limit) and limit > 0 do
+    Agent
+    |> where([agent], agent.user_id == ^scope.user.id)
+    |> order_by([agent], desc: agent.inserted_at)
+    |> limit(^limit)
+    |> preload([:provider])
+    |> Repo.all()
+  end
+
   def get_agent!(%Scope{} = scope, id) do
     Agent
     |> where([agent], agent.user_id == ^scope.user.id and agent.id == ^id)

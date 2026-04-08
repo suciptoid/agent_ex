@@ -29,12 +29,6 @@ defmodule AppWeb.AgentLive.Index do
     |> assign(:agent, nil)
   end
 
-  defp apply_action(socket, :new, _params) do
-    socket
-    |> assign(:page_title, "New Agent")
-    |> assign(:agent, %Agent{})
-  end
-
   defp apply_action(socket, :edit, %{"id" => id}) do
     agent = Agents.get_agent!(socket.assigns.current_scope, id)
 
@@ -60,6 +54,19 @@ defmodule AppWeb.AgentLive.Index do
     provider.name || String.capitalize(provider.provider)
   end
 
-  def tools_summary(%Agent{tools: []}), do: "No tools enabled"
-  def tools_summary(%Agent{tools: tools}), do: Enum.join(tools, ", ")
+  def model_name(%Agent{model: model}) do
+    case String.split(model, ":", parts: 2) do
+      [_provider, model_name] -> model_name
+      [model_name] -> model_name
+    end
+  end
+
+  def tool_count(%Agent{tools: tools}), do: length(tools)
+
+  def tool_count_label(%Agent{} = agent) do
+    case tool_count(agent) do
+      1 -> "1 tool"
+      count -> "#{count} tools"
+    end
+  end
 end

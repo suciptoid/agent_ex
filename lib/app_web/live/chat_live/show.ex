@@ -14,6 +14,7 @@ defmodule AppWeb.ChatLive.Show do
     {"xhigh", "X-High"}
   ]
   @reasoning_effort_atoms %{
+    "default" => :default,
     "none" => :none,
     "minimal" => :minimal,
     "low" => :low,
@@ -60,13 +61,8 @@ defmodule AppWeb.ChatLive.Show do
     {:noreply, assign_message_form(socket, message_params)}
   end
 
-  def handle_event("set-reasoning-effort", %{"value" => value}, socket) do
-    if reasoning_effort_value?(value) do
-      {:noreply, assign(socket, :reasoning_effort, value)}
-    else
-      {:noreply, put_flash(socket, :error, "Unsupported reasoning level")}
-    end
-  end
+  def handle_event("set-reasoning-effort", params, socket),
+    do: update_reasoning_effort(socket, params["effort"] || params["value"])
 
   def handle_event("send", _params, %{assigns: %{streaming_active?: true}} = socket) do
     {:noreply, put_flash(socket, :error, "Wait for the current response to finish first")}
@@ -686,14 +682,26 @@ defmodule AppWeb.ChatLive.Show do
 
   defp reasoning_stream_opts(socket) do
     case {socket.assigns.reasoning_supported?,
-          Map.get(@reasoning_effort_atoms, socket.assigns.reasoning_effort)} do
-      {true, effort} when is_atom(effort) -> [reasoning_effort: effort]
+          Map.fetch(@reasoning_effort_atoms, socket.assigns.reasoning_effort)} do
+      {true, {:ok, effort}} -> [reasoning_effort: effort]
       _ -> []
     end
   end
 
   defp reasoning_effort_value?(value) do
     Enum.any?(@reasoning_effort_options, fn {option_value, _label} -> option_value == value end)
+  end
+
+  defp update_reasoning_effort(socket, value) when is_binary(value) do
+    if reasoning_effort_value?(value) do
+      {:noreply, assign(socket, :reasoning_effort, value)}
+    else
+      {:noreply, put_flash(socket, :error, "Unsupported reasoning level")}
+    end
+  end
+
+  defp update_reasoning_effort(socket, _value) do
+    {:noreply, put_flash(socket, :error, "Unsupported reasoning level")}
   end
 
   defp reset_main_stream(socket) do

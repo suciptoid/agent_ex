@@ -1,0 +1,4 @@
+- Fixed chat reasoning selection so `"default"` maps to `:default` and the request pipeline no longer forwards `reasoning_effort: nil` for reasoning-capable models such as Gemini.
+- Switched the reasoning menu click payload from `phx-value-value` to `phx-value-effort` so browser clicks stop tripping the `"Unsupported reasoning level"` flash path.
+- Added chat LiveView regressions that cover a real Gemini menu-item click and the default reasoning flow.
+- Validation: `mix test test/app_web/live/chat_live_test.exs` passed. `mix precommit` still fails on pre-existing unrelated tests in `AppWeb.UserLive.LoginTest`, `AppWeb.UserAuthTest`, and `App.UsersTest`.

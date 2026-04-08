@@ -262,7 +262,7 @@
                           :for={{value, label} <- reasoning_effort_options()}
                           id={"chat-reasoning-effort-option-#{value}"}
                           phx-click="set-reasoning-effort"
-                          phx-value-value={value}
+                          phx-value-effort={value}
                         >
                           <span class="flex-1">{label}</span>
                           <.icon

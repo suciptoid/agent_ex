@@ -138,34 +138,25 @@ defmodule AppWeb.ChatLiveTest do
       assert has_element?(live_view, "#sidebar-chat-loading-#{room.id}")
     end
 
-    test "shows reasoning controls for supported models and forwards the selected effort", %{
+    test "shows reasoning controls for Gemini models and forwards the selected effort", %{
       conn: conn,
       user: user,
       scope: scope
     } do
-      previous_stub_config = Application.get_env(:app, App.TestSupport.AgentRunnerStub)
-      Application.put_env(:app, App.TestSupport.AgentRunnerStub, notify_pid: self())
-
-      on_exit(fn ->
-        if previous_stub_config do
-          Application.put_env(:app, App.TestSupport.AgentRunnerStub, previous_stub_config)
-        else
-          Application.delete_env(:app, App.TestSupport.AgentRunnerStub)
-        end
-      end)
+      configure_agent_runner_stub(self())
 
       provider =
         provider_fixture(user, %{
-          name: "My Anthropic",
-          provider: "anthropic",
-          api_key: "sk-ant-test"
+          name: "My Gemini",
+          provider: "google",
+          api_key: "google-test-key"
         })
 
       agent =
         agent_fixture(user, %{
           provider: provider,
           name: "Reasoner",
-          model: "anthropic:claude-haiku-4-5"
+          model: "google:gemini-2.5-flash"
         })
 
       room =
@@ -179,7 +170,11 @@ defmodule AppWeb.ChatLiveTest do
 
       assert has_element?(live_view, "#chat-reasoning-effort-menu")
 
-      render_click(live_view, "set-reasoning-effort", %{"value" => "none"})
+      live_view
+      |> element("#chat-reasoning-effort-option-none")
+      |> render_click()
+
+      refute render(live_view) =~ "Unsupported reasoning level"
 
       live_view
       |> form("#chat-message-form", %{
@@ -196,6 +191,55 @@ defmodule AppWeb.ChatLiveTest do
         end)
 
       assert assistant_message.content == "Reasoner: Keep it concise"
+    end
+
+    test "forwards the default reasoning effort for supported models", %{
+      conn: conn,
+      user: user,
+      scope: scope
+    } do
+      configure_agent_runner_stub(self())
+
+      provider =
+        provider_fixture(user, %{
+          name: "My Gemini",
+          provider: "google",
+          api_key: "google-test-key"
+        })
+
+      agent =
+        agent_fixture(user, %{
+          provider: provider,
+          name: "Reasoner",
+          model: "google:gemini-2.5-flash"
+        })
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Gemini Room",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
+
+      assert has_element?(live_view, "#chat-reasoning-effort-option-default")
+
+      live_view
+      |> form("#chat-message-form", %{
+        "message" => %{"content" => "Use the default reasoning mode"}
+      })
+      |> render_submit()
+
+      assert_receive {:agent_runner_streaming_opts, opts}
+      assert opts[:reasoning_effort] == :default
+
+      assistant_message =
+        wait_for_messages(live_view, scope, room.id, fn messages ->
+          Enum.find(messages, &(&1.role == "assistant" && &1.status == :completed))
+        end)
+
+      assert assistant_message.content == "Reasoner: Use the default reasoning mode"
     end
 
     test "hides reasoning controls for models without reasoning support", %{
@@ -811,6 +855,19 @@ defmodule AppWeb.ChatLiveTest do
         result -> {:halt, result}
       end
     end) || flunk("expected chat messages to reach the desired state")
+  end
+
+  defp configure_agent_runner_stub(notify_pid) do
+    previous_stub_config = Application.get_env(:app, App.TestSupport.AgentRunnerStub)
+    Application.put_env(:app, App.TestSupport.AgentRunnerStub, notify_pid: notify_pid)
+
+    on_exit(fn ->
+      if previous_stub_config do
+        Application.put_env(:app, App.TestSupport.AgentRunnerStub, previous_stub_config)
+      else
+        Application.delete_env(:app, App.TestSupport.AgentRunnerStub)
+      end
+    end)
   end
 
   defp wait_for_chat_room(live_view, scope, room_id, callback) do

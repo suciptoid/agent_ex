@@ -5,9 +5,30 @@ defmodule App.Agents.Tools do
 
   require Logger
 
+  alias App.Tools, as: ToolsContext
   alias App.Tools.Tool
 
-  @builtin_tool_names ["web_fetch", "shell"]
+  @builtin_tool_specs [
+    %{
+      name: "web_fetch",
+      description:
+        "Fetch the content of a web page given a URL. Optional headers can be included for authenticated requests.",
+      visible_on_tool_list?: true
+    },
+    %{
+      name: "shell",
+      description:
+        "Execute a shell command on the local system and return the combined stdout and stderr. Use carefully.",
+      visible_on_tool_list?: true
+    },
+    %{
+      name: "create_tool",
+      description:
+        "Create and save a reusable HTTP tool for the current organization using the same fields as the tools UI.",
+      visible_on_tool_list?: true
+    }
+  ]
+  @builtin_tool_names Enum.map(@builtin_tool_specs, & &1.name)
   @supported_param_types %{
     "string" => :string,
     "integer" => :integer,
@@ -16,6 +37,10 @@ defmodule App.Agents.Tools do
   }
 
   def available_tools, do: @builtin_tool_names
+
+  def listable_builtin_tools do
+    Enum.filter(@builtin_tool_specs, & &1.visible_on_tool_list?)
+  end
 
   def resolve(tool_names, opts \\ []) when is_list(tool_names) and is_list(opts) do
     organization_id = Keyword.get(opts, :organization_id)
@@ -35,6 +60,7 @@ defmodule App.Agents.Tools do
       case tool_name do
         "web_fetch" -> [web_fetch_tool()]
         "shell" -> [shell_tool()]
+        "create_tool" -> [create_tool_tool(organization_id)]
         _name -> custom_tool(custom_tool_map[tool_name])
       end
     end)
@@ -145,6 +171,24 @@ defmodule App.Agents.Tools do
   def do_shell(%{"command" => command}) when is_binary(command), do: run_shell(command)
   def do_shell(_args), do: {:error, "Expected a command argument"}
 
+  def do_create_tool(args, organization_id) when is_map(args) and is_binary(organization_id) do
+    attrs =
+      args
+      |> stringify_keys()
+      |> Map.take(["name", "description", "endpoint", "http_method", "param_rows", "header_rows"])
+      |> Map.put_new("http_method", "get")
+
+    case ToolsContext.create_tool_for_organization(organization_id, attrs) do
+      {:ok, %Tool{} = tool} ->
+        {:ok, created_tool_response(tool)}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:error, "Tool could not be created: #{format_changeset_errors(changeset)}"}
+    end
+  end
+
+  def do_create_tool(_args, _organization_id), do: {:error, "Expected tool attributes"}
+
   defp run_shell(command) do
     trimmed = String.trim(command)
 
@@ -215,6 +259,26 @@ defmodule App.Agents.Tools do
         command: [type: :string, required: true, doc: "The shell command to execute"]
       ],
       callback: &__MODULE__.do_shell/1
+    )
+  end
+
+  defp create_tool_tool(nil) do
+    ReqLLM.tool(
+      name: "create_tool",
+      description:
+        "Create and save a reusable HTTP tool for the current organization using the same fields as the tools UI.",
+      parameter_schema: create_tool_parameter_schema(),
+      callback: fn _args -> {:error, "Tool creation requires an active organization"} end
+    )
+  end
+
+  defp create_tool_tool(organization_id) do
+    ReqLLM.tool(
+      name: "create_tool",
+      description:
+        "Create and save a reusable HTTP tool for the current organization using the same fields as the tools UI.",
+      parameter_schema: create_tool_parameter_schema(),
+      callback: fn args -> do_create_tool(args, organization_id) end
     )
   end
 
@@ -365,4 +429,93 @@ defmodule App.Agents.Tools do
 
   defp normalize_metadata(nil), do: %{}
   defp normalize_metadata(value), do: value |> Jason.encode!() |> Jason.decode!()
+
+  defp create_tool_parameter_schema do
+    %{
+      "type" => "object",
+      "properties" => %{
+        "name" => %{
+          "type" => "string",
+          "description" => "Tool identifier, for example brave_search"
+        },
+        "description" => %{
+          "type" => "string",
+          "description" => "Short sentence explaining what the tool does"
+        },
+        "endpoint" => %{
+          "type" => "string",
+          "description" =>
+            "HTTP URL template, including any placeholders like https://api.example.com/{path}"
+        },
+        "http_method" => %{
+          "type" => "string",
+          "description" => "HTTP method for the saved tool",
+          "enum" => Tool.http_methods()
+        },
+        "param_rows" => %{
+          "type" => "array",
+          "description" =>
+            "Tool parameters. Leave value blank for runtime parameters that the model should fill when using the tool later.",
+          "items" => %{
+            "type" => "object",
+            "properties" => %{
+              "name" => %{"type" => "string", "description" => "Parameter name"},
+              "type" => %{
+                "type" => "string",
+                "description" => "Parameter type",
+                "enum" => Tool.param_types()
+              },
+              "value" => %{
+                "type" => "string",
+                "description" => "Default value. Leave empty for LLM-provided runtime parameters."
+              }
+            },
+            "required" => ["name", "type"]
+          }
+        },
+        "header_rows" => %{
+          "type" => "array",
+          "description" => "Static headers to save with the tool, such as Authorization",
+          "items" => %{
+            "type" => "object",
+            "properties" => %{
+              "key" => %{"type" => "string", "description" => "Header name"},
+              "value" => %{"type" => "string", "description" => "Header value"}
+            },
+            "required" => ["key", "value"]
+          }
+        }
+      },
+      "required" => ["name", "description", "endpoint"]
+    }
+  end
+
+  defp created_tool_response(%Tool{} = tool) do
+    %{
+      id: tool.id,
+      name: tool.name,
+      description: tool.description,
+      endpoint: tool.endpoint,
+      http_method: tool.http_method,
+      runtime_parameters: Enum.map(Tool.runtime_param_items(tool), &Map.fetch!(&1, "name")),
+      fixed_parameters: Enum.map(Tool.static_param_items(tool), &Map.fetch!(&1, "name")),
+      header_names: tool.static_headers |> header_names()
+    }
+  end
+
+  defp header_names(nil), do: []
+  defp header_names(headers) when is_map(headers), do: headers |> Map.keys() |> Enum.sort()
+
+  defp format_changeset_errors(%Ecto.Changeset{} = changeset) do
+    changeset
+    |> Ecto.Changeset.traverse_errors(fn {message, opts} ->
+      Enum.reduce(opts, message, fn {key, value}, acc ->
+        String.replace(acc, "%{#{key}}", to_string(value))
+      end)
+    end)
+    |> Enum.map(fn {field, messages} ->
+      "#{field} #{Enum.join(messages, ", ")}"
+    end)
+    |> Enum.join("; ")
+  end
 end

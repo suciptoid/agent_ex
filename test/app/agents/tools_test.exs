@@ -24,12 +24,17 @@ defmodule App.Agents.ToolsTest do
   end
 
   test "available_tools/0 lists builtin tools" do
-    assert Tools.available_tools() == ["web_fetch", "shell"]
+    assert Tools.available_tools() == ["web_fetch", "shell", "create_tool"]
   end
 
   test "resolve/1 returns configured ReqLLM tools" do
     [tool] = Tools.resolve(["web_fetch"])
     assert tool.name == "web_fetch"
+  end
+
+  test "resolve/2 returns the create_tool builtin" do
+    [tool] = Tools.resolve(["create_tool"], organization_id: Ecto.UUID.generate())
+    assert tool.name == "create_tool"
   end
 
   test "resolve/2 includes custom tools for the current user", %{user: user} do
@@ -89,6 +94,40 @@ defmodule App.Agents.ToolsTest do
     end)
 
     assert {:error, "HTTP 404"} = Tools.do_web_fetch(%{url: "https://example.test/missing"})
+  end
+
+  test "do_create_tool/2 persists a custom tool with the UI semantics", %{user: user} do
+    scope = user_scope_fixture(user)
+
+    assert {:ok, result} =
+             Tools.do_create_tool(
+               %{
+                 name: "reader",
+                 description: "Read a document",
+                 endpoint: "https://example.test/{path}?safe_search=true",
+                 http_method: "get",
+                 param_rows: [
+                   %{"name" => "path", "type" => "string", "value" => ""},
+                   %{"name" => "page_size", "type" => "integer", "value" => "25"}
+                 ],
+                 header_rows: [
+                   %{"key" => "authorization", "value" => "Bearer secret-key"}
+                 ]
+               },
+               scope.organization.id
+             )
+
+    [tool] = App.Tools.list_tools(scope)
+    path = Enum.find(App.Tools.Tool.parameter_items(tool), &(&1["name"] == "path"))
+    page_size = Enum.find(App.Tools.Tool.parameter_items(tool), &(&1["name"] == "page_size"))
+
+    assert path["source"] == "llm"
+    assert page_size["source"] == "fixed"
+    assert page_size["value"] == 25
+    assert result.name == "reader"
+    assert result.runtime_parameters == ["path"]
+    assert result.fixed_parameters == ["page_size"]
+    assert result.header_names == ["authorization"]
   end
 
   test "execute_all/3 emits a running placeholder before returning the final tool result" do

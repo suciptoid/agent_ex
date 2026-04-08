@@ -1,0 +1,5 @@
+- Added builtin tool metadata in `App.Agents.Tools`, exposed listable internal tools for `/tools/list`, and registered the new assignable `create_tool` builtin alongside `web_fetch` and `shell`.
+- Implemented shared tool-attribute normalization in `App.Tools` so the LiveView form flow and agent-driven creation use the same parameter/header semantics, including fixed-vs-runtime inference from default values.
+- Updated `/tools/list` to show internal builtin tools separately from saved organization tools, while leaving transient chat-only tools like `update_chatroom_title`, `handover`, and `ask_agent` out of the visible list.
+- Extended agent and tool tests to cover builtin availability, persisted `create_tool` execution, agent assignment, and the new tools index rendering.
+- Fixed `AppWeb.AgentLive.FormComponent` to persist default navigation-related assigns in `update/2`, preventing modal edit saves from crashing with `KeyError` when callers omit `navigation` or `return_to`.

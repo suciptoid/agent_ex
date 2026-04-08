@@ -109,6 +109,9 @@ defmodule AppWeb.AgentLive.FormComponent do
 
     {:ok,
      socket
+     |> assign_new(:display_mode, fn -> :dialog end)
+     |> assign_new(:navigation, fn -> :patch end)
+     |> assign_new(:return_to, fn -> ~p"/agents" end)
      |> assign(assigns)
      |> assign(:model_options, model_options)
      |> assign_form(changeset)}
@@ -277,7 +280,7 @@ defmodule AppWeb.AgentLive.FormComponent do
           <div>
             <p class="text-sm font-medium text-foreground">Tools</p>
             <p class="text-xs text-muted-foreground">
-              Enable builtin tools like `web_fetch` or `shell`, plus any custom API tools you created.
+              Enable builtin tools like `web_fetch`, `shell`, or `create_tool`, plus any custom API tools you created.
             </p>
           </div>
 
@@ -309,6 +312,8 @@ defmodule AppWeb.AgentLive.FormComponent do
                       Fetch and return the body of a web page on demand, with optional headers.
                     <% "shell" -> %>
                       Execute local shell commands and return stdout/stderr. Use with caution.
+                    <% "create_tool" -> %>
+                      Create and save a reusable HTTP tool for this organization from the agent.
                     <% _ -> %>
                       Custom API tool created from your saved tool definitions.
                   <% end %>

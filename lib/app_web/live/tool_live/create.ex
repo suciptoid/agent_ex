@@ -19,14 +19,14 @@ defmodule AppWeb.ToolLive.Create do
   def handle_event("validate", %{"tool" => tool_params}, socket) do
     changeset =
       socket.assigns.tool
-      |> Tools.change_tool(normalize_tool_params(tool_params))
+      |> Tools.change_tool(tool_params)
       |> Map.put(:action, :validate)
 
     {:noreply, assign_form(socket, changeset)}
   end
 
   def handle_event("save", %{"tool" => tool_params}, socket) do
-    save_tool(socket, socket.assigns.live_action, normalize_tool_params(tool_params))
+    save_tool(socket, socket.assigns.live_action, tool_params)
   end
 
   def handle_event("add-param", _params, socket) do
@@ -401,39 +401,6 @@ defmodule AppWeb.ToolLive.Create do
 
   defp assign_form(socket, %Ecto.Changeset{} = changeset) do
     assign(socket, :form, to_form(changeset))
-  end
-
-  defp normalize_tool_params(tool_params) do
-    tool_params
-    |> Map.put(
-      "param_rows",
-      tool_params
-      |> Map.get("param_rows", [])
-      |> normalize_rows()
-      |> Enum.map(&normalize_param_row/1)
-    )
-    |> Map.put("header_rows", normalize_rows(Map.get(tool_params, "header_rows", [])))
-  end
-
-  defp normalize_rows(rows) when is_map(rows) do
-    rows
-    |> Enum.sort_by(fn {key, _value} -> key end)
-    |> Enum.map(fn {_key, value} -> value end)
-  end
-
-  defp normalize_rows(rows) when is_list(rows), do: rows
-  defp normalize_rows(_rows), do: []
-
-  defp normalize_param_row(row) do
-    value =
-      row
-      |> Map.get("value", "")
-      |> to_string()
-      |> String.trim()
-
-    row
-    |> Map.put("value", value)
-    |> Map.put("source", if(value == "", do: "llm", else: "fixed"))
   end
 
   defp update_form_rows(socket, field, updater) do

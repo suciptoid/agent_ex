@@ -43,12 +43,12 @@ defmodule App.AgentsTest do
         "provider_id" => provider.id,
         "temperature" => "0.4",
         "max_tokens" => "512",
-        "tools" => ["web_fetch"]
+        "tools" => ["web_fetch", "create_tool"]
       }
 
       assert {:ok, agent} = Agents.create_agent(scope, attrs)
       assert agent.name == "Planner"
-      assert agent.tools == ["web_fetch"]
+      assert agent.tools == ["web_fetch", "create_tool"]
       assert agent.extra_params == %{"max_tokens" => 512, "temperature" => 0.4}
       assert agent.provider.id == provider.id
     end

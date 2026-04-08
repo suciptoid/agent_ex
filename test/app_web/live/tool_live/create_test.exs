@@ -74,6 +74,9 @@ defmodule AppWeb.ToolLive.CreateTest do
 
     {:ok, live_view, _html} = live(conn, ~p"/tools/list")
 
+    assert has_element?(live_view, "#internal-tool-web_fetch")
+    assert has_element?(live_view, "#internal-tool-shell")
+    assert has_element?(live_view, "#internal-tool-create_tool")
     assert has_element?(live_view, "#tool-#{tool.id}")
     assert has_element?(live_view, "#edit-tool-#{tool.id}")
     assert has_element?(live_view, "#new-tool-button")
@@ -85,6 +88,9 @@ defmodule AppWeb.ToolLive.CreateTest do
     {:ok, live_view, _html} = live(conn, ~p"/tools/list")
 
     assert has_element?(live_view, "#tools.rounded-lg")
+    assert has_element?(live_view, "#internal-tool-create_tool")
+    refute has_element?(live_view, "#edit-tool-create_tool")
+    refute has_element?(live_view, "#delete-tool-create_tool")
     assert has_element?(live_view, "#tool-#{tool.id}")
     assert has_element?(live_view, "#edit-tool-#{tool.id}")
     assert has_element?(live_view, "#delete-tool-#{tool.id}")

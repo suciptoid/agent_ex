@@ -50,6 +50,7 @@ defmodule AppWeb.AgentLiveTest do
 
       assert has_element?(form_view, "#agent-create-page")
       refute has_element?(form_view, "#agent-dialog")
+      assert has_element?(form_view, "#agent-tool-create_tool")
 
       submit_result =
         form_view
@@ -61,7 +62,7 @@ defmodule AppWeb.AgentLiveTest do
             "provider_id" => provider.id,
             "temperature" => "0.4",
             "max_tokens" => "256",
-            "tools" => ["", "web_fetch", custom_tool.name]
+            "tools" => ["", "web_fetch", "create_tool", custom_tool.name]
           }
         })
 
@@ -73,7 +74,38 @@ defmodule AppWeb.AgentLiveTest do
       assert created_agent.name == "Planner"
       assert has_element?(redirected_view, "#agent-#{created_agent.id}")
       assert has_element?(redirected_view, "#edit-agent-#{created_agent.id}")
-      assert Enum.sort(created_agent.tools) == ["brave_search", "web_fetch"]
+      assert Enum.sort(created_agent.tools) == ["brave_search", "create_tool", "web_fetch"]
+    end
+
+    test "edits an agent from the modal without requiring explicit navigation assigns", %{
+      conn: conn,
+      user: user,
+      scope: scope
+    } do
+      provider = provider_fixture(user, %{name: "Anthropic Sandbox", provider: "anthropic"})
+
+      agent =
+        agent_fixture(user, %{
+          provider: provider,
+          name: "Writer",
+          model: "anthropic:claude-haiku-4-5"
+        })
+
+      {:ok, live_view, _html} = live(conn, ~p"/agents/#{agent.id}/edit")
+
+      live_view
+      |> element("#agent-form")
+      |> render_submit(%{
+        "agent" => %{
+          "name" => "Editor",
+          "model" => "anthropic:claude-haiku-4-5",
+          "provider_id" => provider.id,
+          "tools" => [""]
+        }
+      })
+
+      assert_patch(live_view, ~p"/agents")
+      assert Agents.get_agent!(scope, agent.id).name == "Editor"
     end
 
     test "deletes an agent", %{conn: conn, user: user} do

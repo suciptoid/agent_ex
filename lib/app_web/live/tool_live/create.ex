@@ -69,29 +69,10 @@ defmodule AppWeb.ToolLive.Create do
       sidebar_chat_rooms={@sidebar_chat_rooms}
     >
       <div class="flex h-full min-h-0 flex-col p-4 pt-20 sm:px-5 sm:pb-5 sm:pt-20 lg:p-6">
-        <div class="mx-auto flex w-full max-w-6xl flex-col gap-6 xl:flex-row">
-          <section class="flex-1 space-y-6">
+        <div class="mx-auto w-full max-w-4xl">
+          <section class="space-y-6">
             <div class="space-y-3 border-b border-border pb-6">
-              <div class="flex items-center justify-between gap-4">
-                <span class="inline-flex rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.2em] text-primary">
-                  HTTP Tool Builder
-                </span>
-
-                <.link
-                  navigate={~p"/tools/list"}
-                  class="text-sm font-medium text-primary hover:underline"
-                >
-                  Back to tool list
-                </.link>
-              </div>
-
               <h1 class="text-3xl font-bold tracking-tight text-foreground">{@page_title}</h1>
-
-              <p class="max-w-3xl text-sm text-muted-foreground">
-                Use a URL template when the path itself needs runtime data, like <code phx-no-curly-interpolation>https://r.jina.ai/{dynamic_path}?param_a=value</code>.
-                Every <code phx-no-curly-interpolation>{placeholder}</code>
-                must match a parameter name below.
-              </p>
             </div>
 
             <.form
@@ -109,11 +90,31 @@ defmodule AppWeb.ToolLive.Create do
                   placeholder="brave_reader"
                 />
 
-                <.select
-                  field={@form[:http_method]}
-                  label="HTTP method"
-                  options={Enum.map(Tool.http_methods(), &{String.upcase(&1), &1})}
-                />
+                <div class="space-y-2">
+                  <label class="text-sm font-medium text-foreground" for="tool-http-method">
+                    HTTP method
+                  </label>
+                  <input
+                    :if={method_locked?(@form)}
+                    type="hidden"
+                    name={@form[:http_method].name}
+                    value={default_http_method(@form)}
+                  />
+                  <select
+                    id="tool-http-method"
+                    name={@form[:http_method].name}
+                    class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={method_locked?(@form)}
+                  >
+                    <option
+                      :for={method <- Tool.http_methods()}
+                      value={method}
+                      selected={default_http_method(@form) == method}
+                    >
+                      {String.upcase(method)}
+                    </option>
+                  </select>
+                </div>
               </div>
 
               <.input
@@ -127,10 +128,10 @@ defmodule AppWeb.ToolLive.Create do
                 field={@form[:endpoint]}
                 type="text"
                 label="URL template"
-                placeholder="https://r.jina.ai/{dynamic_path}?param_a=value"
+                placeholder="https://api.example.com/{path_a}?q=param_a"
               />
 
-              <section class="space-y-4 rounded-3xl border border-border bg-card/70 p-5 shadow-sm">
+              <section class="space-y-4 rounded-lg border border-border bg-card/70 p-5 shadow-sm">
                 <div class="flex items-center justify-between gap-4">
                   <div>
                     <h2 class="text-lg font-semibold text-foreground">Input parameters</h2>
@@ -147,7 +148,7 @@ defmodule AppWeb.ToolLive.Create do
                 <%= for {row, index} <- Enum.with_index(param_rows(@form)) do %>
                   <div
                     id={"param-row-#{index}"}
-                    class="grid gap-3 rounded-2xl border border-border/70 bg-background p-4 md:grid-cols-[minmax(0,1.2fr)_160px_160px_minmax(0,1fr)_auto]"
+                    class="grid gap-3 rounded-md border border-border/70 bg-background p-4 md:grid-cols-[minmax(0,1.2fr)_160px_minmax(0,1fr)_auto]"
                   >
                     <div class="space-y-2">
                       <label
@@ -191,31 +192,9 @@ defmodule AppWeb.ToolLive.Create do
                     <div class="space-y-2">
                       <label
                         class="text-sm font-medium text-foreground"
-                        for={"tool-param-#{index}-source"}
-                      >
-                        Filled by
-                      </label>
-                      <select
-                        id={"tool-param-#{index}-source"}
-                        name={"tool[param_rows][#{index}][source]"}
-                        class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        <option
-                          :for={source <- Tool.tool_sources()}
-                          value={source}
-                          selected={row["source"] == source}
-                        >
-                          {source_label(source)}
-                        </option>
-                      </select>
-                    </div>
-
-                    <div class="space-y-2">
-                      <label
-                        class="text-sm font-medium text-foreground"
                         for={"tool-param-#{index}-value"}
                       >
-                        Fixed value
+                        Default value
                       </label>
                       <input
                         id={"tool-param-#{index}-value"}
@@ -246,7 +225,7 @@ defmodule AppWeb.ToolLive.Create do
                 <% end %>
               </section>
 
-              <section class="space-y-4 rounded-3xl border border-border bg-card/70 p-5 shadow-sm">
+              <section class="space-y-4 rounded-lg border border-border bg-card/70 p-5 shadow-sm">
                 <div class="flex items-center justify-between gap-4">
                   <div>
                     <h2 class="text-lg font-semibold text-foreground">Headers</h2>
@@ -268,7 +247,7 @@ defmodule AppWeb.ToolLive.Create do
                 <%= for {row, index} <- Enum.with_index(header_rows(@form)) do %>
                   <div
                     id={"header-row-#{index}"}
-                    class="grid gap-3 rounded-2xl border border-border/70 bg-background p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
+                    class="grid gap-3 rounded-md border border-border/70 bg-background p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
                   >
                     <div class="space-y-2">
                       <label
@@ -333,30 +312,6 @@ defmodule AppWeb.ToolLive.Create do
               </div>
             </.form>
           </section>
-
-          <aside class="w-full shrink-0 space-y-4 xl:w-[22rem]">
-            <section class="rounded-3xl border border-border bg-card p-5 shadow-sm">
-              <div class="space-y-2">
-                <h2 class="text-lg font-semibold text-foreground">Template example</h2>
-                <p class="text-sm text-muted-foreground">
-                  Dynamic path segments should be modeled with placeholders in the URL itself.
-                </p>
-              </div>
-
-              <div class="mt-4 rounded-2xl border border-border bg-background p-4 text-xs text-muted-foreground">
-                <code phx-no-curly-interpolation class="block">
-                  https://r.jina.ai/{dynamic_path}?param_a=value
-                </code>
-
-                <ul class="mt-3 space-y-2">
-                  <li><code>dynamic_path</code> → source: LLM at runtime</li>
-                  <li>
-                    <code>param_a</code> → source: Fixed during creation, value: <code>value</code>
-                  </li>
-                </ul>
-              </div>
-            </section>
-          </aside>
         </div>
       </div>
     </Layouts.dashboard>
@@ -414,7 +369,13 @@ defmodule AppWeb.ToolLive.Create do
 
   defp normalize_tool_params(tool_params) do
     tool_params
-    |> Map.put("param_rows", normalize_rows(Map.get(tool_params, "param_rows", [])))
+    |> Map.put(
+      "param_rows",
+      tool_params
+      |> Map.get("param_rows", [])
+      |> normalize_rows()
+      |> Enum.map(&normalize_param_row/1)
+    )
     |> Map.put("header_rows", normalize_rows(Map.get(tool_params, "header_rows", [])))
   end
 
@@ -426,6 +387,18 @@ defmodule AppWeb.ToolLive.Create do
 
   defp normalize_rows(rows) when is_list(rows), do: rows
   defp normalize_rows(_rows), do: []
+
+  defp normalize_param_row(row) do
+    value =
+      row
+      |> Map.get("value", "")
+      |> to_string()
+      |> String.trim()
+
+    row
+    |> Map.put("value", value)
+    |> Map.put("source", if(value == "", do: "llm", else: "fixed"))
+  end
 
   defp update_form_rows(socket, field, updater) do
     params =
@@ -449,8 +422,21 @@ defmodule AppWeb.ToolLive.Create do
   defp header_rows(form),
     do: form.params["header_rows"] || form.data.header_rows || [Tool.blank_header_row()]
 
-  defp source_label("llm"), do: "LLM at runtime"
-  defp source_label("fixed"), do: "Fixed during creation"
+  defp method_locked?(form), do: form_value(form, :name) != ""
+
+  defp default_http_method(form) do
+    case form_value(form, :http_method) do
+      "" -> "get"
+      value -> value
+    end
+  end
+
+  defp form_value(form, field) do
+    field
+    |> then(&form[&1].value)
+    |> to_string()
+    |> String.trim()
+  end
 
   defp save_label(:edit), do: "Save Changes"
   defp save_label(_action), do: "Save Tool"

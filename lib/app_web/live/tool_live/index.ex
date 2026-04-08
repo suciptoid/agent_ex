@@ -2,7 +2,6 @@ defmodule AppWeb.ToolLive.Index do
   use AppWeb, :live_view
 
   alias App.Tools
-  alias App.Tools.Tool
 
   @impl true
   def mount(_params, _session, socket) do
@@ -13,6 +12,14 @@ defmodule AppWeb.ToolLive.Index do
      |> assign(:page_title, "Tools")
      |> stream_configure(:tools, dom_id: &"tool-#{&1.id}")
      |> stream(:tools, tools)}
+  end
+
+  @impl true
+  def handle_event("delete", %{"id" => id}, socket) do
+    tool = Tools.get_tool!(socket.assigns.current_scope, id)
+    {:ok, _tool} = Tools.delete_tool(socket.assigns.current_scope, tool)
+
+    {:noreply, stream_delete(socket, :tools, tool)}
   end
 
   @impl true
@@ -40,51 +47,33 @@ defmodule AppWeb.ToolLive.Index do
             </div>
           </div>
 
-          <div id="tools" phx-update="stream" class="grid gap-4 xl:grid-cols-2">
+          <div id="tools" phx-update="stream" class="rounded-lg border border-border bg-card">
             <div
               :for={{dom_id, tool} <- @streams.tools}
               id={dom_id}
-              class="rounded-2xl border border-border bg-card p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+              class="flex items-center justify-between gap-4 border-b border-border p-4 last:border-b-0"
             >
-              <div class="flex items-start justify-between gap-4">
-                <div class="space-y-2">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <h2 class="text-lg font-semibold text-foreground">{tool.name}</h2>
-                    <span class="inline-flex items-center rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-                      {String.upcase(tool.http_method)}
-                    </span>
-                  </div>
-                  <p class="text-sm text-muted-foreground">{tool.description}</p>
-                </div>
+              <p class="font-medium text-foreground">{tool.name}</p>
 
+              <div class="flex gap-2">
                 <.link id={"edit-tool-#{tool.id}"} navigate={~p"/tools/#{tool.id}/edit"}>
                   <.button variant="outline">Edit</.button>
                 </.link>
-              </div>
-
-              <div class="mt-4 rounded-2xl border border-border bg-background p-4">
-                <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  URL Template
-                </p>
-                <p class="mt-2 break-all text-sm text-foreground">{tool.endpoint}</p>
-              </div>
-
-              <div class="mt-4 flex flex-wrap gap-2">
-                <span class="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                  {length(Tool.runtime_param_items(tool))} runtime params
-                </span>
-                <span class="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                  {length(Tool.static_param_items(tool))} fixed params
-                </span>
-                <span class="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                  {length(Tool.template_placeholders(tool))} path placeholders
-                </span>
+                <.button
+                  id={"delete-tool-#{tool.id}"}
+                  phx-click="delete"
+                  phx-value-id={tool.id}
+                  data-confirm="Are you sure?"
+                  variant="outline"
+                >
+                  Delete
+                </.button>
               </div>
             </div>
 
             <div
               id="tools-empty-state"
-              class="hidden rounded-2xl border border-dashed border-border bg-muted/30 p-10 text-center text-sm text-muted-foreground only:block"
+              class="hidden p-10 text-center text-sm text-muted-foreground only:block"
             >
               No tools created yet.
             </div>

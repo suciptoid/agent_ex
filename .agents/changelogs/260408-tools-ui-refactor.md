@@ -1,0 +1,6 @@
+- Refactored `/tools/list` into a compact single-column list that only shows each tool name plus edit/delete actions, and added LiveView deletion support via `App.Tools.delete_tool/2`.
+- Simplified the shared `/tools/create` and `/tools/:id/edit` form by removing the HTTP Tool Builder badge, back link, template example sidebar, and URL helper copy.
+- Locked the HTTP method control once the tool name has a value while preserving the selected method via a hidden input during submit.
+- Updated the URL placeholder to `https://api.example.com/{path_a}?q=param_a`, reduced section/card radii to `rounded-lg`/`rounded-md`, and renamed `Fixed value` to `Default value`.
+- Removed the `Filled by` UI and now infer parameter `source` from the default value: blank stays runtime (`llm`), populated persists as fixed.
+- Expanded `test/app_web/live/tool_live/create_test.exs` to cover compact list deletion, simplified shared form UI, method locking, and inferred parameter source behavior.

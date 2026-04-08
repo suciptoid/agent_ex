@@ -36,6 +36,11 @@ defmodule App.Tools do
     |> Repo.update()
   end
 
+  def delete_tool(%Scope{} = scope, %Tool{} = tool) do
+    ensure_user_owns_tool!(scope, tool)
+    Repo.delete(tool)
+  end
+
   def list_named_tools(user_id, names) when is_list(names) do
     Tool
     |> where([tool], tool.user_id == ^user_id and tool.name in ^names)

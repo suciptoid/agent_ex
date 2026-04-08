@@ -63,7 +63,6 @@ defmodule App.MixProject do
       {:swoosh, "~> 1.16"},
       {:req, "~> 0.5"},
       {:req_llm, "~> 1.6"},
-      {:llm_db, "~> 2026.4.0", override: true},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 1.0"},

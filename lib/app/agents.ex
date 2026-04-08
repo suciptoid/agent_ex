@@ -6,26 +6,32 @@ defmodule App.Agents do
   import Ecto.Query, warn: false
 
   alias App.Agents.Agent
+  alias App.Organizations.Membership
   alias App.Providers.Provider
   alias App.Repo
   alias App.Tools
   alias App.Users.Scope
+  alias App.Users.User
 
   def list_agents(%Scope{} = scope) do
     Agent
-    |> where([agent], agent.user_id == ^scope.user.id)
+    |> where([agent], agent.organization_id == ^Scope.organization_id!(scope))
     |> order_by([agent], desc: agent.inserted_at)
     |> preload([:provider])
     |> Repo.all()
   end
 
   def count_agents(%Scope{} = scope) do
-    Repo.aggregate(from(agent in Agent, where: agent.user_id == ^scope.user.id), :count, :id)
+    Repo.aggregate(
+      from(agent in Agent, where: agent.organization_id == ^Scope.organization_id!(scope)),
+      :count,
+      :id
+    )
   end
 
   def list_recent_agents(%Scope{} = scope, limit \\ 5) when is_integer(limit) and limit > 0 do
     Agent
-    |> where([agent], agent.user_id == ^scope.user.id)
+    |> where([agent], agent.organization_id == ^Scope.organization_id!(scope))
     |> order_by([agent], desc: agent.inserted_at)
     |> limit(^limit)
     |> preload([:provider])
@@ -34,32 +40,61 @@ defmodule App.Agents do
 
   def get_agent!(%Scope{} = scope, id) do
     Agent
-    |> where([agent], agent.user_id == ^scope.user.id and agent.id == ^id)
+    |> where(
+      [agent],
+      agent.organization_id == ^Scope.organization_id!(scope) and agent.id == ^id
+    )
     |> preload([:provider])
     |> Repo.one!()
   end
 
+  def get_agent(%Scope{} = scope, id) do
+    Agent
+    |> where(
+      [agent],
+      agent.organization_id == ^Scope.organization_id!(scope) and agent.id == ^id
+    )
+    |> preload([:provider])
+    |> Repo.one()
+  end
+
+  def get_agent_for_user(%User{} = user, id) do
+    Agent
+    |> join(:inner, [agent], membership in Membership,
+      on: membership.organization_id == agent.organization_id
+    )
+    |> where([agent, membership], membership.user_id == ^user.id and agent.id == ^id)
+    |> preload([:provider])
+    |> select([agent, _membership], agent)
+    |> Repo.one()
+  end
+
   def create_agent(%Scope{} = scope, attrs) do
-    %Agent{user_id: scope.user.id}
-    |> Agent.changeset(attrs, allowed_tools: available_tools(scope))
-    |> validate_provider_ownership(scope)
-    |> Repo.insert()
-    |> preload_agent()
+    with :ok <- authorize_manager(scope) do
+      %Agent{organization_id: Scope.organization_id!(scope)}
+      |> Agent.changeset(attrs, allowed_tools: available_tools(scope))
+      |> validate_provider_ownership(scope)
+      |> Repo.insert()
+      |> preload_agent()
+    end
   end
 
   def update_agent(%Scope{} = scope, %Agent{} = agent, attrs) do
-    ensure_user_owns_agent!(scope, agent)
-
-    agent
-    |> Agent.changeset(attrs, allowed_tools: available_tools(scope))
-    |> validate_provider_ownership(scope)
-    |> Repo.update()
-    |> preload_agent()
+    with :ok <- authorize_manager(scope),
+         :ok <- ensure_organization_owns_agent(scope, agent) do
+      agent
+      |> Agent.changeset(attrs, allowed_tools: available_tools(scope))
+      |> validate_provider_ownership(scope)
+      |> Repo.update()
+      |> preload_agent()
+    end
   end
 
   def delete_agent(%Scope{} = scope, %Agent{} = agent) do
-    ensure_user_owns_agent!(scope, agent)
-    Repo.delete(agent)
+    with :ok <- authorize_manager(scope),
+         :ok <- ensure_organization_owns_agent(scope, agent) do
+      Repo.delete(agent)
+    end
   end
 
   def change_agent(%Scope{} = scope, %Agent{} = agent, attrs \\ %{}) do
@@ -82,17 +117,29 @@ defmodule App.Agents do
       provider_id ->
         if Repo.exists?(
              from provider in Provider,
-               where: provider.id == ^provider_id and provider.user_id == ^scope.user.id
+               where:
+                 provider.id == ^provider_id and
+                   provider.organization_id == ^Scope.organization_id!(scope)
            ) do
           changeset
         else
-          Ecto.Changeset.add_error(changeset, :provider_id, "must belong to the current user")
+          Ecto.Changeset.add_error(
+            changeset,
+            :provider_id,
+            "must belong to the current organization"
+          )
         end
     end
   end
 
-  defp ensure_user_owns_agent!(%Scope{} = scope, %Agent{user_id: user_id}) do
-    if user_id != scope.user.id do
+  defp authorize_manager(%Scope{} = scope) do
+    if Scope.manager?(scope), do: :ok, else: {:error, :forbidden}
+  end
+
+  defp ensure_organization_owns_agent(%Scope{} = scope, %Agent{organization_id: organization_id}) do
+    if organization_id == Scope.organization_id!(scope) do
+      :ok
+    else
       raise Ecto.NoResultsError, query: Agent
     end
   end

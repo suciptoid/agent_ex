@@ -1,6 +1,4 @@
 defmodule App.ProvidersFixtures do
-  alias App.Users.Scope
-
   def provider_attrs(attrs \\ %{}) do
     Enum.into(attrs, %{
       name: "My OpenAI",
@@ -10,7 +8,7 @@ defmodule App.ProvidersFixtures do
   end
 
   def provider_fixture(user, attrs \\ %{}) do
-    scope = %Scope{user: user}
+    scope = App.OrganizationsFixtures.organization_scope_fixture(user)
 
     {:ok, provider} =
       App.Providers.create_provider(scope, provider_attrs(attrs))

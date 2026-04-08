@@ -4,15 +4,23 @@ defmodule AppWeb.AgentLive.New do
   alias App.Agents
   alias App.Agents.Agent
   alias App.Providers
+  alias App.Users.Scope
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok,
-     socket
-     |> assign(:page_title, "Create Agent")
-     |> assign(:agent, %Agent{})
-     |> assign(:providers, Providers.list_providers(socket.assigns.current_scope))
-     |> assign(:available_tools, Agents.available_tools(socket.assigns.current_scope))}
+    if Scope.manager?(socket.assigns.current_scope) do
+      {:ok,
+       socket
+       |> assign(:page_title, "Create Agent")
+       |> assign(:agent, %Agent{})
+       |> assign(:providers, Providers.list_providers(socket.assigns.current_scope))
+       |> assign(:available_tools, Agents.available_tools(socket.assigns.current_scope))}
+    else
+      {:ok,
+       socket
+       |> put_flash(:error, "Only organization owners and admins can manage agents.")
+       |> push_navigate(to: ~p"/agents")}
+    end
   end
 
   @impl true
@@ -27,6 +35,7 @@ defmodule AppWeb.AgentLive.New do
       flash={@flash}
       current_scope={@current_scope}
       sidebar_chat_rooms={@sidebar_chat_rooms}
+      sidebar_organizations={@sidebar_organizations}
     >
       <div class="flex h-full min-h-0 flex-col p-4 pt-20 sm:px-5 sm:pb-5 sm:pt-20 lg:p-6">
         <div id="agent-create-page" class="mx-auto w-full max-w-4xl">

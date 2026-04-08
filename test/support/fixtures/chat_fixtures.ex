@@ -1,6 +1,5 @@
 defmodule App.ChatFixtures do
   alias App.AgentsFixtures
-  alias App.Users.Scope
 
   def chat_room_attrs(attrs \\ %{}) do
     Enum.into(attrs, %{
@@ -30,7 +29,12 @@ defmodule App.ChatFixtures do
           List.first(agent_ids)
       )
 
-    {:ok, chat_room} = App.Chat.create_chat_room(Scope.for_user(user), params)
+    {:ok, chat_room} =
+      App.Chat.create_chat_room(
+        App.OrganizationsFixtures.organization_scope_fixture(user),
+        params
+      )
+
     chat_room
   end
 

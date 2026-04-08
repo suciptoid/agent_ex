@@ -99,6 +99,12 @@ defmodule AppWeb.ProviderLive.FormComponent do
 
       {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply, assign_form(socket, changeset)}
+
+      {:error, :forbidden} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Only organization owners and admins can manage providers.")
+         |> push_patch(to: ~p"/providers")}
     end
   end
 
@@ -114,6 +120,12 @@ defmodule AppWeb.ProviderLive.FormComponent do
 
       {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply, assign_form(socket, changeset)}
+
+      {:error, :forbidden} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Only organization owners and admins can manage providers.")
+         |> push_patch(to: ~p"/providers")}
     end
   end
 

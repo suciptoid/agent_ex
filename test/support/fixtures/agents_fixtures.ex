@@ -1,6 +1,5 @@
 defmodule App.AgentsFixtures do
   alias App.ProvidersFixtures
-  alias App.Users.Scope
 
   def agent_attrs(attrs \\ %{}) do
     Enum.into(attrs, %{
@@ -29,7 +28,12 @@ defmodule App.AgentsFixtures do
       |> agent_attrs()
       |> Map.put(:provider_id, provider.id)
 
-    {:ok, agent} = App.Agents.create_agent(Scope.for_user(user), params)
+    {:ok, agent} =
+      App.Agents.create_agent(
+        App.OrganizationsFixtures.organization_scope_fixture(user),
+        params
+      )
+
     agent
   end
 end

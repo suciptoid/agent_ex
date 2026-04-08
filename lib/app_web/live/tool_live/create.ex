@@ -3,6 +3,7 @@ defmodule AppWeb.ToolLive.Create do
 
   alias App.Tools
   alias App.Tools.Tool
+  alias App.Users.Scope
 
   @impl true
   def mount(_params, _session, socket) do
@@ -67,6 +68,7 @@ defmodule AppWeb.ToolLive.Create do
       flash={@flash}
       current_scope={@current_scope}
       sidebar_chat_rooms={@sidebar_chat_rooms}
+      sidebar_organizations={@sidebar_organizations}
     >
       <div class="flex h-full min-h-0 flex-col p-4 pt-20 sm:px-5 sm:pb-5 sm:pt-20 lg:p-6">
         <div class="mx-auto w-full max-w-4xl">
@@ -319,22 +321,44 @@ defmodule AppWeb.ToolLive.Create do
   end
 
   defp apply_action(socket, :new, _params) do
-    changeset = Tools.change_tool(%Tool{})
+    if Scope.manager?(socket.assigns.current_scope) do
+      changeset = Tools.change_tool(%Tool{})
 
-    socket
-    |> assign(:page_title, "Create Tool")
-    |> assign(:tool, %Tool{})
-    |> assign_form(changeset)
+      socket
+      |> assign(:page_title, "Create Tool")
+      |> assign(:tool, %Tool{})
+      |> assign_form(changeset)
+    else
+      socket
+      |> put_flash(:error, "Only organization owners and admins can manage tools.")
+      |> push_navigate(to: ~p"/tools/list")
+    end
   end
 
   defp apply_action(socket, :edit, %{"id" => id}) do
-    tool = Tools.get_tool!(socket.assigns.current_scope, id)
-    changeset = Tools.change_tool(tool)
+    cond do
+      not Scope.manager?(socket.assigns.current_scope) ->
+        socket
+        |> put_flash(:error, "Only organization owners and admins can manage tools.")
+        |> push_navigate(to: ~p"/tools/list")
 
-    socket
-    |> assign(:page_title, "Edit Tool")
-    |> assign(:tool, tool)
-    |> assign_form(changeset)
+      tool = Tools.get_tool(socket.assigns.current_scope, id) ->
+        changeset = Tools.change_tool(tool)
+
+        socket
+        |> assign(:page_title, "Edit Tool")
+        |> assign(:tool, tool)
+        |> assign_form(changeset)
+
+      tool = Tools.get_tool_for_user(socket.assigns.current_scope.user, id) ->
+        redirect(
+          socket,
+          to: switch_path(tool.organization_id, ~p"/tools/#{id}/edit")
+        )
+
+      true ->
+        raise Ecto.NoResultsError, query: Tool
+    end
   end
 
   defp save_tool(socket, :new, tool_params) do
@@ -347,6 +371,12 @@ defmodule AppWeb.ToolLive.Create do
 
       {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply, assign_form(socket, changeset)}
+
+      {:error, :forbidden} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Only organization owners and admins can manage tools.")
+         |> push_navigate(to: ~p"/tools/list")}
     end
   end
 
@@ -360,6 +390,12 @@ defmodule AppWeb.ToolLive.Create do
 
       {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply, assign_form(socket, changeset)}
+
+      {:error, :forbidden} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Only organization owners and admins can manage tools.")
+         |> push_navigate(to: ~p"/tools/list")}
     end
   end
 
@@ -440,4 +476,8 @@ defmodule AppWeb.ToolLive.Create do
 
   defp save_label(:edit), do: "Save Changes"
   defp save_label(_action), do: "Save Tool"
+
+  defp switch_path(organization_id, return_to) do
+    ~p"/organizations/switch/#{organization_id}?return_to=#{return_to}"
+  end
 end

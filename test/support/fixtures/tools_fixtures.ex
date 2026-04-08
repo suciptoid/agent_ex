@@ -1,6 +1,4 @@
 defmodule App.ToolsFixtures do
-  alias App.Users.Scope
-
   def tool_attrs(attrs \\ %{}) do
     Enum.into(attrs, %{
       name: "brave_search",
@@ -20,7 +18,7 @@ defmodule App.ToolsFixtures do
   def tool_fixture(user, attrs \\ %{}) do
     {:ok, tool} =
       App.Tools.create_tool(
-        Scope.for_user(user),
+        App.OrganizationsFixtures.organization_scope_fixture(user),
         tool_attrs(attrs)
       )
 

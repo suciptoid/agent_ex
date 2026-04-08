@@ -5,45 +5,71 @@ defmodule App.Providers do
 
   import Ecto.Query, warn: false
   alias App.Repo
+  alias App.Organizations.Membership
   alias App.Providers.Provider
   alias App.Users.Scope
+  alias App.Users.User
   alias LLMDB
   alias ReqLLM.Provider.Generated.ValidProviders
 
   def list_providers(%Scope{} = scope) do
-    Repo.all(from p in Provider, where: p.user_id == ^scope.user.id)
+    Repo.all(
+      from provider in Provider,
+        where: provider.organization_id == ^Scope.organization_id!(scope),
+        order_by: [asc: provider.name, asc: provider.inserted_at]
+    )
   end
 
   def count_providers(%Scope{} = scope) do
-    Repo.aggregate(from(p in Provider, where: p.user_id == ^scope.user.id), :count, :id)
+    Repo.aggregate(
+      from(provider in Provider,
+        where: provider.organization_id == ^Scope.organization_id!(scope)
+      ),
+      :count,
+      :id
+    )
   end
 
   def get_provider!(%Scope{} = scope, id) do
-    Repo.get_by!(Provider, id: id, user_id: scope.user.id)
+    Repo.get_by!(Provider, id: id, organization_id: Scope.organization_id!(scope))
   end
 
   def get_provider(%Scope{} = scope, id) do
-    Repo.get_by(Provider, id: id, user_id: scope.user.id)
+    Repo.get_by(Provider, id: id, organization_id: Scope.organization_id!(scope))
+  end
+
+  def get_provider_for_user(%User{} = user, id) do
+    Provider
+    |> join(:inner, [provider], membership in Membership,
+      on: membership.organization_id == provider.organization_id
+    )
+    |> where([provider, membership], membership.user_id == ^user.id and provider.id == ^id)
+    |> select([provider, _membership], provider)
+    |> Repo.one()
   end
 
   def create_provider(%Scope{} = scope, attrs) do
-    %Provider{user_id: scope.user.id}
-    |> Provider.changeset(attrs)
-    |> Repo.insert()
+    with :ok <- authorize_manager(scope) do
+      %Provider{organization_id: Scope.organization_id!(scope)}
+      |> Provider.changeset(attrs)
+      |> Repo.insert()
+    end
   end
 
   def update_provider(%Scope{} = scope, provider, attrs) do
-    ensure_user_owns_provider!(scope, provider)
-
-    provider
-    |> Provider.changeset(attrs)
-    |> Repo.update()
+    with :ok <- authorize_manager(scope),
+         :ok <- ensure_organization_owns_provider(scope, provider) do
+      provider
+      |> Provider.changeset(attrs)
+      |> Repo.update()
+    end
   end
 
   def delete_provider(%Scope{} = scope, provider) do
-    ensure_user_owns_provider!(scope, provider)
-
-    Repo.delete(provider)
+    with :ok <- authorize_manager(scope),
+         :ok <- ensure_organization_owns_provider(scope, provider) do
+      Repo.delete(provider)
+    end
   end
 
   def change_provider(provider, attrs \\ %{}) do
@@ -71,8 +97,14 @@ defmodule App.Providers do
     |> Enum.map(&Atom.to_string/1)
   end
 
-  defp ensure_user_owns_provider!(%Scope{} = scope, provider) do
-    if provider.user_id != scope.user.id do
+  defp authorize_manager(%Scope{} = scope) do
+    if Scope.manager?(scope), do: :ok, else: {:error, :forbidden}
+  end
+
+  defp ensure_organization_owns_provider(%Scope{} = scope, provider) do
+    if provider.organization_id == Scope.organization_id!(scope) do
+      :ok
+    else
       raise Ecto.NoResultsError, query: Provider
     end
   end

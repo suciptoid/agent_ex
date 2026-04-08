@@ -2,6 +2,7 @@ defmodule AppWeb.ToolLive.Index do
   use AppWeb, :live_view
 
   alias App.Tools
+  alias App.Users.Scope
 
   @impl true
   def mount(_params, _session, socket) do
@@ -10,16 +11,22 @@ defmodule AppWeb.ToolLive.Index do
     {:ok,
      socket
      |> assign(:page_title, "Tools")
+     |> assign(:can_manage_organization?, Scope.manager?(socket.assigns.current_scope))
      |> stream_configure(:tools, dom_id: &"tool-#{&1.id}")
      |> stream(:tools, tools)}
   end
 
   @impl true
   def handle_event("delete", %{"id" => id}, socket) do
-    tool = Tools.get_tool!(socket.assigns.current_scope, id)
-    {:ok, _tool} = Tools.delete_tool(socket.assigns.current_scope, tool)
+    if socket.assigns.can_manage_organization? do
+      tool = Tools.get_tool!(socket.assigns.current_scope, id)
+      {:ok, _tool} = Tools.delete_tool(socket.assigns.current_scope, tool)
 
-    {:noreply, stream_delete(socket, :tools, tool)}
+      {:noreply, stream_delete(socket, :tools, tool)}
+    else
+      {:noreply,
+       put_flash(socket, :error, "Only organization owners and admins can manage tools.")}
+    end
   end
 
   @impl true
@@ -29,6 +36,7 @@ defmodule AppWeb.ToolLive.Index do
       flash={@flash}
       current_scope={@current_scope}
       sidebar_chat_rooms={@sidebar_chat_rooms}
+      sidebar_organizations={@sidebar_organizations}
     >
       <div class="flex h-full min-h-0 flex-col p-4 pt-20 sm:px-5 sm:pb-5 sm:pt-20 lg:p-6">
         <div class="space-y-6">
@@ -41,11 +49,18 @@ defmodule AppWeb.ToolLive.Index do
                 </p>
               </div>
 
-              <.link id="new-tool-button" navigate={~p"/tools/create"}>
+              <.link :if={@can_manage_organization?} id="new-tool-button" navigate={~p"/tools/create"}>
                 <.button>Create Tool</.button>
               </.link>
             </div>
           </div>
+
+          <p
+            :if={not @can_manage_organization?}
+            class="rounded-2xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground"
+          >
+            Tools can only be managed by organization owners and admins.
+          </p>
 
           <div id="tools" phx-update="stream" class="rounded-lg border border-border bg-card">
             <div
@@ -55,7 +70,7 @@ defmodule AppWeb.ToolLive.Index do
             >
               <p class="font-medium text-foreground">{tool.name}</p>
 
-              <div class="flex gap-2">
+              <div :if={@can_manage_organization?} class="flex gap-2">
                 <.link id={"edit-tool-#{tool.id}"} navigate={~p"/tools/#{tool.id}/edit"}>
                   <.button variant="outline">Edit</.button>
                 </.link>

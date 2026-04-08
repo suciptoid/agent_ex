@@ -46,14 +46,20 @@ defmodule AppWeb.ConnCase do
   """
   def register_and_log_in_user(%{conn: conn} = context) do
     user = App.UsersFixtures.user_fixture()
-    scope = App.Users.Scope.for_user(user)
+    organization = App.OrganizationsFixtures.organization_fixture(user)
+    scope = App.OrganizationsFixtures.organization_scope_fixture(user, organization: organization)
 
     opts =
       context
       |> Map.take([:token_authenticated_at])
       |> Enum.into([])
 
-    %{conn: log_in_user(conn, user, opts), user: user, scope: scope}
+    %{
+      conn: log_in_user(conn, user, Keyword.put(opts, :organization, organization)),
+      user: user,
+      scope: scope,
+      organization: organization
+    }
   end
 
   @doc """
@@ -63,12 +69,14 @@ defmodule AppWeb.ConnCase do
   """
   def log_in_user(conn, user, opts \\ []) do
     token = App.Users.generate_user_session_token(user)
+    organization_id = active_organization_id(opts[:organization])
 
     maybe_set_token_authenticated_at(token, opts[:token_authenticated_at])
 
     conn
     |> Phoenix.ConnTest.init_test_session(%{})
     |> Plug.Conn.put_session(:user_token, token)
+    |> maybe_put_active_organization(organization_id)
   end
 
   defp maybe_set_token_authenticated_at(_token, nil), do: nil
@@ -76,4 +84,17 @@ defmodule AppWeb.ConnCase do
   defp maybe_set_token_authenticated_at(token, authenticated_at) do
     App.UsersFixtures.override_token_authenticated_at(token, authenticated_at)
   end
+
+  defp maybe_put_active_organization(conn, nil), do: conn
+
+  defp maybe_put_active_organization(conn, organization_id) do
+    Plug.Conn.put_session(conn, :active_organization_id, organization_id)
+  end
+
+  defp active_organization_id(%{id: organization_id}), do: organization_id
+
+  defp active_organization_id(organization_id) when is_binary(organization_id),
+    do: organization_id
+
+  defp active_organization_id(_organization), do: nil
 end

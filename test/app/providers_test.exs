@@ -3,11 +3,10 @@ defmodule App.ProvidersTest do
 
   alias App.Providers
   alias App.UsersFixtures
-  alias App.Users.Scope
 
   setup do
     user = UsersFixtures.user_fixture()
-    scope = %Scope{user: user}
+    scope = UsersFixtures.user_scope_fixture(user)
     {:ok, user: user, scope: scope}
   end
 
@@ -66,7 +65,7 @@ defmodule App.ProvidersTest do
   defp provider_fixture(user, attrs \\ %{}) do
     {:ok, provider} =
       Providers.create_provider(
-        %Scope{user: user},
+        UsersFixtures.user_scope_fixture(user),
         Map.merge(
           %{
             "provider" => "openai",

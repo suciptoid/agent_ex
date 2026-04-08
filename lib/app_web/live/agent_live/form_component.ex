@@ -145,6 +145,12 @@ defmodule AppWeb.AgentLive.FormComponent do
 
       {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply, assign_form(socket, changeset)}
+
+      {:error, :forbidden} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Only organization owners and admins can manage agents.")
+         |> navigate_after_save()}
     end
   end
 
@@ -160,6 +166,12 @@ defmodule AppWeb.AgentLive.FormComponent do
 
       {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply, assign_form(socket, changeset)}
+
+      {:error, :forbidden} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Only organization owners and admins can manage agents.")
+         |> navigate_after_save()}
     end
   end
 

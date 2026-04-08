@@ -8,12 +8,14 @@ defmodule App.Chat do
   alias Ecto.Multi
   alias App.Agents.Agent
   alias App.Chat.{ChatRoom, ChatRoomAgent, Message}
+  alias App.Organizations.Membership
   alias App.Repo
   alias App.Users.Scope
+  alias App.Users.User
 
   def list_chat_rooms(%Scope{} = scope) do
     ChatRoom
-    |> where([chat_room], chat_room.user_id == ^scope.user.id)
+    |> where([chat_room], chat_room.organization_id == ^Scope.organization_id!(scope))
     |> order_by([chat_room], desc: chat_room.updated_at, desc: chat_room.inserted_at)
     |> preload(^chat_room_preloads())
     |> Repo.all()
@@ -21,7 +23,9 @@ defmodule App.Chat do
 
   def count_chat_rooms(%Scope{} = scope) do
     Repo.aggregate(
-      from(chat_room in ChatRoom, where: chat_room.user_id == ^scope.user.id),
+      from(chat_room in ChatRoom,
+        where: chat_room.organization_id == ^Scope.organization_id!(scope)
+      ),
       :count,
       :id
     )
@@ -29,7 +33,7 @@ defmodule App.Chat do
 
   def list_recent_chat_rooms(%Scope{} = scope, limit \\ 5) when is_integer(limit) and limit > 0 do
     ChatRoom
-    |> where([chat_room], chat_room.user_id == ^scope.user.id)
+    |> where([chat_room], chat_room.organization_id == ^Scope.organization_id!(scope))
     |> order_by([chat_room], desc: chat_room.updated_at, desc: chat_room.inserted_at)
     |> limit(^limit)
     |> preload([:agents])
@@ -38,14 +42,38 @@ defmodule App.Chat do
 
   def get_chat_room!(%Scope{} = scope, id) do
     ChatRoom
-    |> where([chat_room], chat_room.user_id == ^scope.user.id and chat_room.id == ^id)
+    |> where(
+      [chat_room],
+      chat_room.organization_id == ^Scope.organization_id!(scope) and chat_room.id == ^id
+    )
     |> preload(^chat_room_preloads())
     |> Repo.one!()
   end
 
+  def get_chat_room(%Scope{} = scope, id) do
+    ChatRoom
+    |> where(
+      [chat_room],
+      chat_room.organization_id == ^Scope.organization_id!(scope) and chat_room.id == ^id
+    )
+    |> preload(^chat_room_preloads())
+    |> Repo.one()
+  end
+
+  def get_chat_room_for_user(%User{} = user, id) do
+    ChatRoom
+    |> join(:inner, [chat_room], membership in Membership,
+      on: membership.organization_id == chat_room.organization_id
+    )
+    |> where([chat_room, membership], membership.user_id == ^user.id and chat_room.id == ^id)
+    |> preload(^chat_room_preloads())
+    |> select([chat_room, _membership], chat_room)
+    |> Repo.one()
+  end
+
   def create_chat_room(%Scope{} = scope, attrs) do
     changeset =
-      %ChatRoom{user_id: scope.user.id}
+      %ChatRoom{organization_id: Scope.organization_id!(scope)}
       |> ChatRoom.changeset(attrs)
 
     with %{valid?: true} <- changeset,
@@ -301,7 +329,8 @@ defmodule App.Chat do
     agents =
       Repo.all(
         from agent in Agent,
-          where: agent.user_id == ^scope.user.id and agent.id in ^agent_ids,
+          where:
+            agent.organization_id == ^Scope.organization_id!(scope) and agent.id in ^agent_ids,
           preload: [:provider]
       )
 
@@ -452,8 +481,8 @@ defmodule App.Chat do
   defp ensure_loaded_chat_room(%Scope{} = scope, %ChatRoom{} = chat_room),
     do: get_chat_room!(scope, chat_room.id)
 
-  defp ensure_user_owns_chat_room!(%Scope{} = scope, %ChatRoom{user_id: user_id}) do
-    if user_id != scope.user.id do
+  defp ensure_user_owns_chat_room!(%Scope{} = scope, %ChatRoom{organization_id: organization_id}) do
+    if organization_id != Scope.organization_id!(scope) do
       raise Ecto.NoResultsError, query: ChatRoom
     end
   end
@@ -461,7 +490,7 @@ defmodule App.Chat do
   defp get_agent_for_room!(%Scope{} = scope, agent_id) do
     Repo.one!(
       from agent in Agent,
-        where: agent.user_id == ^scope.user.id and agent.id == ^agent_id,
+        where: agent.organization_id == ^Scope.organization_id!(scope) and agent.id == ^agent_id,
         preload: [:provider]
     )
   end
@@ -480,7 +509,7 @@ defmodule App.Chat do
   def list_chat_rooms_for_sidebar(%Scope{} = scope) do
     chat_rooms =
       ChatRoom
-      |> where([cr], cr.user_id == ^scope.user.id)
+      |> where([cr], cr.organization_id == ^Scope.organization_id!(scope))
       |> order_by([cr], desc: cr.updated_at)
       |> select([cr], map(cr, [:id, :title, :updated_at]))
       |> limit(30)

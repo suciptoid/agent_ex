@@ -35,7 +35,7 @@ defmodule App.Agents.ToolsTest do
   test "resolve/2 includes custom tools for the current user", %{user: user} do
     tool = tool_fixture(user, %{name: "brave_search"})
 
-    [resolved_tool] = Tools.resolve([tool.name], user_id: user.id)
+    [resolved_tool] = Tools.resolve([tool.name], organization_id: tool.organization_id)
     assert resolved_tool.name == "brave_search"
   end
 
@@ -56,7 +56,9 @@ defmodule App.Agents.ToolsTest do
       Plug.Conn.send_resp(conn, 200, "templated")
     end)
 
-    [tool] = Tools.resolve(["jina_reader"], user_id: user.id)
+    [tool] =
+      Tools.resolve(["jina_reader"], organization_id: user_scope_fixture(user).organization.id)
+
     assert {:ok, "templated"} = ReqLLM.Tool.execute(tool, %{"dynamic_path" => "docs/file.txt"})
   end
 

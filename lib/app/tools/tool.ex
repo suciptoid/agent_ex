@@ -22,7 +22,7 @@ defmodule App.Tools.Tool do
     field :param_rows, {:array, :map}, virtual: true, default: []
     field :header_rows, {:array, :map}, virtual: true, default: []
 
-    belongs_to :user, App.Users.User
+    belongs_to :organization, App.Organizations.Organization
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -55,8 +55,8 @@ defmodule App.Tools.Tool do
     |> validate_endpoint_placeholders()
     |> put_parameter_definitions()
     |> put_static_headers()
-    |> unique_constraint(:name, name: :tools_user_id_name_index)
-    |> foreign_key_constraint(:user_id)
+    |> unique_constraint(:name, name: :tools_organization_id_name_index)
+    |> foreign_key_constraint(:organization_id)
   end
 
   def param_types, do: @param_types

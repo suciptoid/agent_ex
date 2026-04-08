@@ -25,7 +25,7 @@ defmodule AppWeb.UserAuthTest do
       conn = UserAuth.log_in_user(conn, user)
       assert token = get_session(conn, :user_token)
       assert get_session(conn, :live_socket_id) == "users_sessions:#{Base.url_encode64(token)}"
-      assert redirected_to(conn) == ~p"/"
+      assert redirected_to(conn) == ~p"/organizations/select"
       assert Users.get_user_by_session_token(token)
     end
 
@@ -80,7 +80,7 @@ defmodule AppWeb.UserAuthTest do
         |> assign(:current_scope, Scope.for_user(user))
         |> UserAuth.log_in_user(user)
 
-      assert redirected_to(conn) == ~p"/users/settings"
+      assert redirected_to(conn) == ~p"/organizations/select"
     end
 
     test "writes a cookie if remember_me was set in previous session", %{conn: conn, user: user} do
@@ -153,6 +153,24 @@ defmodule AppWeb.UserAuthTest do
       assert conn.assigns.current_scope.user.id == user.id
       assert conn.assigns.current_scope.user.authenticated_at == user.authenticated_at
       assert get_session(conn, :user_token) == user_token
+    end
+
+    test "restores the active organization from session for multi-org users", %{
+      conn: conn,
+      user: user
+    } do
+      first_org = App.OrganizationsFixtures.organization_fixture(user, %{name: "Alpha"})
+      second_org = App.OrganizationsFixtures.organization_fixture(user, %{name: "Beta"})
+      user_token = Users.generate_user_session_token(user)
+
+      conn =
+        conn
+        |> put_session(:user_token, user_token)
+        |> put_session(:active_organization_id, second_org.id)
+        |> UserAuth.fetch_current_scope_for_user([])
+
+      assert conn.assigns.current_scope.organization.id == second_org.id
+      refute conn.assigns.current_scope.organization.id == first_org.id
     end
 
     test "authenticates user from cookies", %{conn: conn, user: user} do

@@ -553,19 +553,30 @@ defmodule AppWeb.ChatLive.Show do
   end
 
   defp load_chat_room(socket, id) do
-    chat_room = Chat.get_chat_room!(socket.assigns.current_scope, id)
-    messages = Chat.list_messages(chat_room)
-    visible_messages = visible_messages(messages)
+    case Chat.get_chat_room(socket.assigns.current_scope, id) do
+      %{} = chat_room ->
+        messages = Chat.list_messages(chat_room)
+        visible_messages = visible_messages(messages)
 
-    socket
-    |> assign(:chat_room, chat_room)
-    |> assign(:page_title, chat_room.title || "Chat")
-    |> assign(:latest_message_id, latest_message_id(visible_messages))
-    |> assign_reasoning_state(chat_room)
-    |> refresh_sidebar_chat_rooms()
-    |> bump_messages_revision()
-    |> stream(:messages, visible_messages, reset: true)
-    |> sync_main_stream(messages)
+        socket
+        |> assign(:chat_room, chat_room)
+        |> assign(:page_title, chat_room.title || "Chat")
+        |> assign(:latest_message_id, latest_message_id(visible_messages))
+        |> assign_reasoning_state(chat_room)
+        |> refresh_sidebar_chat_rooms()
+        |> bump_messages_revision()
+        |> stream(:messages, visible_messages, reset: true)
+        |> sync_main_stream(messages)
+
+      nil ->
+        case Chat.get_chat_room_for_user(socket.assigns.current_scope.user, id) do
+          %{} = chat_room ->
+            redirect(socket, to: switch_path(chat_room.organization_id, ~p"/chat/#{id}"))
+
+          nil ->
+            raise Ecto.NoResultsError, query: App.Chat.ChatRoom
+        end
+    end
   end
 
   defp refresh_chat_messages(socket) do
@@ -588,6 +599,10 @@ defmodule AppWeb.ChatLive.Show do
       :sidebar_chat_rooms,
       App.Chat.list_chat_rooms_for_sidebar(socket.assigns.current_scope)
     )
+  end
+
+  defp switch_path(organization_id, return_to) do
+    ~p"/organizations/switch/#{organization_id}?return_to=#{return_to}"
   end
 
   defp assign_message_form(socket, params) do

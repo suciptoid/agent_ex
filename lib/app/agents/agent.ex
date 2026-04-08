@@ -15,7 +15,7 @@ defmodule App.Agents.Agent do
     field :max_tokens, :integer, virtual: true
 
     belongs_to :provider, App.Providers.Provider
-    belongs_to :user, App.Users.User
+    belongs_to :organization, App.Organizations.Organization
 
     has_many :chat_room_agents, App.Chat.ChatRoomAgent
     has_many :chat_rooms, through: [:chat_room_agents, :chat_room]
@@ -46,7 +46,7 @@ defmodule App.Agents.Agent do
     |> validate_tools(Keyword.get(opts, :allowed_tools, App.Agents.Tools.available_tools()))
     |> put_extra_params()
     |> foreign_key_constraint(:provider_id)
-    |> foreign_key_constraint(:user_id)
+    |> foreign_key_constraint(:organization_id)
   end
 
   defp normalize_tools(tool_names) do

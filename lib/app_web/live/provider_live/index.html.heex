@@ -2,6 +2,7 @@
   flash={@flash}
   current_scope={@current_scope}
   sidebar_chat_rooms={@sidebar_chat_rooms}
+  sidebar_organizations={@sidebar_organizations}
 >
   <div class="flex h-full min-h-0 flex-col p-4 pt-20 sm:px-5 sm:pb-5 sm:pt-20 lg:p-6">
     <div class="space-y-6">
@@ -13,11 +14,23 @@
               Manage your LLM providers and API keys.
             </p>
           </div>
-          <.link id="new-provider-button" patch={~p"/providers/new"}>
+
+          <.link
+            :if={@can_manage_organization?}
+            id="new-provider-button"
+            patch={~p"/providers/new"}
+          >
             <.button>New Provider</.button>
           </.link>
         </div>
       </div>
+
+      <p
+        :if={not @can_manage_organization?}
+        class="rounded-2xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground"
+      >
+        Providers can only be managed by organization owners and admins.
+      </p>
 
       <%= if @live_action in [:new, :edit] do %>
         <.live_component
@@ -41,7 +54,7 @@
             <p class="font-medium text-foreground">{provider.name || provider.provider}</p>
             <p class="text-sm text-muted-foreground">{provider.provider}</p>
           </div>
-          <div class="flex gap-2">
+          <div :if={@can_manage_organization?} class="flex gap-2">
             <.link id={"edit-provider-#{provider.id}"} patch={~p"/providers/#{provider.id}/edit"}>
               <.button variant="outline">Edit</.button>
             </.link>

@@ -11,7 +11,7 @@ defmodule App.Chat.ChatRoom do
     field :agent_ids, {:array, :binary_id}, virtual: true, default: []
     field :active_agent_id, :binary_id, virtual: true
 
-    belongs_to :user, App.Users.User
+    belongs_to :organization, App.Organizations.Organization
 
     has_many :chat_room_agents, App.Chat.ChatRoomAgent
     has_many :agents, through: [:chat_room_agents, :agent]
@@ -28,7 +28,7 @@ defmodule App.Chat.ChatRoom do
     |> validate_length(:title, max: 160)
     |> validate_agent_ids()
     |> validate_active_agent()
-    |> foreign_key_constraint(:user_id)
+    |> foreign_key_constraint(:organization_id)
   end
 
   defp validate_agent_ids(changeset) do

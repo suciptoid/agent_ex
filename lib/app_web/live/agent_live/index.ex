@@ -4,6 +4,7 @@ defmodule AppWeb.AgentLive.Index do
   alias App.Agents
   alias App.Agents.Agent
   alias App.Providers
+  alias App.Users.Scope
 
   @impl true
   def mount(_params, _session, socket) do
@@ -13,6 +14,7 @@ defmodule AppWeb.AgentLive.Index do
     {:ok,
      socket
      |> assign(:providers, providers)
+     |> assign(:can_manage_organization?, Scope.manager?(socket.assigns.current_scope))
      |> assign(:available_tools, Agents.available_tools(socket.assigns.current_scope))
      |> stream_configure(:agents, dom_id: &"agent-#{&1.id}")
      |> stream(:agents, agents)}
@@ -30,11 +32,26 @@ defmodule AppWeb.AgentLive.Index do
   end
 
   defp apply_action(socket, :edit, %{"id" => id}) do
-    agent = Agents.get_agent!(socket.assigns.current_scope, id)
+    cond do
+      not socket.assigns.can_manage_organization? ->
+        socket
+        |> put_flash(:error, "Only organization owners and admins can manage agents.")
+        |> push_patch(to: ~p"/agents")
 
-    socket
-    |> assign(:page_title, "Edit Agent")
-    |> assign(:agent, agent)
+      agent = Agents.get_agent(socket.assigns.current_scope, id) ->
+        socket
+        |> assign(:page_title, "Edit Agent")
+        |> assign(:agent, agent)
+
+      agent = Agents.get_agent_for_user(socket.assigns.current_scope.user, id) ->
+        redirect(
+          socket,
+          to: switch_path(agent.organization_id, ~p"/agents/#{id}/edit")
+        )
+
+      true ->
+        raise Ecto.NoResultsError, query: Agent
+    end
   end
 
   @impl true
@@ -44,10 +61,15 @@ defmodule AppWeb.AgentLive.Index do
 
   @impl true
   def handle_event("delete", %{"id" => id}, socket) do
-    agent = Agents.get_agent!(socket.assigns.current_scope, id)
-    {:ok, _agent} = Agents.delete_agent(socket.assigns.current_scope, agent)
+    if socket.assigns.can_manage_organization? do
+      agent = Agents.get_agent!(socket.assigns.current_scope, id)
+      {:ok, _agent} = Agents.delete_agent(socket.assigns.current_scope, agent)
 
-    {:noreply, stream_delete(socket, :agents, agent)}
+      {:noreply, stream_delete(socket, :agents, agent)}
+    else
+      {:noreply,
+       put_flash(socket, :error, "Only organization owners and admins can manage agents.")}
+    end
   end
 
   def provider_label(%Agent{provider: provider}) do
@@ -68,5 +90,9 @@ defmodule AppWeb.AgentLive.Index do
       1 -> "1 tool"
       count -> "#{count} tools"
     end
+  end
+
+  defp switch_path(organization_id, return_to) do
+    ~p"/organizations/switch/#{organization_id}?return_to=#{return_to}"
   end
 end

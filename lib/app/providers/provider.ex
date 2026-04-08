@@ -9,7 +9,7 @@ defmodule App.Providers.Provider do
     field :provider, :string
     field :api_key, App.Encrypted.Binary
 
-    belongs_to :user, App.Users.User
+    belongs_to :organization, App.Organizations.Organization
 
     timestamps(type: :utc_datetime)
   end
@@ -19,6 +19,6 @@ defmodule App.Providers.Provider do
     |> cast(attrs, [:name, :provider, :api_key])
     |> validate_required([:provider, :api_key])
     |> validate_inclusion(:provider, App.Providers.valid_provider_values())
-    |> foreign_key_constraint(:user_id)
+    |> foreign_key_constraint(:organization_id)
   end
 end

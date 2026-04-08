@@ -5,6 +5,7 @@ defmodule AppWeb.DashboardLive do
   alias App.Chat
   alias App.Providers
   alias App.Tools
+  alias App.Users.Scope
 
   @impl true
   def mount(_params, _session, socket) do
@@ -13,10 +14,14 @@ defmodule AppWeb.DashboardLive do
     agents_count = Agents.count_agents(scope)
     tools_count = Tools.count_tools(scope)
     conversations_count = Chat.count_chat_rooms(scope)
+    can_manage_organization? = Scope.manager?(scope)
 
     {:ok,
      socket
      |> assign(:page_title, "Dashboard")
+     |> assign(:can_manage_organization?, can_manage_organization?)
+     |> assign(:organization_name, scope.organization.name)
+     |> assign(:organization_role_label, organization_role_label(scope.organization_role))
      |> assign(:providers_count, providers_count)
      |> assign(:agents_count, agents_count)
      |> assign(:tools_count, tools_count)
@@ -25,7 +30,12 @@ defmodule AppWeb.DashboardLive do
      |> assign(:recent_chat_rooms, Chat.list_recent_chat_rooms(scope, 5))
      |> assign(
        :primary_action,
-       primary_action(providers_count, agents_count, conversations_count)
+       primary_action(
+         providers_count,
+         agents_count,
+         conversations_count,
+         can_manage_organization?
+       )
      )}
   end
 
@@ -36,6 +46,7 @@ defmodule AppWeb.DashboardLive do
       flash={@flash}
       current_scope={@current_scope}
       sidebar_chat_rooms={@sidebar_chat_rooms}
+      sidebar_organizations={@sidebar_organizations}
     >
       <div class="flex h-full min-h-0 flex-col p-4 pt-20 sm:px-5 sm:pb-5 sm:pt-20 lg:p-6">
         <div class="space-y-6">
@@ -58,21 +69,36 @@ defmodule AppWeb.DashboardLive do
                 </div>
 
                 <div class="space-y-2">
+                  <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span class="inline-flex items-center rounded-full border border-border bg-muted/60 px-2.5 py-1 font-medium text-foreground">
+                      {@organization_name}
+                    </span>
+                    <span class="inline-flex items-center rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 font-medium text-primary">
+                      {@organization_role_label}
+                    </span>
+                  </div>
+
                   <h1 id="dashboard-heading" class="text-3xl font-bold tracking-tight text-foreground">
                     Dashboard
                   </h1>
                   <p id="dashboard-summary" class="max-w-2xl text-sm leading-6 text-muted-foreground">
                     {hero_copy(
+                      @organization_name,
                       @current_scope.user.email,
                       @providers_count,
                       @agents_count,
-                      @conversations_count
+                      @conversations_count,
+                      @can_manage_organization?
                     )}
                   </p>
                 </div>
               </div>
 
-              <.link id="dashboard-primary-action" navigate={@primary_action.href}>
+              <.link
+                :if={@primary_action}
+                id="dashboard-primary-action"
+                navigate={@primary_action.href}
+              >
                 <.button class="gap-2">
                   <.icon name={@primary_action.icon} class="size-4" />
                   {@primary_action.label}
@@ -288,21 +314,32 @@ defmodule AppWeb.DashboardLive do
     """
   end
 
-  defp primary_action(0, _agents_count, _conversations_count) do
+  defp primary_action(0, _agents_count, _conversations_count, true) do
     %{href: ~p"/providers", label: "Connect a provider", icon: "hero-server-stack"}
   end
 
-  defp primary_action(_providers_count, 0, _conversations_count) do
+  defp primary_action(_providers_count, 0, _conversations_count, true) do
     %{href: ~p"/agents/new", label: "Create your first agent", icon: "hero-cpu-chip"}
   end
 
-  defp primary_action(_providers_count, _agents_count, 0) do
+  defp primary_action(_providers_count, _agents_count, 0, true) do
     %{href: ~p"/chat", label: "Start your first chat", icon: "hero-chat-bubble-left-right"}
   end
 
-  defp primary_action(_providers_count, _agents_count, _conversations_count) do
+  defp primary_action(_providers_count, _agents_count, _conversations_count, true) do
     %{href: ~p"/chat", label: "Open chat workspace", icon: "hero-chat-bubble-left-right"}
   end
+
+  defp primary_action(_providers_count, agents_count, 0, false) when agents_count > 0 do
+    %{href: ~p"/chat", label: "Start your first chat", icon: "hero-chat-bubble-left-right"}
+  end
+
+  defp primary_action(_providers_count, agents_count, conversations_count, false)
+       when agents_count > 0 and conversations_count > 0 do
+    %{href: ~p"/chat", label: "Open chat workspace", icon: "hero-chat-bubble-left-right"}
+  end
+
+  defp primary_action(_providers_count, _agents_count, _conversations_count, false), do: nil
 
   defp workspace_status_label(0, _agents_count, _conversations_count), do: "Setup required"
   defp workspace_status_label(_providers_count, 0, _conversations_count), do: "Agents missing"
@@ -318,20 +355,46 @@ defmodule AppWeb.DashboardLive do
   defp workspace_status_icon(_providers_count, _agents_count, _conversations_count),
     do: "hero-bolt"
 
-  defp hero_copy(email, 0, _agents_count, _conversations_count) do
-    "#{email} — connect a provider first so you can pick models, create agents, and start using the workspace."
+  defp hero_copy(organization_name, email, 0, _agents_count, _conversations_count, true) do
+    "#{organization_name} is active for #{email}. Connect a provider first so this workspace can create agents and start chatting."
   end
 
-  defp hero_copy(email, _providers_count, 0, _conversations_count) do
-    "#{email} — your providers are ready. Create an agent next so you can launch chats with reusable instructions and tools."
+  defp hero_copy(organization_name, email, _providers_count, 0, _conversations_count, true) do
+    "#{organization_name} is active for #{email}. Providers are ready, so the next step is creating an agent for this workspace."
   end
 
-  defp hero_copy(email, _providers_count, _agents_count, 0) do
-    "#{email} — your workspace is configured. Start the first chat to see recent conversations and activity show up here."
+  defp hero_copy(organization_name, email, _providers_count, _agents_count, 0, true) do
+    "#{organization_name} is configured for #{email}. Start the first chat to see recent conversations and activity show up here."
   end
 
-  defp hero_copy(email, providers_count, agents_count, conversations_count) do
-    "#{email} — you have #{providers_count} providers, #{agents_count} agents, and #{conversations_count} conversations in motion."
+  defp hero_copy(
+         organization_name,
+         email,
+         providers_count,
+         agents_count,
+         conversations_count,
+         true
+       ) do
+    "#{organization_name} is active for #{email}. You have #{providers_count} providers, #{agents_count} agents, and #{conversations_count} conversations in motion."
+  end
+
+  defp hero_copy(organization_name, email, _providers_count, 0, _conversations_count, false) do
+    "#{organization_name} is active for #{email}. An owner or admin needs to add providers and agents before members can start chatting."
+  end
+
+  defp hero_copy(organization_name, email, _providers_count, _agents_count, 0, false) do
+    "#{organization_name} is ready for #{email}. Start the first chat to begin working inside this workspace."
+  end
+
+  defp hero_copy(
+         organization_name,
+         email,
+         _providers_count,
+         agents_count,
+         conversations_count,
+         false
+       ) do
+    "#{organization_name} is active for #{email}. This workspace already has #{agents_count} agents and #{conversations_count} conversations available."
   end
 
   defp recent_chats_destination(0, _agents_count), do: ~p"/providers"
@@ -400,4 +463,9 @@ defmodule AppWeb.DashboardLive do
   defp agent_count_label(count), do: "#{count} agents"
 
   defp format_timestamp(%DateTime{} = timestamp), do: Calendar.strftime(timestamp, "%b %d, %H:%M")
+
+  defp organization_role_label("owner"), do: "Owner"
+  defp organization_role_label("admin"), do: "Admin"
+  defp organization_role_label("member"), do: "Member"
+  defp organization_role_label(_role), do: "Member"
 end

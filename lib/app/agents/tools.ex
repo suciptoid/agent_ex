@@ -18,13 +18,13 @@ defmodule App.Agents.Tools do
   def available_tools, do: @builtin_tool_names
 
   def resolve(tool_names, opts \\ []) when is_list(tool_names) and is_list(opts) do
-    user_id = Keyword.get(opts, :user_id)
+    organization_id = Keyword.get(opts, :organization_id)
 
     custom_tools =
-      case {user_id, custom_tool_names(tool_names)} do
+      case {organization_id, custom_tool_names(tool_names)} do
         {nil, _names} -> []
-        {_user_id, []} -> []
-        {user_id, names} -> App.Tools.list_named_tools(user_id, names)
+        {_organization_id, []} -> []
+        {organization_id, names} -> App.Tools.list_named_tools(organization_id, names)
       end
 
     custom_tool_map = Map.new(custom_tools, fn tool -> {tool.name, tool} end)

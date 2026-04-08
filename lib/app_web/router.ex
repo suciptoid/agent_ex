@@ -17,6 +17,10 @@ defmodule AppWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :active_organization_required do
+    plug :require_active_organization
+  end
+
   scope "/", AppWeb do
     pipe_through :browser
 
@@ -50,11 +54,23 @@ defmodule AppWeb.Router do
   scope "/", AppWeb do
     pipe_through [:browser, :require_authenticated_user]
 
+    get "/organizations/switch/:id", OrganizationSessionController, :update
+    post "/users/update-password", UserSessionController, :update_password
+
     live_session :require_authenticated_user,
       on_mount: [{AppWeb.UserAuth, :require_authenticated}] do
-      live "/dashboard", DashboardLive, :index
+      live "/organizations/select", OrganizationLive.Select, :index
       live "/users/settings", UserLive.Settings, :edit
       live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
+    end
+  end
+
+  scope "/", AppWeb do
+    pipe_through [:browser, :require_authenticated_user, :active_organization_required]
+
+    live_session :require_active_organization,
+      on_mount: [{AppWeb.UserAuth, :require_authenticated}] do
+      live "/dashboard", DashboardLive, :index
       live "/providers", ProviderLive.Index, :index
       live "/providers/new", ProviderLive.Index, :new
       live "/providers/:id/edit", ProviderLive.Index, :edit
@@ -67,8 +83,6 @@ defmodule AppWeb.Router do
       live "/chat", ChatLive.Index, :index
       live "/chat/:id", ChatLive.Show, :show
     end
-
-    post "/users/update-password", UserSessionController, :update_password
   end
 
   scope "/", AppWeb do

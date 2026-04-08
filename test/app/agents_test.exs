@@ -81,7 +81,7 @@ defmodule App.AgentsTest do
                  "provider_id" => other_provider.id
                })
 
-      assert "must belong to the current user" in errors_on(changeset).provider_id
+      assert "must belong to the current organization" in errors_on(changeset).provider_id
     end
   end
 
@@ -113,7 +113,7 @@ defmodule App.AgentsTest do
     test "preloads virtual extra params for forms", %{user: user, provider: provider} do
       agent = agent_fixture(user, %{provider: provider, temperature: 0.6, max_tokens: 1024})
 
-      changeset = Agents.change_agent(App.Users.Scope.for_user(user), agent)
+      changeset = Agents.change_agent(user_scope_fixture(user), agent)
 
       assert Ecto.Changeset.get_field(changeset, :temperature) == 0.6
       assert Ecto.Changeset.get_field(changeset, :max_tokens) == 1024

@@ -22,7 +22,7 @@ defmodule App.Agents.Runner do
     context = build_context(agent, messages, opts)
 
     tools =
-      App.Agents.Tools.resolve(agent.tools, user_id: agent.user_id) ++
+      App.Agents.Tools.resolve(agent.tools, organization_id: agent.organization_id) ++
         Keyword.get(opts, :extra_tools, [])
 
     llm_opts =
@@ -50,7 +50,7 @@ defmodule App.Agents.Runner do
     context = build_context(agent, messages, opts)
 
     tools =
-      App.Agents.Tools.resolve(agent.tools, user_id: agent.user_id) ++
+      App.Agents.Tools.resolve(agent.tools, organization_id: agent.organization_id) ++
         Keyword.get(opts, :extra_tools, [])
 
     llm_opts =

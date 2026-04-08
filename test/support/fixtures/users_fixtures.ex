@@ -7,7 +7,6 @@ defmodule App.UsersFixtures do
   import Ecto.Query
 
   alias App.Users
-  alias App.Users.Scope
 
   def unique_user_email, do: "user-#{Ecto.UUID.generate()}@example.com"
   def valid_user_password, do: "hello world!"
@@ -47,7 +46,7 @@ defmodule App.UsersFixtures do
   end
 
   def user_scope_fixture(user) do
-    Scope.for_user(user)
+    App.OrganizationsFixtures.organization_scope_fixture(user)
   end
 
   def set_password(user) do

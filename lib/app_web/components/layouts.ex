@@ -198,6 +198,10 @@ defmodule AppWeb.Layouts do
 
   attr :sidebar_chat_rooms, :list, default: [], doc: "list of chat rooms for the sidebar"
 
+  attr :sidebar_organizations, :list,
+    default: [],
+    doc: "organization memberships for the sidebar switcher"
+
   slot :inner_block, required: true
 
   def dashboard(assigns) do
@@ -242,7 +246,7 @@ defmodule AppWeb.Layouts do
         "lg:relative lg:inset-y-0 lg:left-0 lg:h-full lg:max-w-none lg:rounded-none lg:border-y-0 lg:border-l-0 lg:shadow-none lg:w-[255px]",
         "lg:[[data-sidebar-collapsed=true]_&]:w-14"
       ]}>
-        <%!-- Sidebar top: hamburger + logo --%>
+        <%!-- Sidebar top: hamburger + organization switcher --%>
         <div class="flex items-center gap-2 px-3 py-3 border-b border-border">
           <button
             type="button"
@@ -253,13 +257,54 @@ defmodule AppWeb.Layouts do
           >
             <.icon name="hero-bars-3" class="size-5" />
           </button>
-          <a
-            href={~p"/dashboard"}
-            class="flex items-center gap-2 overflow-hidden [[data-sidebar-collapsed=true]_&]:hidden"
-          >
-            <img src={~p"/images/logo.svg"} width="24" />
-            <span class="text-base font-semibold text-foreground whitespace-nowrap">AgentEx</span>
-          </a>
+
+          <div class="min-w-0 flex-1 [[data-sidebar-collapsed=true]_&]:hidden">
+            <.menu_button
+              id="sidebar-organization-switcher"
+              variant="unstyled"
+              content_class="w-64 z-50 bg-popover text-popover-foreground rounded-md border border-border p-1 shadow-md mb-2 aria-hidden:hidden not-aria-hidden:animate-in not-aria-hidden:fade-in-0 not-aria-hidden:zoom-in-95 aria-hidden:animate-out aria-hidden:fade-out-0 aria-hidden:zoom-out-95"
+              class="flex w-full! min-w-0 items-center gap-3 rounded-xl border border-border/60 bg-background/70 px-2.5 py-2 text-left shadow-none transition hover:bg-accent/60"
+            >
+              <div class="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <.icon name="hero-building-office-2" class="size-4.5" />
+              </div>
+
+              <div class="min-w-0 flex-1 overflow-hidden">
+                <p class="truncate text-sm font-semibold text-foreground">
+                  {active_organization_name(@current_scope)}
+                </p>
+                <p class="truncate text-xs text-muted-foreground">
+                  {active_organization_subtitle(@current_scope, @sidebar_organizations)}
+                </p>
+              </div>
+
+              <.icon name="hero-chevron-up-down" class="size-4 shrink-0 text-muted-foreground" />
+
+              <:items>
+                <.menu_item
+                  :for={membership <- @sidebar_organizations}
+                  href={~p"/organizations/switch/#{membership.organization_id}"}
+                >
+                  <div class="flex min-w-0 flex-1 items-center gap-2">
+                    <span class="truncate">{membership.organization.name}</span>
+                    <span
+                      :if={organization_active?(membership, @current_scope)}
+                      class="inline-flex items-center rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                    >
+                      Current
+                    </span>
+                  </div>
+                  <span class="text-xs text-muted-foreground">
+                    {String.capitalize(membership.role)}
+                  </span>
+                </.menu_item>
+                <.menu_separator />
+                <.menu_item navigate={~p"/organizations/select?new=true"}>
+                  <.icon name="hero-plus" class="size-4" /> Create New Organization
+                </.menu_item>
+              </:items>
+            </.menu_button>
+          </div>
         </div>
 
         <%!-- Navigation Links --%>
@@ -471,4 +516,21 @@ defmodule AppWeb.Layouts do
     </div>
     """
   end
+
+  defp active_organization_name(%{organization: %{name: name}}) when is_binary(name), do: name
+  defp active_organization_name(_scope), do: "Select organization"
+
+  defp active_organization_subtitle(%{organization_role: role}, _sidebar_organizations)
+       when is_binary(role) do
+    "#{String.capitalize(role)} access"
+  end
+
+  defp active_organization_subtitle(_scope, []), do: "Create your first workspace"
+  defp active_organization_subtitle(_scope, _sidebar_organizations), do: "Switch workspace"
+
+  defp organization_active?(membership, %{organization: %{id: organization_id}}) do
+    membership.organization_id == organization_id
+  end
+
+  defp organization_active?(_membership, _scope), do: false
 end

@@ -11,6 +11,12 @@ defmodule App.Users.User do
     field :confirmed_at, :utc_datetime
     field :authenticated_at, :utc_datetime, virtual: true
 
+    has_many :organization_memberships, App.Organizations.Membership
+
+    many_to_many :organizations, App.Organizations.Organization,
+      join_through: App.Organizations.Membership,
+      join_keys: [user_id: :id, organization_id: :id]
+
     timestamps(type: :utc_datetime)
   end
 

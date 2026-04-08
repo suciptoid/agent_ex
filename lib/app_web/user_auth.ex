@@ -4,40 +4,38 @@ defmodule AppWeb.UserAuth do
   import Plug.Conn
   import Phoenix.Controller
 
+  alias App.Organizations
   alias App.Users
   alias App.Users.Scope
 
-  # Make the remember me cookie valid for 14 days. This should match
-  # the session validity setting in UserToken.
   @max_cookie_age_in_days 14
   @remember_me_cookie "_app_web_user_remember_me"
+  @active_organization_session_key :active_organization_id
+  @organization_return_to_session_key :organization_return_to
+
   @remember_me_options [
     sign: true,
     max_age: @max_cookie_age_in_days * 24 * 60 * 60,
     same_site: "Lax"
   ]
 
-  # How old the session token should be before a new one is issued. When a request is made
-  # with a session token older than this value, then a new session token will be created
-  # and the session and remember-me cookies (if set) will be updated with the new token.
-  # Lowering this value will result in more tokens being created by active users. Increasing
-  # it will result in less time before a session token expires for a user to get issued a new
-  # token. This can be set to a value greater than `@max_cookie_age_in_days` to disable
-  # the reissuing of tokens completely.
   @session_reissue_age_in_days 7
 
   @doc """
   Logs the user in.
 
   Redirects to the session's `:user_return_to` path
-  or falls back to the `signed_in_path/1`.
+  or falls back to the organization-aware signed-in path.
   """
   def log_in_user(conn, user, params \\ %{}) do
     user_return_to = get_session(conn, :user_return_to)
+    active_organization_id = login_active_organization_id(conn, user)
 
     conn
     |> create_or_extend_session(user, params)
-    |> redirect(to: user_return_to || signed_in_path(conn))
+    |> sync_active_organization_session(active_organization_id)
+    |> delete_session(@organization_return_to_session_key)
+    |> redirect(to: user_return_to || default_signed_in_path(active_organization_id))
   end
 
   @doc """
@@ -67,8 +65,11 @@ defmodule AppWeb.UserAuth do
   def fetch_current_scope_for_user(conn, _opts) do
     with {token, conn} <- ensure_user_token(conn),
          {user, token_inserted_at} <- Users.get_user_by_session_token(token) do
+      {scope, active_organization_id} = authenticated_scope(conn, user)
+
       conn
-      |> assign(:current_scope, Scope.for_user(user))
+      |> assign(:current_scope, scope)
+      |> sync_active_organization_session(active_organization_id)
       |> maybe_reissue_user_session_token(user, token_inserted_at)
     else
       nil -> assign(conn, :current_scope, Scope.for_user(nil))
@@ -89,7 +90,35 @@ defmodule AppWeb.UserAuth do
     end
   end
 
-  # Reissue the session token if it is older than the configured reissue age.
+  defp authenticated_scope(conn, user) do
+    active_organization_id = get_session(conn, @active_organization_session_key)
+
+    {_memberships, membership} =
+      Organizations.resolve_active_membership(user, active_organization_id)
+
+    {Organizations.scope_for_membership(user, membership),
+     membership && membership.organization_id}
+  end
+
+  defp login_active_organization_id(conn, user) do
+    active_organization_id = get_session(conn, @active_organization_session_key)
+
+    {_memberships, membership} =
+      Organizations.resolve_active_membership(user, active_organization_id)
+
+    membership && membership.organization_id
+  end
+
+  defp sync_active_organization_session(conn, nil),
+    do: delete_session(conn, @active_organization_session_key)
+
+  defp sync_active_organization_session(conn, active_organization_id) do
+    put_session(conn, @active_organization_session_key, active_organization_id)
+  end
+
+  defp default_signed_in_path(nil), do: ~p"/organizations/select"
+  defp default_signed_in_path(_active_organization_id), do: ~p"/dashboard"
+
   defp maybe_reissue_user_session_token(conn, user, token_inserted_at) do
     token_age = DateTime.diff(DateTime.utc_now(:second), token_inserted_at, :day)
 
@@ -100,14 +129,6 @@ defmodule AppWeb.UserAuth do
     end
   end
 
-  # This function is the one responsible for creating session tokens
-  # and storing them safely in the session and cookies. It may be called
-  # either when logging in or to renew a session which
-  # will soon expire.
-  #
-  # When the session is created, rather than extended, the renew_session
-  # function will clear the session to avoid fixation attacks. See the
-  # renew_session function to customize this behaviour.
   defp create_or_extend_session(conn, user, params) do
     token = Users.generate_user_session_token(user)
     remember_me = get_session(conn, :user_remember_me)
@@ -118,28 +139,13 @@ defmodule AppWeb.UserAuth do
     |> maybe_write_remember_me_cookie(token, params, remember_me)
   end
 
-  # Do not renew session if the user is already logged in
-  # to prevent CSRF errors or data being lost in tabs that are still open
-  defp renew_session(conn, user) when conn.assigns.current_scope.user.id == user.id do
+  defp renew_session(
+         %Plug.Conn{assigns: %{current_scope: %Scope{user: %Users.User{id: user_id}}}} = conn,
+         %Users.User{id: user_id}
+       ) do
     conn
   end
 
-  # This function renews the session ID and erases the whole
-  # session to avoid fixation attacks. If there is any data
-  # in the session you may want to preserve after log in/log out,
-  # you must explicitly fetch the session data before clearing
-  # and then immediately set it after clearing, for example:
-  #
-  #     defp renew_session(conn, _user) do
-  #       delete_csrf_token()
-  #       preferred_locale = get_session(conn, :preferred_locale)
-  #
-  #       conn
-  #       |> configure_session(renew: true)
-  #       |> clear_session()
-  #       |> put_session(:preferred_locale, preferred_locale)
-  #     end
-  #
   defp renew_session(conn, _user) do
     delete_csrf_token()
 
@@ -181,35 +187,6 @@ defmodule AppWeb.UserAuth do
 
   @doc """
   Handles mounting and authenticating the current_scope in LiveViews.
-
-  ## `on_mount` arguments
-
-    * `:mount_current_scope` - Assigns current_scope
-      to socket assigns based on user_token, or nil if
-      there's no user_token or no matching user.
-
-    * `:require_authenticated` - Authenticates the user from the session,
-      and assigns the current_scope to socket assigns based
-      on user_token.
-      Redirects to login page if there's no logged user.
-
-  ## Examples
-
-  Use the `on_mount` lifecycle macro in LiveViews to mount or authenticate
-  the `current_scope`:
-
-      defmodule AppWeb.PageLive do
-        use AppWeb, :live_view
-
-        on_mount {AppWeb.UserAuth, :mount_current_scope}
-        ...
-      end
-
-  Or use the `live_session` of your router to invoke the on_mount callback:
-
-      live_session :authenticated, on_mount: [{AppWeb.UserAuth, :require_authenticated}] do
-        live "/profile", ProfileLive, :index
-      end
   """
   def on_mount(:mount_current_scope, _params, session, socket) do
     {:cont, mount_current_scope(socket, session)}
@@ -219,9 +196,19 @@ defmodule AppWeb.UserAuth do
     socket = mount_current_scope(socket, session)
 
     if socket.assigns.current_scope && socket.assigns.current_scope.user do
+      scope = socket.assigns.current_scope
+
       socket =
-        Phoenix.Component.assign_new(socket, :sidebar_chat_rooms, fn ->
-          App.Chat.list_chat_rooms_for_sidebar(socket.assigns.current_scope)
+        socket
+        |> Phoenix.Component.assign_new(:sidebar_chat_rooms, fn ->
+          if Scope.organization_selected?(scope) do
+            App.Chat.list_chat_rooms_for_sidebar(scope)
+          else
+            []
+          end
+        end)
+        |> Phoenix.Component.assign_new(:sidebar_organizations, fn ->
+          Organizations.list_memberships(scope.user)
         end)
 
       {:cont, socket}
@@ -237,19 +224,37 @@ defmodule AppWeb.UserAuth do
 
   defp mount_current_scope(socket, session) do
     Phoenix.Component.assign_new(socket, :current_scope, fn ->
-      {user, _} =
+      active_organization_id = session_active_organization_id(session)
+
+      {user, _token_inserted_at} =
         if user_token = session["user_token"] do
           Users.get_user_by_session_token(user_token)
         end || {nil, nil}
 
-      Scope.for_user(user)
+      if user do
+        {_memberships, membership} =
+          Organizations.resolve_active_membership(user, active_organization_id)
+
+        Organizations.scope_for_membership(user, membership)
+      else
+        Scope.for_user(nil)
+      end
     end)
   end
 
+  defp session_active_organization_id(session) do
+    session["active_organization_id"] || session[:active_organization_id]
+  end
+
   @doc "Returns the path to redirect to after log in."
-  # the user was already logged in, redirect to dashboard
-  def signed_in_path(%Plug.Conn{assigns: %{current_scope: %Scope{user: %Users.User{}}}}) do
-    ~p"/dashboard"
+  def signed_in_path(%Plug.Conn{assigns: %{current_scope: %Scope{} = scope}}),
+    do: signed_in_path(scope)
+
+  def signed_in_path(%Phoenix.LiveView.Socket{assigns: %{current_scope: %Scope{} = scope}}),
+    do: signed_in_path(scope)
+
+  def signed_in_path(%Scope{user: %Users.User{}} = scope) do
+    if Scope.organization_selected?(scope), do: ~p"/dashboard", else: ~p"/organizations/select"
   end
 
   def signed_in_path(_), do: ~p"/"
@@ -269,9 +274,40 @@ defmodule AppWeb.UserAuth do
     end
   end
 
+  @doc """
+  Plug for routes that require an active organization in addition to authentication.
+  """
+  def require_active_organization(conn, _opts) do
+    if Scope.organization_selected?(conn.assigns.current_scope) do
+      conn
+    else
+      conn
+      |> put_flash(:error, active_organization_required_message(conn.assigns.current_scope))
+      |> maybe_store_organization_return_to()
+      |> redirect(to: ~p"/organizations/select")
+      |> halt()
+    end
+  end
+
+  defp active_organization_required_message(%Scope{user: %Users.User{} = user}) do
+    if Organizations.count_organizations(user) == 0 do
+      "Create an organization to continue."
+    else
+      "Choose an organization to continue."
+    end
+  end
+
+  defp active_organization_required_message(_scope), do: "Choose an organization to continue."
+
   defp maybe_store_return_to(%{method: "GET"} = conn) do
     put_session(conn, :user_return_to, current_path(conn))
   end
 
   defp maybe_store_return_to(conn), do: conn
+
+  defp maybe_store_organization_return_to(%{method: "GET"} = conn) do
+    put_session(conn, @organization_return_to_session_key, current_path(conn))
+  end
+
+  defp maybe_store_organization_return_to(conn), do: conn
 end

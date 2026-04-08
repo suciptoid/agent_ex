@@ -228,26 +228,33 @@ defmodule App.Chat.StreamWorker do
   def handle_info({ref, {:stream_done, result}}, %{task_ref: ref} = state) do
     Process.demonitor(ref, [:flush])
 
-    case result do
-      {:ok, %{content: content, agent_id: agent_id, metadata: metadata}} ->
-        persist_success(state.chat_room, state.message_id, content, agent_id, metadata, state)
+    completion_event =
+      case result do
+        {:ok, %{content: content, agent_id: agent_id, metadata: metadata}} ->
+          persist_success(state.chat_room, state.message_id, content, agent_id, metadata, state)
+          {:stream_complete, tool_parent_message_id(state), content}
 
-      {:error, reason} ->
-        error_text = error_message(reason)
-        persist_error(state.chat_room, state.message_id, error_text, state)
-    end
+        {:error, reason} ->
+          error_text = error_message(reason)
+          persist_error(state.chat_room, state.message_id, error_text, state)
+          {:stream_error, tool_parent_message_id(state), error_text}
+      end
 
     broadcast_message_update(state.chat_room.id, state.message_id)
+    broadcast(state.chat_room.id, completion_event)
     {:stop, :normal, state}
   end
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{task_ref: ref} = state) do
+    error_text = "The agent encountered an error"
+
     Logger.error(
       "[StreamWorker] Streaming task crashed for message #{state.message_id}: #{inspect(reason)}"
     )
 
-    persist_error(state.chat_room, state.message_id, "The agent encountered an error", state)
+    persist_error(state.chat_room, state.message_id, error_text, state)
     broadcast_message_update(state.chat_room.id, state.message_id)
+    broadcast(state.chat_room.id, {:stream_error, tool_parent_message_id(state), error_text})
     {:stop, :normal, state}
   end
 

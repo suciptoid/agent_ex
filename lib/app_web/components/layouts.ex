@@ -345,10 +345,10 @@ defmodule AppWeb.Layouts do
             <.link
               id="sidebar-gateways-link"
               navigate={~p"/gateways"}
-              class="ml-8 flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [[data-sidebar-collapsed=true]_&]:hidden"
+              class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
             >
-              <.icon name="hero-signal" class="size-4 flex-shrink-0" />
-              <span>Gateways</span>
+              <.icon name="hero-signal" class="size-5 flex-shrink-0" />
+              <span class="[[data-sidebar-collapsed=true]_&]:hidden">Gateways</span>
             </.link>
           </div>
         </nav>

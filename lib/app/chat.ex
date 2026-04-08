@@ -60,6 +60,10 @@ defmodule App.Chat do
     |> Repo.one()
   end
 
+  def preload_chat_room(%ChatRoom{} = chat_room) do
+    Repo.preload(chat_room, chat_room_preloads())
+  end
+
   def get_chat_room_for_user(%User{} = user, id) do
     ChatRoom
     |> join(:inner, [chat_room], membership in Membership,

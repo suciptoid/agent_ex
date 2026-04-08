@@ -100,10 +100,11 @@ defmodule AppWeb.GatewayLiveTest do
     assert payload["allowed_updates"] == ["message", "callback_query"]
   end
 
-  test "gateways appear under agents in the sidebar and can be enabled from the list", %{
-    conn: conn,
-    scope: scope
-  } do
+  test "gateways appear under agents in the sidebar with consistent nav styling and can be enabled from the list",
+       %{
+         conn: conn,
+         scope: scope
+       } do
     stub_telegram_webhook(self())
 
     {:ok, gateway} =
@@ -117,6 +118,9 @@ defmodule AppWeb.GatewayLiveTest do
     {:ok, live_view, _html} = live(conn, ~p"/gateways")
 
     assert has_element?(live_view, "#sidebar-agents-group #sidebar-gateways-link", "Gateways")
+    assert has_element?(live_view, "#sidebar-gateways-link.pl-8.font-medium.gap-3.py-2")
+    assert has_element?(live_view, "#sidebar-gateways-link .size-5")
+    refute has_element?(live_view, "#sidebar-gateways-link.text-muted-foreground")
     assert has_element?(live_view, "#gateway-switch-#{gateway.id}[role=\"switch\"]")
 
     live_view

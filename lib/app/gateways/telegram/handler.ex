@@ -117,15 +117,8 @@ defmodule App.Gateways.Telegram.Handler do
          chat_room,
          _user_message
        ) do
-    # Load chat room with agents
-    chat_room =
-      App.Repo.preload(chat_room, [:chat_room_agents, :agents, messages: [:agent, :tool_messages]])
-
-    active_agent =
-      case Enum.find(chat_room.chat_room_agents, & &1.is_active) do
-        nil -> nil
-        cra -> App.Repo.preload(cra, agent: :provider).agent
-      end
+    chat_room = Chat.preload_chat_room(chat_room)
+    active_agent = active_agent(chat_room)
 
     if active_agent do
       # Create a pending assistant message
@@ -136,9 +129,8 @@ defmodule App.Gateways.Telegram.Handler do
              agent_id: active_agent.id
            }) do
         {:ok, assistant_message} ->
-          # Start streaming and set up relay
-          messages = Chat.list_messages(chat_room)
-          Task.start(fn -> relay_response(gateway, channel, chat_room, assistant_message) end)
+          messages = chat_room.messages
+          :ok = start_relay(gateway, channel, chat_room, assistant_message)
           Chat.start_stream(chat_room, messages, assistant_message)
 
         {:error, reason} ->
@@ -161,22 +153,16 @@ defmodule App.Gateways.Telegram.Handler do
   """
   def relay_response(%Gateway{} = gateway, %Channel{} = channel, chat_room, %{id: message_id}) do
     Chat.subscribe_chat_room(chat_room)
-
     receive_loop(gateway, channel, message_id)
+  after
+    Chat.unsubscribe_chat_room(chat_room)
   end
 
   defp receive_loop(gateway, channel, message_id) do
     receive do
-      {:stream_complete, ^message_id, _content} ->
-        # Fetch the final message from DB
-        case Chat.get_message_by_id(message_id) do
-          %{content: content} when is_binary(content) and content != "" ->
-            client = Client.new(gateway.token)
-            Client.send_message(client, channel.external_chat_id, content)
-
-          _ ->
-            :ok
-        end
+      {:stream_complete, ^message_id, content} when is_binary(content) and content != "" ->
+        client = Client.new(gateway.token)
+        Client.send_message(client, channel.external_chat_id, content)
 
       {:stream_error, ^message_id, _reason} ->
         client = Client.new(gateway.token)
@@ -210,6 +196,39 @@ defmodule App.Gateways.Telegram.Handler do
   defp display_name(%{"first_name" => first}), do: first
   defp display_name(%{"username" => username}), do: username
   defp display_name(_), do: nil
+
+  defp active_agent(%{chat_room_agents: chat_room_agents}) do
+    case Enum.find(chat_room_agents, & &1.is_active) || List.first(chat_room_agents) do
+      %{agent: agent} -> agent
+      nil -> nil
+    end
+  end
+
+  defp start_relay(gateway, channel, chat_room, assistant_message) do
+    parent = self()
+    ready_ref = make_ref()
+
+    {:ok, _relay_pid} =
+      Task.start(fn ->
+        Chat.subscribe_chat_room(chat_room)
+        send(parent, {:gateway_relay_ready, ready_ref})
+
+        try do
+          receive_loop(gateway, channel, assistant_message.id)
+        after
+          Chat.unsubscribe_chat_room(chat_room)
+        end
+      end)
+
+    receive do
+      {:gateway_relay_ready, ^ready_ref} ->
+        :ok
+    after
+      1_000 ->
+        Logger.warning("Relay subscription setup timed out for message #{assistant_message.id}")
+        :ok
+    end
+  end
 
   defp config_value(%Gateway.Config{} = config, key, _default) do
     Map.get(config, key)

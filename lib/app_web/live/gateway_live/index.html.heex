@@ -1,0 +1,137 @@
+<Layouts.dashboard
+  flash={@flash}
+  current_scope={@current_scope}
+  sidebar_chat_rooms={@sidebar_chat_rooms}
+  sidebar_organizations={@sidebar_organizations}
+>
+  <div class="flex h-full min-h-0 flex-col p-4 pt-20 sm:px-5 sm:pb-5 sm:pt-20 lg:p-6">
+    <div class="space-y-6">
+      <div class="border-b border-border pb-6">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h1 class="text-3xl font-bold tracking-tight text-foreground">Gateways</h1>
+            <p class="mt-2 text-sm text-muted-foreground">
+              Connect external messaging platforms like Telegram to your agents.
+            </p>
+          </div>
+
+          <.link
+            :if={@can_manage?}
+            id="new-gateway-button"
+            patch={~p"/gateways/new"}
+          >
+            <.button>New Gateway</.button>
+          </.link>
+        </div>
+      </div>
+
+      <p
+        :if={not @can_manage?}
+        class="rounded-2xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground"
+      >
+        Gateways can only be managed by organization owners and admins.
+      </p>
+
+      <%= if @live_action in [:new, :edit] do %>
+        <.live_component
+          module={AppWeb.GatewayLive.FormComponent}
+          id={@gateway.id || :new}
+          title={@page_title}
+          action={@live_action}
+          gateway={@gateway}
+          current_scope={@current_scope}
+          on_close={JS.patch(~p"/gateways")}
+        />
+      <% end %>
+
+      <div id="gateways" phx-update="stream" class="rounded-lg border border-border bg-card">
+        <div
+          :for={{id, gateway} <- @streams.gateways}
+          id={id}
+          class="flex items-center justify-between gap-4 p-4 border-b border-border last:border-b-0"
+        >
+          <div class="flex items-center gap-3">
+            <div class={[
+              "flex h-10 w-10 items-center justify-center rounded-lg",
+              gateway_type_bg(gateway.type)
+            ]}>
+              <.icon name={gateway_type_icon(gateway.type)} class="size-5 text-white" />
+            </div>
+            <div>
+              <p class="font-medium text-foreground">{gateway.name}</p>
+              <p class="text-sm text-muted-foreground">
+                {gateway_type_label(gateway.type)}
+                <span class={[
+                  "ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                  gateway_status_classes(gateway.status)
+                ]}>
+                  {gateway.status}
+                </span>
+              </p>
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <div class="text-xs text-muted-foreground font-mono hidden sm:block">
+              /gateway/webhook/{gateway.id}
+            </div>
+            <div :if={@can_manage?} class="flex items-center gap-4">
+              <div class="flex items-center gap-2">
+                <span class="hidden text-xs font-medium text-muted-foreground sm:inline">
+                  Enabled
+                </span>
+                <.switch
+                  id={"gateway-switch-#{gateway.id}"}
+                  name={"gateway-switch-#{gateway.id}"}
+                  value="true"
+                  data-checked={to_string(gateway.status == :active)}
+                  phx-hook=".SyncSwitchState"
+                  phx-click="toggle-status"
+                  phx-value-id={gateway.id}
+                  phx-value-enabled={if(gateway.status == :active, do: "false", else: "true")}
+                />
+              </div>
+
+              <div class="flex gap-2">
+                <.link id={"edit-gateway-#{gateway.id}"} patch={~p"/gateways/#{gateway.id}/edit"}>
+                  <.button variant="outline" size="sm">Edit</.button>
+                </.link>
+                <.button
+                  variant="outline"
+                  size="sm"
+                  phx-click="delete"
+                  phx-value-id={gateway.id}
+                  data-confirm="Are you sure? This will delete all channels associated with this gateway."
+                >
+                  Delete
+                </.button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div
+          id="gateways-empty-state"
+          class="hidden only:block p-8 text-center"
+        >
+          <.icon name="hero-signal" class="mx-auto size-10 text-muted-foreground/50" />
+          <p class="mt-3 text-sm font-medium text-foreground">No gateways yet</p>
+          <p class="mt-1 text-sm text-muted-foreground">
+            Create a gateway to connect an external messaging platform.
+          </p>
+        </div>
+      </div>
+    </div>
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".SyncSwitchState">
+      export default {
+        mounted() {
+          this.syncCheckedState()
+        },
+        updated() {
+          this.syncCheckedState()
+        },
+        syncCheckedState() {
+          this.el.checked = this.el.dataset.checked === "true"
+        }
+      }
+    </script>
+  </div>
+</Layouts.dashboard>

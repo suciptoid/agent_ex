@@ -333,13 +333,24 @@ defmodule AppWeb.Layouts do
             <span class="[[data-sidebar-collapsed=true]_&]:hidden">Tools</span>
           </.link>
 
-          <.link
-            navigate={~p"/agents"}
-            class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
-          >
-            <.icon name="hero-cpu-chip" class="size-5 flex-shrink-0" />
-            <span class="[[data-sidebar-collapsed=true]_&]:hidden">Agents</span>
-          </.link>
+          <div id="sidebar-agents-group" class="space-y-0.5">
+            <.link
+              navigate={~p"/agents"}
+              class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+            >
+              <.icon name="hero-cpu-chip" class="size-5 flex-shrink-0" />
+              <span class="[[data-sidebar-collapsed=true]_&]:hidden">Agents</span>
+            </.link>
+
+            <.link
+              id="sidebar-gateways-link"
+              navigate={~p"/gateways"}
+              class="ml-8 flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [[data-sidebar-collapsed=true]_&]:hidden"
+            >
+              <.icon name="hero-signal" class="size-4 flex-shrink-0" />
+              <span>Gateways</span>
+            </.link>
+          </div>
         </nav>
 
         <%!-- Chat History --%>

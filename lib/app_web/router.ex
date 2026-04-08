@@ -32,6 +32,13 @@ defmodule AppWeb.Router do
   #   pipe_through :api
   # end
 
+  # Gateway webhook endpoint — no CSRF, no session
+  scope "/gateway", AppWeb do
+    pipe_through :api
+
+    post "/webhook/:gateway_id", GatewayWebhookController, :create
+  end
+
   # Enable LiveDashboard and Swoosh mailbox preview in development
   if Application.compile_env(:app, :dev_routes) do
     # If you want to use the LiveDashboard in production, you should put
@@ -82,6 +89,9 @@ defmodule AppWeb.Router do
       live "/agents/:id/edit", AgentLive.Index, :edit
       live "/chat", ChatLive.Index, :index
       live "/chat/:id", ChatLive.Show, :show
+      live "/gateways", GatewayLive.Index, :index
+      live "/gateways/new", GatewayLive.Index, :new
+      live "/gateways/:id/edit", GatewayLive.Index, :edit
     end
   end
 

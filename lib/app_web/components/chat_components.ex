@@ -25,7 +25,7 @@ defmodule AppWeb.ChatComponents do
       <div
         id={@composer_id}
         data-chat-composer-shell
-        class="overflow-hidden rounded-lg rounded-b-none border-4 border-b-0 border-border/70 bg-background/80 backdrop-blur-lg supports-[backdrop-filter]:bg-background/60"
+        class="overflow-visible rounded-lg rounded-b-none border-4 border-b-0 border-border/70 bg-background/80 backdrop-blur-lg supports-[backdrop-filter]:bg-background/60"
       >
         <.textarea
           field={@form[:content]}
@@ -75,22 +75,59 @@ defmodule AppWeb.ChatComponents do
     <script :type={Phoenix.LiveView.ColocatedHook} name=".ChatInput">
       export default {
         mounted() {
+          this.offsetRoot = document.documentElement;
+          this.layoutOffsetVariableName = this.resolveLayoutOffsetVariableName();
+          this.composerShell = null;
+          this.composerOffsetFrame = null;
+          this.lastComposerOffset = null;
+
+          this.observeComposerShell = () => {
+            if (!this.composerResizeObserver) return;
+
+            const nextComposerShell =
+              this.el.closest("form")?.querySelector("[data-chat-composer-shell]") || null;
+
+            if (nextComposerShell === this.composerShell) return;
+
+            if (this.composerShell) {
+              this.composerResizeObserver.unobserve(this.composerShell);
+            }
+
+            this.composerShell = nextComposerShell;
+
+            if (this.composerShell) {
+              this.composerResizeObserver.observe(this.composerShell);
+              this.scheduleComposerOffsetSync();
+            }
+          };
+
           this.syncComposerOffset = () => {
-            const layoutId = this.el.dataset.layoutTarget;
-            if (!layoutId) return;
+            if (!this.layoutOffsetVariableName) return;
 
-            const layout = document.getElementById(layoutId);
-            const composerShell = this.el.closest("form")?.querySelector("[data-chat-composer-shell]");
+            const composerShell =
+              this.composerShell ||
+                this.el.closest("form")?.querySelector("[data-chat-composer-shell]");
 
-            if (!layout || !composerShell) return;
+            if (!composerShell) return;
 
             const padding = Number.parseInt(this.el.dataset.composerOffsetPadding || "24", 10);
             const offset = Math.ceil(composerShell.getBoundingClientRect().height + padding);
-            layout.style.setProperty("--chat-composer-offset", `${offset}px`);
+
+            if (offset === this.lastComposerOffset) return;
+
+            this.lastComposerOffset = offset;
+            this.offsetRoot.style.setProperty(this.layoutOffsetVariableName, `${offset}px`);
           };
 
-          this.onInput = () => this.syncComposerOffset();
-          this.onResize = () => this.syncComposerOffset();
+          this.scheduleComposerOffsetSync = () => {
+            if (this.composerOffsetFrame) return;
+
+            this.composerOffsetFrame = window.requestAnimationFrame(() => {
+              this.composerOffsetFrame = null;
+              this.syncComposerOffset();
+            });
+          };
+
           this.onKeyDown = (event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
@@ -105,20 +142,45 @@ defmodule AppWeb.ChatComponents do
             }
           };
 
-          this.el.addEventListener("input", this.onInput);
           this.el.addEventListener("keydown", this.onKeyDown);
-          window.addEventListener("resize", this.onResize);
-          this.syncComposerOffset();
+
+          if (typeof ResizeObserver === "function") {
+            this.composerResizeObserver = new ResizeObserver(() => this.scheduleComposerOffsetSync());
+            this.observeComposerShell();
+          }
+
+          this.scheduleComposerOffsetSync();
         },
 
         updated() {
-          this.syncComposerOffset();
+          this.observeComposerShell();
         },
 
         destroyed() {
-          this.el.removeEventListener("input", this.onInput);
           this.el.removeEventListener("keydown", this.onKeyDown);
-          window.removeEventListener("resize", this.onResize);
+
+          if (this.composerOffsetFrame) {
+            window.cancelAnimationFrame(this.composerOffsetFrame);
+          }
+
+          if (this.composerResizeObserver && this.composerShell) {
+            this.composerResizeObserver.unobserve(this.composerShell);
+          }
+
+          if (this.composerResizeObserver) {
+            this.composerResizeObserver.disconnect();
+          }
+
+          if (this.layoutOffsetVariableName) {
+            this.offsetRoot.style.removeProperty(this.layoutOffsetVariableName);
+          }
+        },
+
+        resolveLayoutOffsetVariableName() {
+          const layoutId = this.el.dataset.layoutTarget;
+          if (!layoutId) return null;
+
+          return `--${layoutId.replace(/[^a-zA-Z0-9_-]/g, "-")}-composer-offset`;
         }
       }
     </script>

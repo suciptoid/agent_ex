@@ -35,6 +35,7 @@ defmodule AppWeb.ChatLive.Show do
      |> assign(:available_agents, available_agents)
      |> assign(:agent_message_streams, %{})
      |> assign(:latest_message_id, nil)
+     |> assign(:messages_revision, 0)
      |> assign(:streaming_message_id, nil)
      |> assign(:streaming_message_agent, nil)
      |> assign(:streaming_message_inserted_at, nil)
@@ -562,6 +563,7 @@ defmodule AppWeb.ChatLive.Show do
     |> assign(:latest_message_id, latest_message_id(visible_messages))
     |> assign_reasoning_state(chat_room)
     |> refresh_sidebar_chat_rooms()
+    |> bump_messages_revision()
     |> stream(:messages, visible_messages, reset: true)
     |> sync_main_stream(messages)
   end
@@ -575,6 +577,7 @@ defmodule AppWeb.ChatLive.Show do
     |> assign(:chat_room, chat_room)
     |> assign(:latest_message_id, latest_message_id(visible_messages))
     |> refresh_sidebar_chat_rooms()
+    |> bump_messages_revision()
     |> stream(:messages, visible_messages, reset: true)
     |> sync_main_stream(messages)
   end
@@ -998,7 +1001,13 @@ defmodule AppWeb.ChatLive.Show do
   end
 
   defp stream_insert_message(socket, message) do
-    stream_insert(socket, :messages, message, at: -1)
+    socket
+    |> bump_messages_revision()
+    |> stream_insert(:messages, message, at: -1)
+  end
+
+  defp bump_messages_revision(socket) do
+    update(socket, :messages_revision, &((&1 || 0) + 1))
   end
 
   defp visible_messages(messages) do

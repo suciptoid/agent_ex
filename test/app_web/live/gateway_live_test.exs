@@ -50,6 +50,7 @@ defmodule AppWeb.GatewayLiveTest do
     assert has_element?(live_view, "#gateway-form")
     refute has_element?(live_view, "#gateway-dialog")
     assert has_element?(live_view, "a", "Back to gateways")
+    assert render(live_view) =~ "disable BotFather privacy mode"
 
     assert has_element?(
              live_view,

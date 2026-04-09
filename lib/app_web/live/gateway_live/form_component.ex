@@ -180,6 +180,12 @@ defmodule AppWeb.GatewayLive.FormComponent do
         Connect an external messaging platform to your agents.
       </p>
 
+      <div class="rounded-2xl border border-sky-500/20 bg-sky-500/5 px-4 py-3 text-sm text-sky-900 dark:text-sky-100">
+        Telegram groups:
+        disable BotFather privacy mode or make the bot an admin if you want normal group messages to reach this gateway.
+        With privacy mode enabled, Telegram only forwards limited bot-relevant messages such as commands and replies.
+      </div>
+
       <.form
         for={@form}
         id="gateway-form"

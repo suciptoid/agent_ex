@@ -135,6 +135,8 @@ defmodule App.Gateways.Telegram.Handler do
            name: sender_name || channel.external_username || "User"
          }) do
       {:ok, message} ->
+        Chat.broadcast_chat_room(chat_room.id, {:user_message_created, message})
+
         # Subscribe to chat room to relay agent responses back
         maybe_start_agent_and_relay(gateway, channel, chat_room, message)
 
@@ -163,6 +165,7 @@ defmodule App.Gateways.Telegram.Handler do
            }) do
         {:ok, assistant_message} ->
           messages = chat_room.messages
+          Chat.broadcast_chat_room(chat_room.id, {:agent_message_created, assistant_message})
           :ok = start_relay(gateway, channel, chat_room, assistant_message)
 
           Chat.start_stream(chat_room, messages, assistant_message,

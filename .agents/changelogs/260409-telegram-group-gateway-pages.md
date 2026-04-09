@@ -23,3 +23,31 @@
 - `mix precommit`
 
 By: gpt-5.4 on GitHub Copilot
+
+## Gateway Chat Broadcast Fix
+
+- Traced a follow-up report where Telegram group messages appeared to create no activity in the open web chat room.
+- Fixed `lib/app/gateways/telegram/handler.ex` so gateway-originated user messages now broadcast `{:user_message_created, message}` after persistence, matching the normal in-app chat flow.
+- Fixed the same handler to broadcast `{:agent_message_created, assistant_message}` when a gateway-triggered assistant placeholder is created, so open LiveViews refresh immediately instead of waiting for later stream updates.
+- Added `test/app/gateways/telegram/handler_test.exs` coverage proving gateway messages publish both PubSub events for chat subscribers.
+
+## Validation
+
+- `mix test test/app/gateways/telegram/handler_test.exs`
+- `mix precommit`
+
+By: gpt-5.4 on GitHub Copilot
+
+## Follow-up Troubleshooting Note
+
+- Investigated a report where `/start` worked in a Telegram group but later plain messages never reached the chat room and produced no bot reply.
+- Confirmed the app-side Telegram handler already supports group `message` updates; the observed pattern matches Telegram privacy-mode delivery rules, where commands can arrive but ordinary group text may not be forwarded.
+- Added a visible setup note to `lib/app_web/live/gateway_live/form_component.ex` telling users to disable BotFather privacy mode or make the bot an admin for full group-message delivery.
+- Extended `test/app_web/live/gateway_live_test.exs` to assert that the setup note is rendered on the dedicated gateway form page.
+
+## Validation
+
+- `mix test test/app_web/live/gateway_live_test.exs`
+- `mix precommit`
+
+By: gpt-5.4 on GitHub Copilot

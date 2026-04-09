@@ -266,6 +266,55 @@ defmodule App.Gateways.Telegram.HandlerTest do
     assert second_payload["chat_id"] == to_string(group_chat_id)
   end
 
+  test "gateway messages are broadcast to open chat subscribers", %{user: user, scope: scope} do
+    provider = provider_fixture(user)
+    agent = agent_fixture(user, %{provider: provider, name: "Gateway Agent"})
+    stub_telegram_api(self())
+
+    {:ok, gateway} =
+      Gateways.create_gateway(scope, %{
+        "name" => "Support Bot",
+        "type" => "telegram",
+        "token" => "telegram-token",
+        "config" => %{
+          "agent_id" => agent.id,
+          "allow_all_users" => true
+        }
+      })
+
+    assert {:ok, _response} =
+             Handler.handle_update(gateway, %{
+               "message" => %{
+                 "chat" => %{"id" => 1234},
+                 "from" => %{"id" => 5678, "first_name" => "Alex"},
+                 "text" => "/start"
+               }
+             })
+
+    channel = Gateways.get_channel(gateway, 1234)
+    Chat.subscribe_chat_room(channel.chat_room_id)
+    flush_mailbox()
+
+    assert {:ok, _stream_pid} =
+             Handler.handle_update(gateway, %{
+               "message" => %{
+                 "chat" => %{"id" => 1234},
+                 "from" => %{"id" => 5678, "first_name" => "Alex"},
+                 "text" => "Need support"
+               }
+             })
+
+    assert_receive {:user_message_created, user_message}
+    assert user_message.chat_room_id == channel.chat_room_id
+    assert user_message.role == "user"
+    assert user_message.content == "Need support"
+
+    assert_receive {:agent_message_created, assistant_message}
+    assert assistant_message.chat_room_id == channel.chat_room_id
+    assert assistant_message.role == "assistant"
+    assert assistant_message.status == :pending
+  end
+
   defp stub_telegram_api(test_pid) do
     Req.Test.stub(__MODULE__, fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)

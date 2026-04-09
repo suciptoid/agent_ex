@@ -241,9 +241,9 @@ defmodule AppWeb.Layouts do
       <%!-- Sidebar --%>
       <aside class={[
         "fixed inset-y-2 left-2 z-50 flex h-[calc(100vh-1rem)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl transition-all duration-300 ease-in-out",
-        "w-[255px]",
+        "w-[260px]",
         "[[data-sidebar-collapsed=true]_&]:-translate-x-[calc(100%+0.75rem)] lg:[[data-sidebar-collapsed=true]_&]:translate-x-0",
-        "lg:relative lg:inset-y-0 lg:left-0 lg:h-full lg:max-w-none lg:rounded-none lg:border-y-0 lg:border-l-0 lg:shadow-none lg:w-[255px]",
+        "lg:relative lg:inset-y-0 lg:left-0 lg:h-full lg:max-w-none lg:rounded-none lg:border-y-0 lg:border-l-0 lg:shadow-none lg:w-[260px]",
         "lg:[[data-sidebar-collapsed=true]_&]:w-14"
       ]}>
         <%!-- Sidebar top: hamburger + organization switcher --%>

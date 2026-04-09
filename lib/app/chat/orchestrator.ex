@@ -44,7 +44,7 @@ defmodule App.Chat.Orchestrator do
             persist_agent_result(chat_room, agent.id, result)
 
           {:error, reason} ->
-            Logger.error("[Orchestrator] Agent run failed: #{inspect(reason)}")
+            Logger.error("[Orchestrator] Agent run failed: #{delegated_error_text(reason)}")
             {:error, reason}
         end
       end
@@ -86,7 +86,7 @@ defmodule App.Chat.Orchestrator do
            }}
 
         {:error, reason} ->
-          Logger.error("[Orchestrator] Streaming failed: #{inspect(reason)}")
+          Logger.error("[Orchestrator] Streaming failed: #{delegated_error_text(reason)}")
           {:error, reason}
       end
     end
@@ -273,7 +273,7 @@ defmodule App.Chat.Orchestrator do
                 {:ok, "Asked #{target_agent.name} to handle that. They will reply in the chat."}
 
               {:error, reason} ->
-                {:error, "Failed to start delegated agent: #{inspect(reason)}"}
+                {:error, "Failed to start delegated agent: #{delegated_error_text(reason)}"}
             end
         end
       end
@@ -334,7 +334,7 @@ defmodule App.Chat.Orchestrator do
 
       {:error, reason} ->
         Logger.error(
-          "[Orchestrator] Delegated agent #{target_agent.name} failed: #{inspect(reason)}"
+          "[Orchestrator] Delegated agent #{target_agent.name} failed: #{delegated_error_text(reason)}"
         )
 
         error_text = delegated_error_text(reason)
@@ -413,13 +413,31 @@ defmodule App.Chat.Orchestrator do
   defp maybe_put_metadata(metadata, _key, nil), do: metadata
   defp maybe_put_metadata(metadata, key, value), do: Map.put(metadata, key, value)
 
+  defp delegated_error_text({:error, reason}), do: delegated_error_text(reason)
+  defp delegated_error_text({reason, _stacktrace}), do: delegated_error_text(reason)
+
+  defp delegated_error_text(%{reason: reason}) when not is_nil(reason),
+    do: delegated_error_text(reason)
+
+  defp delegated_error_text(%{"reason" => reason}) when not is_nil(reason),
+    do: delegated_error_text(reason)
+
+  defp delegated_error_text(%{response_body: %{"message" => message}}) when is_binary(message),
+    do: message
+
+  defp delegated_error_text(%{"response_body" => %{"message" => message}})
+       when is_binary(message),
+       do: message
+
   defp delegated_error_text(%{message: message}) when is_binary(message), do: message
+  defp delegated_error_text(%{"message" => message}) when is_binary(message), do: message
+  defp delegated_error_text(%{__exception__: true} = exception), do: Exception.message(exception)
   defp delegated_error_text(reason) when is_binary(reason), do: reason
 
   defp delegated_error_text(reason) when is_atom(reason),
     do: Phoenix.Naming.humanize(to_string(reason))
 
-  defp delegated_error_text(reason), do: inspect(reason)
+  defp delegated_error_text(_reason), do: "Unexpected error"
 
   defp normalize_instruction_text(value) when is_binary(value), do: String.trim(value)
   defp normalize_instruction_text(value), do: value

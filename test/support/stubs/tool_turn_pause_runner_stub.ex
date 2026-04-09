@@ -1,0 +1,127 @@
+defmodule App.TestSupport.ToolTurnPauseRunnerStub do
+  def run(agent, messages, _opts \\ []) do
+    {:ok, result(stub_content(agent, messages))}
+  end
+
+  def run_streaming(agent, messages, recipient, opts \\ []) do
+    content = stub_content(agent, messages)
+
+    emit_chunk =
+      stream_callback(recipient, opts, :on_result, fn token -> {:stream_chunk, token} end)
+
+    emit_thinking =
+      stream_callback(recipient, opts, :on_thinking, fn token ->
+        {:stream_thinking_chunk, token}
+      end)
+
+    emit_tool_start =
+      stream_callback(recipient, opts, :on_tool_start, fn tool_result ->
+        {:stream_tool_started, tool_result}
+      end)
+
+    emit_tool_result =
+      stream_callback(recipient, opts, :on_tool_result, fn tool_result ->
+        {:stream_tool_result, tool_result}
+      end)
+
+    emit_tool_calls =
+      stream_callback(recipient, opts, :on_tool_calls, fn tool_call_turn ->
+        {:stream_tool_calls, tool_call_turn}
+      end)
+
+    config = Application.get_env(:app, __MODULE__, [])
+    notify_pid = Keyword.get(config, :notify_pid)
+    tool_response = Keyword.fetch!(config, :tool_response)
+    thinking = Keyword.get(config, :thinking)
+
+    if is_pid(notify_pid) do
+      send(notify_pid, {:tool_turn_runner_started, self()})
+    end
+
+    if is_binary(thinking) and thinking != "" do
+      emit_thinking.(thinking)
+    end
+
+    emit_tool_calls.(tool_call_turn(tool_response, thinking))
+
+    running_tool =
+      tool_response
+      |> Map.put("content", nil)
+      |> Map.put("status", "running")
+
+    emit_tool_start.(running_tool)
+
+    receive do
+      :emit_tool_result ->
+        emit_tool_result.(tool_response)
+
+        if is_pid(notify_pid) do
+          send(notify_pid, {:tool_turn_runner_tool_result_emitted, self()})
+        end
+    after
+      5_000 ->
+        {:error, "tool result timed out"}
+    end
+
+    receive do
+      :continue ->
+        content
+        |> String.graphemes()
+        |> Enum.each(emit_chunk)
+
+        {:ok, result(content, tool_call_turns(tool_response, thinking))}
+    after
+      5_000 ->
+        {:error, "tool turn stream timed out"}
+    end
+  end
+
+  defp result(content, tool_call_turns \\ []) do
+    %{
+      content: content,
+      usage: %{"input_tokens" => 1, "output_tokens" => 1, "total_tokens" => 2},
+      thinking: nil,
+      tool_call_turns: tool_call_turns,
+      tool_responses: [],
+      finish_reason: "stop",
+      provider_meta: %{}
+    }
+  end
+
+  defp stub_content(agent, messages) do
+    last_user_message = messages |> Enum.reverse() |> Enum.find(&(&1.role == "user"))
+
+    case last_user_message do
+      nil -> "#{agent.name} is ready."
+      message -> "#{agent.name}: #{message.content}"
+    end
+  end
+
+  defp tool_call_turns(tool_response, thinking), do: [tool_call_turn(tool_response, thinking)]
+
+  defp tool_call_turn(tool_response, thinking) do
+    %{
+      "thinking" => thinking,
+      "tool_calls" => [
+        %{
+          "id" => tool_response["id"],
+          "name" => tool_response["name"],
+          "arguments" => tool_response["arguments"]
+        }
+      ]
+    }
+  end
+
+  defp stream_callback(recipient, opts, key, default_message_builder) do
+    case Keyword.get(opts, key) do
+      callback when is_function(callback, 1) ->
+        callback
+
+      _ when is_pid(recipient) ->
+        fn payload -> send(recipient, default_message_builder.(payload)) end
+
+      _ ->
+        fn _payload -> :ok end
+    end
+  end
+end

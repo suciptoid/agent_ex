@@ -121,7 +121,7 @@ defmodule AppWeb.ChatLive.Show do
                 {:error, reason} ->
                   {:noreply,
                    socket
-                   |> put_flash(:error, "Failed to start stream: #{inspect(reason)}")
+                   |> put_flash(:error, "Failed to start stream: #{user_error_message(reason)}")
                    |> load_chat_room(chat_room.id)}
               end
 
@@ -160,7 +160,7 @@ defmodule AppWeb.ChatLive.Show do
       true ->
         prior_messages = Enum.take_while(messages, &(&1.id != message.id))
         active_agent = active_agent_for_room(chat_room)
-        agent_id = message.agent_id || (active_agent && active_agent.id)
+        agent_id = (active_agent && active_agent.id) || message.agent_id
 
         attrs =
           %{
@@ -194,7 +194,11 @@ defmodule AppWeb.ChatLive.Show do
 
                   {:error, reason} ->
                     {:noreply,
-                     put_flash(socket, :error, "Failed to regenerate: #{inspect(reason)}")}
+                     put_flash(
+                       socket,
+                       :error,
+                       "Failed to regenerate: #{user_error_message(reason)}"
+                     )}
                 end
 
               {_count, _rows} ->
@@ -224,7 +228,8 @@ defmodule AppWeb.ChatLive.Show do
         {:noreply, socket |> load_chat_room(socket.assigns.chat_room.id) |> reset_main_stream()}
 
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to stop stream: #{inspect(reason)}")}
+        {:noreply,
+         put_flash(socket, :error, "Failed to stop stream: #{user_error_message(reason)}")}
     end
   end
 
@@ -718,6 +723,7 @@ defmodule AppWeb.ChatLive.Show do
   defp reasoning_stream_opts(socket) do
     case {socket.assigns.reasoning_supported?,
           Map.fetch(@reasoning_effort_atoms, socket.assigns.reasoning_effort)} do
+      {true, {:ok, :default}} -> []
       {true, {:ok, effort}} -> [reasoning_effort: effort]
       _ -> []
     end
@@ -1123,7 +1129,32 @@ defmodule AppWeb.ChatLive.Show do
     errors |> Enum.map(fn {k, {msg, _}} -> "#{k}: #{msg}" end) |> Enum.join(", ")
   end
 
-  defp changeset_error(reason), do: inspect(reason)
+  defp changeset_error(reason), do: user_error_message(reason)
+
+  defp user_error_message({:error, reason}), do: user_error_message(reason)
+  defp user_error_message({reason, _stacktrace}), do: user_error_message(reason)
+
+  defp user_error_message(%{reason: reason}) when not is_nil(reason),
+    do: user_error_message(reason)
+
+  defp user_error_message(%{"reason" => reason}) when not is_nil(reason),
+    do: user_error_message(reason)
+
+  defp user_error_message(%{response_body: %{"message" => message}}) when is_binary(message),
+    do: message
+
+  defp user_error_message(%{"response_body" => %{"message" => message}}) when is_binary(message),
+    do: message
+
+  defp user_error_message(%{message: message}) when is_binary(message), do: message
+  defp user_error_message(%{"message" => message}) when is_binary(message), do: message
+  defp user_error_message(%{__exception__: true} = exception), do: Exception.message(exception)
+  defp user_error_message(reason) when is_binary(reason), do: reason
+
+  defp user_error_message(reason) when is_atom(reason),
+    do: Phoenix.Naming.humanize(to_string(reason))
+
+  defp user_error_message(_reason), do: "Unexpected error"
 
   def render_markdown(nil), do: ""
 

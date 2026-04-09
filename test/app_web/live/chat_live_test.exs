@@ -279,7 +279,7 @@ defmodule AppWeb.ChatLiveTest do
       assert assistant_message.content == "Reasoner: Keep it concise"
     end
 
-    test "forwards the default reasoning effort for supported models", %{
+    test "omits the default reasoning effort for supported models", %{
       conn: conn,
       user: user,
       scope: scope
@@ -318,7 +318,7 @@ defmodule AppWeb.ChatLiveTest do
       |> render_submit()
 
       assert_receive {:agent_runner_streaming_opts, opts}
-      assert opts[:reasoning_effort] == :default
+      refute Keyword.has_key?(opts, :reasoning_effort)
 
       assistant_message =
         wait_for_messages(live_view, scope, room.id, fn messages ->
@@ -435,6 +435,61 @@ defmodule AppWeb.ChatLiveTest do
       assert regenerated_message.id == assistant_message.id
       assert length(messages) == 2
       assert has_element?(live_view, "#message-#{assistant_message.id}")
+    end
+
+    test "regenerate uses the current active agent", %{
+      conn: conn,
+      user: user,
+      scope: scope
+    } do
+      provider = provider_fixture(user)
+      lead_agent = agent_fixture(user, %{provider: provider, name: "Lead Agent"})
+      backup_agent = agent_fixture(user, %{provider: provider, name: "Backup Agent"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Switch Retry Room",
+          agents: [lead_agent, backup_agent],
+          active_agent_id: lead_agent.id
+        })
+
+      {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
+
+      live_view
+      |> form("#chat-message-form", %{
+        "message" => %{"content" => "Retry this"}
+      })
+      |> render_submit()
+
+      assistant_message =
+        wait_for_messages(live_view, scope, room.id, fn messages ->
+          Enum.find(messages, &(&1.role == "assistant" && &1.status == :completed))
+        end)
+
+      live_view
+      |> element("#chat-agent-selector-set-#{backup_agent.id}")
+      |> render_click()
+
+      live_view
+      |> element("#regenerate-message-#{assistant_message.id}")
+      |> render_click()
+
+      regenerated_message =
+        wait_for_messages(live_view, scope, room.id, fn messages ->
+          Enum.find(messages, fn message ->
+            message.id == assistant_message.id and message.status == :completed and
+              message.agent_id == backup_agent.id and
+              message.content == "Backup Agent: Retry this"
+          end)
+        end)
+
+      assert regenerated_message.agent_id == backup_agent.id
+
+      assert has_element?(
+               live_view,
+               "#message-#{assistant_message.id}",
+               "Backup Agent: Retry this"
+             )
     end
 
     test "renders thinking, tool responses, and cost metadata", %{
@@ -929,6 +984,143 @@ defmodule AppWeb.ChatLiveTest do
       _ = :sys.get_state(live_view.pid)
 
       assert has_element?(live_view, "#message-#{completed_message.id}", "Hello world")
+    end
+
+    test "creates the follow-up pending assistant message only after tool results arrive", %{
+      conn: conn,
+      user: user,
+      scope: scope
+    } do
+      previous_runner = Application.get_env(:app, :agent_runner)
+      previous_stub_config = Application.get_env(:app, App.TestSupport.ToolTurnPauseRunnerStub)
+
+      Application.put_env(:app, :agent_runner, App.TestSupport.ToolTurnPauseRunnerStub)
+
+      Application.put_env(:app, App.TestSupport.ToolTurnPauseRunnerStub,
+        notify_pid: self(),
+        thinking: "Planning the lookup",
+        tool_response: %{
+          "id" => "tool_1",
+          "name" => "web_fetch",
+          "arguments" => %{"url" => "https://example.com"},
+          "content" => "sample payload",
+          "status" => "ok"
+        }
+      )
+
+      on_exit(fn ->
+        if previous_runner do
+          Application.put_env(:app, :agent_runner, previous_runner)
+        else
+          Application.delete_env(:app, :agent_runner)
+        end
+
+        if previous_stub_config do
+          Application.put_env(:app, App.TestSupport.ToolTurnPauseRunnerStub, previous_stub_config)
+        else
+          Application.delete_env(:app, App.TestSupport.ToolTurnPauseRunnerStub)
+        end
+      end)
+
+      provider = provider_fixture(user)
+      agent = agent_fixture(user, %{provider: provider, name: "Tool Agent"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Tool Waiting Room",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
+
+      live_view
+      |> form("#chat-message-form", %{
+        "message" => %{"content" => "Fetch it"}
+      })
+      |> render_submit()
+
+      assert_receive {:tool_turn_runner_started, runner_pid}
+
+      tool_call_message =
+        wait_for_messages(live_view, scope, room.id, fn messages ->
+          Enum.find(messages, fn message ->
+            message.role == "assistant" and length(message.metadata["tool_calls"] || []) == 1
+          end)
+        end)
+
+      assert has_element?(live_view, "#message-#{tool_call_message.id}")
+
+      refute Enum.any?(Chat.list_messages(Chat.get_chat_room!(scope, room.id)), fn message ->
+               message.role == "assistant" and message.status == :pending and
+                 message.id != tool_call_message.id
+             end)
+
+      send(runner_pid, :emit_tool_result)
+      assert_receive {:tool_turn_runner_tool_result_emitted, ^runner_pid}
+
+      followup_message =
+        wait_for_messages(live_view, scope, room.id, fn messages ->
+          Enum.find(messages, fn message ->
+            message.role == "assistant" and message.status == :pending and
+              message.id != tool_call_message.id
+          end)
+        end)
+
+      assert followup_message.id != tool_call_message.id
+      assert has_element?(live_view, "#message-#{followup_message.id}")
+      assert has_element?(live_view, "#message-streaming-#{followup_message.id}")
+
+      ref = Process.monitor(runner_pid)
+      send(runner_pid, :continue)
+      assert_receive {:DOWN, ^ref, :process, ^runner_pid, _reason}
+
+      completed_message =
+        wait_for_messages(live_view, scope, room.id, fn messages ->
+          Enum.find(messages, fn message ->
+            message.role == "assistant" and message.status == :completed and
+              message.content == "Tool Agent: Fetch it"
+          end)
+        end)
+
+      assert completed_message.id == followup_message.id
+    end
+
+    test "renders only the exception message for failed assistant runs", %{
+      conn: conn,
+      user: user,
+      scope: scope
+    } do
+      Application.put_env(:app, :agent_runner, App.TestSupport.FailingAgentRunnerStub)
+
+      provider = provider_fixture(user)
+      agent = agent_fixture(user, %{provider: provider, name: "Explosive Agent"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Failure Room",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
+
+      live_view
+      |> form("#chat-message-form", %{
+        "message" => %{"content" => "Fail now"}
+      })
+      |> render_submit()
+
+      failed_message =
+        wait_for_messages(live_view, scope, room.id, fn messages ->
+          Enum.find(messages, &(&1.role == "assistant" && &1.status == :error))
+        end)
+
+      assert failed_message.content ==
+               "Invalid value: 'default'. Supported values are: 'none', 'minimal', 'low', 'medium', 'high', and 'xhigh'."
+
+      refute failed_message.content =~ "API request failed"
+      refute failed_message.content =~ "response_body"
     end
   end
 

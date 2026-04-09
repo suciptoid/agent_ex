@@ -44,6 +44,8 @@ defmodule App.Chat.StreamWorker do
       content: Keyword.get(opts, :content, "") || "",
       thinking: Keyword.get(opts, :thinking, "") || "",
       next_tool_position: nil,
+      followup_message_position: nil,
+      pending_tool_call_ids: [],
       tool_parent_message_id: nil,
       tool_responses: Keyword.get(opts, :tool_responses, []),
       metadata: Keyword.get(opts, :metadata, %{}) || %{},
@@ -119,6 +121,7 @@ defmodule App.Chat.StreamWorker do
   end
 
   def handle_call(:cancel, _from, state) do
+    state = ensure_followup_message(state, true)
     _ = Task.shutdown(state.task, :brutal_kill)
 
     persisted? =
@@ -140,6 +143,7 @@ defmodule App.Chat.StreamWorker do
 
   @impl true
   def handle_info({:stream_chunk, token}, state) do
+    state = ensure_followup_message(state, true)
     new_content = append_text(state.content, token)
     new_count = state.token_count + 1
 
@@ -159,6 +163,7 @@ defmodule App.Chat.StreamWorker do
   end
 
   def handle_info({:stream_thinking_chunk, token}, state) do
+    state = ensure_followup_message(state, true)
     state = %{state | thinking: append_text(state.thinking, token)}
     broadcast(state.chat_room.id, {:stream_thinking_chunk, state.message_id, token})
     {:noreply, state}
@@ -195,16 +200,19 @@ defmodule App.Chat.StreamWorker do
     tool_responses = merge_tool_response(state.tool_responses, tool_result)
     state = %{state | tool_responses: tool_responses}
 
-    case persist_tool_message(state, tool_result) do
-      {:ok, state, tool_message} ->
-        broadcast_message_update(state.chat_room.id, tool_message.id)
-        broadcast(state.chat_room.id, {:stream_tool_result, state.message_id, tool_result})
-        {:noreply, state}
+    state =
+      case persist_tool_message(state, tool_result) do
+        {:ok, state, tool_message} ->
+          broadcast_message_update(state.chat_room.id, tool_message.id)
+          broadcast(state.chat_room.id, {:stream_tool_result, state.message_id, tool_result})
+          ensure_followup_message(state, false)
 
-      {:error, _reason} ->
-        broadcast(state.chat_room.id, {:stream_tool_result, state.message_id, tool_result})
-        {:noreply, state}
-    end
+        {:error, _reason} ->
+          broadcast(state.chat_room.id, {:stream_tool_result, state.message_id, tool_result})
+          ensure_followup_message(state, false)
+      end
+
+    {:noreply, state}
   end
 
   def handle_info({:title_updated, title}, state) do
@@ -227,6 +235,7 @@ defmodule App.Chat.StreamWorker do
 
   def handle_info({ref, {:stream_done, result}}, %{task_ref: ref} = state) do
     Process.demonitor(ref, [:flush])
+    state = ensure_followup_message(state, true)
 
     completion_event =
       case result do
@@ -246,6 +255,7 @@ defmodule App.Chat.StreamWorker do
   end
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{task_ref: ref} = state) do
+    state = ensure_followup_message(state, true)
     error_text = "The agent encountered an error"
 
     Logger.error(
@@ -377,28 +387,26 @@ defmodule App.Chat.StreamWorker do
                Chat.update_message(
                  message,
                  tool_call_message_attrs(state, tool_call_turn, completed_position)
-               ),
-             {:ok, next_message} <-
-               create_followup_assistant_message(
-                 state,
-                 reserved_message_position(completed_position)
-               ),
-             :ok <- switch_stream_message(tool_parent_message_id, next_message.id) do
+               ) do
           broadcast_message_update(state.chat_room.id, tool_parent_message_id)
-          broadcast_message_update(state.chat_room.id, next_message.id)
 
           {:ok,
            %{
              state
-             | message_id: next_message.id,
-               content: next_message.content || "",
-               thinking: Message.thinking(next_message) || "",
-               metadata: next_message.metadata || %{},
+             | content: "",
+               thinking: "",
+               metadata: carry_forward_metadata(state.metadata),
                token_count: 0,
                next_tool_position: next_tool_position,
+               followup_message_position: reserved_message_position(completed_position),
+               pending_tool_call_ids:
+                 tool_call_turn
+                 |> turn_tool_calls()
+                 |> Enum.map(&tool_call_id/1)
+                 |> Enum.reject(&is_nil/1),
                tool_parent_message_id: tool_parent_message_id,
                tool_responses: [],
-               agent_id: next_message.agent_id || state.agent_id
+               agent_id: message.agent_id || state.agent_id
            }}
         else
           {:error, _reason} = error ->
@@ -425,6 +433,56 @@ defmodule App.Chat.StreamWorker do
       agent_id: state.agent_id,
       metadata: carry_forward_metadata(state.metadata)
     })
+  end
+
+  defp ensure_followup_message(state, force?) do
+    case maybe_create_followup_message(state, force?) do
+      {:ok, state} ->
+        state
+
+      {:error, reason} ->
+        Logger.error(
+          "[StreamWorker] Failed to create follow-up assistant message for #{state.message_id}: #{inspect(reason)}"
+        )
+
+        state
+    end
+  end
+
+  defp maybe_create_followup_message(%{followup_message_position: nil} = state, _force?),
+    do: {:ok, state}
+
+  defp maybe_create_followup_message(state, force?) do
+    if force? or tool_turn_complete?(state) do
+      case create_followup_assistant_message(state, state.followup_message_position) do
+        {:ok, next_message} ->
+          case switch_stream_message(state.message_id, next_message.id) do
+            :ok ->
+              broadcast_message_update(state.chat_room.id, next_message.id)
+
+              {:ok,
+               %{
+                 state
+                 | message_id: next_message.id,
+                   agent_id: next_message.agent_id || state.agent_id,
+                   content: next_message.content || "",
+                   thinking: Message.thinking(next_message) || "",
+                   metadata: next_message.metadata || %{},
+                   token_count: 0,
+                   followup_message_position: nil,
+                   pending_tool_call_ids: []
+               }}
+
+            {:error, reason} ->
+              {:error, reason}
+          end
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      {:ok, state}
+    end
   end
 
   defp switch_stream_message(previous_message_id, next_message_id)
@@ -571,6 +629,24 @@ defmodule App.Chat.StreamWorker do
     |> List.wrap()
   end
 
+  defp tool_call_id(%{} = tool_call), do: Map.get(tool_call, "id") || Map.get(tool_call, :id)
+  defp tool_call_id(_tool_call), do: nil
+
+  defp tool_turn_complete?(%{pending_tool_call_ids: []} = state) do
+    Enum.any?(state.tool_responses, fn tool_response ->
+      Map.get(tool_response, "status") != "running"
+    end)
+  end
+
+  defp tool_turn_complete?(state) do
+    Enum.all?(state.pending_tool_call_ids, fn pending_tool_call_id ->
+      case Enum.find(state.tool_responses, &(Map.get(&1, "id") == pending_tool_call_id)) do
+        nil -> false
+        tool_response -> Map.get(tool_response, "status") != "running"
+      end
+    end)
+  end
+
   defp completed_turn_position(%{next_tool_position: nil}, current_position), do: current_position
 
   defp completed_turn_position(%{next_tool_position: next_tool_position}, _current_position),
@@ -595,8 +671,21 @@ defmodule App.Chat.StreamWorker do
   defp empty_to_nil([]), do: nil
   defp empty_to_nil(value), do: value
 
+  defp error_message({:error, reason}), do: error_message(reason)
+  defp error_message({reason, _stacktrace}), do: error_message(reason)
+  defp error_message(%{reason: reason}) when not is_nil(reason), do: error_message(reason)
+  defp error_message(%{"reason" => reason}) when not is_nil(reason), do: error_message(reason)
+
+  defp error_message(%{response_body: %{"message" => message}}) when is_binary(message),
+    do: message
+
+  defp error_message(%{"response_body" => %{"message" => message}}) when is_binary(message),
+    do: message
+
   defp error_message(%{message: message}) when is_binary(message), do: message
+  defp error_message(%{"message" => message}) when is_binary(message), do: message
+  defp error_message(%{__exception__: true} = exception), do: Exception.message(exception)
   defp error_message(reason) when is_binary(reason), do: reason
   defp error_message(reason) when is_atom(reason), do: Phoenix.Naming.humanize(to_string(reason))
-  defp error_message(reason), do: inspect(reason)
+  defp error_message(_reason), do: "Unexpected error"
 end

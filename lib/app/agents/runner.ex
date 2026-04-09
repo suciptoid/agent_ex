@@ -160,7 +160,7 @@ defmodule App.Agents.Runner do
         end
 
       {:error, reason} ->
-        Logger.error("[Runner] LLM call failed: #{inspect(reason)}")
+        Logger.error("[Runner] LLM call failed: #{error_text(reason)}")
         {:error, reason}
     end
   end
@@ -259,10 +259,26 @@ defmodule App.Agents.Runner do
         )
 
       {:error, reason} ->
-        Logger.error("[Runner] Stream failed: #{inspect(reason)}")
+        Logger.error("[Runner] Stream failed: #{error_text(reason)}")
         {:error, reason}
     end
   end
+
+  defp error_text({:error, reason}), do: error_text(reason)
+  defp error_text({reason, _stacktrace}), do: error_text(reason)
+  defp error_text(%{reason: reason}) when not is_nil(reason), do: error_text(reason)
+  defp error_text(%{"reason" => reason}) when not is_nil(reason), do: error_text(reason)
+  defp error_text(%{response_body: %{"message" => message}}) when is_binary(message), do: message
+
+  defp error_text(%{"response_body" => %{"message" => message}}) when is_binary(message),
+    do: message
+
+  defp error_text(%{message: message}) when is_binary(message), do: message
+  defp error_text(%{"message" => message}) when is_binary(message), do: message
+  defp error_text(%{__exception__: true} = exception), do: Exception.message(exception)
+  defp error_text(reason) when is_binary(reason), do: reason
+  defp error_text(reason) when is_atom(reason), do: Phoenix.Naming.humanize(to_string(reason))
+  defp error_text(reason), do: inspect(reason)
 
   defp build_stream_callbacks(recipient, opts) do
     %{

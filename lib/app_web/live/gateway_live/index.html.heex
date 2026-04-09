@@ -18,7 +18,7 @@
           <.link
             :if={@can_manage?}
             id="new-gateway-button"
-            patch={~p"/gateways/new"}
+            navigate={~p"/gateways/new"}
           >
             <.button>New Gateway</.button>
           </.link>
@@ -31,18 +31,6 @@
       >
         Gateways can only be managed by organization owners and admins.
       </p>
-
-      <%= if @live_action in [:new, :edit] do %>
-        <.live_component
-          module={AppWeb.GatewayLive.FormComponent}
-          id={@gateway.id || :new}
-          title={@page_title}
-          action={@live_action}
-          gateway={@gateway}
-          current_scope={@current_scope}
-          on_close={JS.patch(~p"/gateways")}
-        />
-      <% end %>
 
       <div id="gateways" phx-update="stream" class="rounded-lg border border-border bg-card">
         <div
@@ -92,7 +80,10 @@
               </div>
 
               <div class="flex gap-2">
-                <.link id={"edit-gateway-#{gateway.id}"} patch={~p"/gateways/#{gateway.id}/edit"}>
+                <.link
+                  id={"edit-gateway-#{gateway.id}"}
+                  navigate={~p"/gateways/#{gateway.id}/edit"}
+                >
                   <.button variant="outline" size="sm">Edit</.button>
                 </.link>
                 <.button

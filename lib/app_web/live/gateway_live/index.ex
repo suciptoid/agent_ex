@@ -2,7 +2,6 @@ defmodule AppWeb.GatewayLive.Index do
   use AppWeb, :live_view
 
   alias App.Gateways
-  alias App.Gateways.Gateway
   alias App.Gateways.Telegram.Webhook, as: TelegramWebhook
   alias App.Users.Scope
 
@@ -15,45 +14,8 @@ defmodule AppWeb.GatewayLive.Index do
   end
 
   @impl true
-  def handle_params(params, _url, socket) do
-    {:noreply, apply_action(socket, socket.assigns.live_action, params)}
-  end
-
-  defp apply_action(socket, :index, _params) do
-    socket
-    |> assign(:page_title, "Gateways")
-    |> assign(:gateway, nil)
-  end
-
-  defp apply_action(socket, :new, _params) do
-    if socket.assigns.can_manage? do
-      socket
-      |> assign(:page_title, "New Gateway")
-      |> assign(:gateway, %Gateway{})
-    else
-      socket
-      |> put_flash(:error, "Only organization owners and admins can manage gateways.")
-      |> push_patch(to: ~p"/gateways")
-    end
-  end
-
-  defp apply_action(socket, :edit, %{"id" => id}) do
-    if socket.assigns.can_manage? do
-      gateway = Gateways.get_gateway!(socket.assigns.current_scope, id)
-
-      socket
-      |> assign(:page_title, "Edit Gateway")
-      |> assign(:gateway, gateway)
-    else
-      socket
-      |> put_flash(:error, "Only organization owners and admins can manage gateways.")
-      |> push_patch(to: ~p"/gateways")
-    end
-  end
-
-  @impl true
-  def handle_info({AppWeb.GatewayLive.FormComponent, {:saved, gateway}}, socket) do
-    {:noreply, stream_insert(socket, :gateways, gateway)}
+  def handle_params(_params, _url, socket) do
+    {:noreply, assign(socket, :page_title, "Gateways")}
   end
 
   @impl true

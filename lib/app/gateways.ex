@@ -87,7 +87,11 @@ defmodule App.Gateways do
       %Channel{} = channel ->
         channel
         |> Repo.preload([:chat_room, :gateway])
-        |> ensure_channel_chat_room()
+        |> sync_existing_channel(attrs)
+        |> then(fn
+          {:ok, channel} -> ensure_channel_chat_room(channel)
+          {:error, _reason} = error -> error
+        end)
 
       nil ->
         create_channel_with_chat_room(gateway, attrs)
@@ -142,6 +146,7 @@ defmodule App.Gateways do
     external_chat_id = to_string(attrs[:external_chat_id] || attrs["external_chat_id"])
     external_user_id = attrs[:external_user_id] || attrs["external_user_id"]
     external_username = attrs[:external_username] || attrs["external_username"]
+    metadata = attrs[:metadata] || attrs["metadata"] || %{}
 
     Multi.new()
     |> gateway_chat_room_multi(gateway, external_username, external_chat_id)
@@ -151,6 +156,7 @@ defmodule App.Gateways do
         external_chat_id: external_chat_id,
         external_user_id: external_user_id && to_string(external_user_id),
         external_username: external_username,
+        metadata: metadata,
         chat_room_id: chat_room.id
       })
     end)
@@ -168,6 +174,65 @@ defmodule App.Gateways do
     do: reset_channel_chat_room(channel)
 
   defp ensure_channel_chat_room(%Channel{} = channel), do: {:ok, channel}
+
+  defp sync_existing_channel(%Channel{} = channel, attrs) do
+    with {:ok, channel} <- maybe_update_channel_identity(channel, attrs),
+         {:ok, channel} <- maybe_update_chat_room_title(channel) do
+      {:ok, channel}
+    end
+  end
+
+  defp maybe_update_channel_identity(%Channel{} = channel, attrs) do
+    external_user_id = attrs[:external_user_id] || attrs["external_user_id"]
+    external_username = attrs[:external_username] || attrs["external_username"]
+
+    merged_metadata =
+      merge_channel_metadata(channel.metadata, attrs[:metadata] || attrs["metadata"])
+
+    changes =
+      %{}
+      |> maybe_put_channel_change(
+        :external_user_id,
+        stringify_value(external_user_id),
+        channel.external_user_id
+      )
+      |> maybe_put_channel_change(
+        :external_username,
+        external_username,
+        channel.external_username
+      )
+      |> maybe_put_channel_change(:metadata, merged_metadata, channel.metadata || %{})
+
+    if map_size(changes) == 0 do
+      {:ok, channel}
+    else
+      case channel |> Channel.changeset(changes) |> Repo.update() do
+        {:ok, channel} ->
+          {:ok, Repo.preload(channel, [:chat_room, :gateway])}
+
+        {:error, changeset} ->
+          {:error, changeset}
+      end
+    end
+  end
+
+  defp maybe_update_chat_room_title(%Channel{chat_room: %ChatRoom{} = chat_room} = channel) do
+    title = channel_title(channel.external_username, channel.external_chat_id)
+
+    if title in [nil, "", chat_room.title] do
+      {:ok, channel}
+    else
+      case chat_room |> ChatRoom.changeset(%{title: title}) |> Repo.update() do
+        {:ok, chat_room} ->
+          {:ok, %{channel | chat_room: chat_room, chat_room_id: chat_room.id}}
+
+        {:error, changeset} ->
+          {:error, changeset}
+      end
+    end
+  end
+
+  defp maybe_update_chat_room_title(%Channel{} = channel), do: {:ok, channel}
 
   defp gateway_chat_room_multi(multi, %Gateway{} = gateway, external_username, external_chat_id) do
     title = channel_title(external_username, external_chat_id)
@@ -208,7 +273,10 @@ defmodule App.Gateways do
   defp channel_title(username, _external_chat_id), do: username
 
   defp config_value(%Gateway.Config{} = config, key, default) do
-    Map.get(config, key) || default
+    case Map.get(config, key) do
+      nil -> default
+      value -> value
+    end
   end
 
   defp config_value(%{} = config, key, default) do
@@ -216,6 +284,29 @@ defmodule App.Gateways do
   end
 
   defp config_value(_, _key, default), do: default
+
+  defp merge_channel_metadata(current_metadata, new_metadata) when is_map(new_metadata) do
+    current_metadata
+    |> normalize_metadata()
+    |> Map.merge(new_metadata)
+  end
+
+  defp merge_channel_metadata(current_metadata, _new_metadata),
+    do: normalize_metadata(current_metadata)
+
+  defp normalize_metadata(metadata) when is_map(metadata), do: metadata
+  defp normalize_metadata(_metadata), do: %{}
+
+  defp maybe_put_channel_change(changes, _field, nil, _current), do: changes
+
+  defp maybe_put_channel_change(changes, field, value, current) when value != current do
+    Map.put(changes, field, value)
+  end
+
+  defp maybe_put_channel_change(changes, _field, _value, _current), do: changes
+
+  defp stringify_value(nil), do: nil
+  defp stringify_value(value), do: to_string(value)
 
   defp ensure_organization_owns!(%Scope{} = scope, %Gateway{organization_id: org_id}) do
     if org_id != Scope.organization_id!(scope) do

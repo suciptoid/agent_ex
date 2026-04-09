@@ -90,8 +90,8 @@ defmodule AppWeb.Router do
       live "/chat", ChatLive.Index, :index
       live "/chat/:id", ChatLive.Show, :show
       live "/gateways", GatewayLive.Index, :index
-      live "/gateways/new", GatewayLive.Index, :new
-      live "/gateways/:id/edit", GatewayLive.Index, :edit
+      live "/gateways/new", GatewayLive.Form, :new
+      live "/gateways/:id/edit", GatewayLive.Form, :edit
     end
   end
 

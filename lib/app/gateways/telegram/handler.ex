@@ -29,60 +29,58 @@ defmodule App.Gateways.Telegram.Handler do
 
   # --- Message handling ---
 
-  defp handle_message(%Gateway{} = gateway, %{"chat" => %{"id" => chat_id}} = message) do
+  defp handle_message(%Gateway{} = gateway, %{"chat" => %{"id" => _chat_id} = chat} = message) do
     text = Map.get(message, "text", "")
-    from = Map.get(message, "from", %{})
-    user_id = Map.get(from, "id")
-    username = display_name(from)
+    context = telegram_context(chat, Map.get(message, "from", %{}))
 
     case telegram_command(text) do
       :start ->
-        handle_start(gateway, chat_id, user_id, username)
+        handle_start(gateway, context)
 
       :new ->
-        handle_new(gateway, chat_id, user_id, username)
+        handle_new(gateway, context)
 
       :blank ->
         :ok
 
       :message ->
-        handle_user_message(gateway, chat_id, user_id, username, String.trim(text))
+        handle_user_message(gateway, context, String.trim(text))
     end
   end
 
   defp handle_message(_gateway, _message), do: :ok
 
-  defp handle_start(%Gateway{} = gateway, chat_id, user_id, username) do
-    if Gateways.user_allowed?(gateway, to_string(user_id)) do
+  defp handle_start(%Gateway{} = gateway, context) do
+    if Gateways.user_allowed?(gateway, sender_id(context)) do
       # Ensure channel exists
-      {:ok, _channel} =
-        Gateways.find_or_create_channel(gateway, %{
-          external_chat_id: chat_id,
-          external_user_id: user_id,
-          external_username: username
-        })
+      {:ok, _channel} = Gateways.find_or_create_channel(gateway, channel_attrs(context))
 
       client = Client.new(gateway.token)
       config = gateway.config || %{}
       welcome = config_value(config, :welcome_message, "Welcome! You're now connected.")
-      Client.send_message(client, chat_id, welcome)
+      Client.send_message(client, context.chat_id, welcome)
     else
       client = Client.new(gateway.token)
-      Client.send_message(client, chat_id, "Sorry, you're not authorized to use this bot.")
+
+      Client.send_message(
+        client,
+        context.chat_id,
+        "Sorry, you're not authorized to use this bot."
+      )
     end
   end
 
-  defp handle_new(%Gateway{} = gateway, chat_id, user_id, username) do
+  defp handle_new(%Gateway{} = gateway, context) do
     client = Client.new(gateway.token)
 
-    if Gateways.user_allowed?(gateway, to_string(user_id)) do
-      case reset_or_create_channel(gateway, chat_id, user_id, username) do
+    if Gateways.user_allowed?(gateway, sender_id(context)) do
+      case reset_or_create_channel(gateway, context) do
         {:ok, _channel} ->
           config = gateway.config || %{}
 
           Client.send_message(
             client,
-            chat_id,
+            context.chat_id,
             config_value(
               config,
               :new_chat_message,
@@ -92,24 +90,29 @@ defmodule App.Gateways.Telegram.Handler do
 
         {:error, reason} ->
           Logger.error("Failed to rotate Telegram channel chat room: #{inspect(reason)}")
-          Client.send_message(client, chat_id, "Sorry, I couldn't start a new chat right now.")
+
+          Client.send_message(
+            client,
+            context.chat_id,
+            "Sorry, I couldn't start a new chat right now."
+          )
       end
     else
-      Client.send_message(client, chat_id, "Sorry, you're not authorized to use this bot.")
+      Client.send_message(
+        client,
+        context.chat_id,
+        "Sorry, you're not authorized to use this bot."
+      )
     end
   end
 
-  defp handle_user_message(%Gateway{} = gateway, chat_id, user_id, username, content) do
-    unless Gateways.user_allowed?(gateway, to_string(user_id)) do
+  defp handle_user_message(%Gateway{} = gateway, context, content) do
+    unless Gateways.user_allowed?(gateway, sender_id(context)) do
       :ok
     else
-      case Gateways.find_or_create_channel(gateway, %{
-             external_chat_id: chat_id,
-             external_user_id: user_id,
-             external_username: username
-           }) do
+      case Gateways.find_or_create_channel(gateway, channel_attrs(context)) do
         {:ok, %Channel{chat_room: chat_room} = channel} when not is_nil(chat_room) ->
-          send_to_chat_room(gateway, channel, content)
+          send_to_chat_room(gateway, channel, context.sender_name, content)
 
         {:ok, _channel} ->
           Logger.warning("Channel created without chat_room for gateway #{gateway.id}")
@@ -122,14 +125,14 @@ defmodule App.Gateways.Telegram.Handler do
     end
   end
 
-  defp send_to_chat_room(%Gateway{} = gateway, %Channel{} = channel, content) do
+  defp send_to_chat_room(%Gateway{} = gateway, %Channel{} = channel, sender_name, content) do
     chat_room = channel.chat_room
 
     # Create user message in the chat room
     case Chat.create_message(chat_room, %{
            role: "user",
            content: content,
-           name: channel.external_username || "User"
+           name: sender_name || channel.external_username || "User"
          }) do
       {:ok, message} ->
         # Subscribe to chat room to relay agent responses back
@@ -244,22 +247,17 @@ defmodule App.Gateways.Telegram.Handler do
     end
   end
 
-  defp reset_or_create_channel(%Gateway{} = gateway, chat_id, user_id, username) do
-    attrs = %{
-      external_chat_id: chat_id,
-      external_user_id: user_id,
-      external_username: username
-    }
+  defp reset_or_create_channel(%Gateway{} = gateway, context) do
+    attrs = channel_attrs(context)
 
-    case Gateways.get_channel(gateway, chat_id) do
+    case Gateways.get_channel(gateway, context.chat_id) do
       nil ->
         Gateways.find_or_create_channel(gateway, attrs)
 
-      %Channel{} = channel ->
-        channel
-        |> Map.put(:external_user_id, to_string(user_id))
-        |> Map.put(:external_username, username)
-        |> Gateways.reset_channel_chat_room()
+      %Channel{} ->
+        with {:ok, channel} <- Gateways.find_or_create_channel(gateway, attrs) do
+          Gateways.reset_channel_chat_room(channel)
+        end
     end
   end
 
@@ -352,7 +350,10 @@ defmodule App.Gateways.Telegram.Handler do
   end
 
   defp config_value(%Gateway.Config{} = config, key, default) do
-    Map.get(config, key) || default
+    case Map.get(config, key) do
+      nil -> default
+      value -> value
+    end
   end
 
   defp config_value(%{} = config, key, default) do
@@ -360,4 +361,55 @@ defmodule App.Gateways.Telegram.Handler do
   end
 
   defp config_value(_, _key, default), do: default
+
+  defp telegram_context(chat, from) do
+    sender_name = display_name(from) || display_name(chat)
+
+    %{
+      chat_id: Map.get(chat, "id"),
+      sender_id: Map.get(from, "id"),
+      sender_name: sender_name,
+      channel_name: channel_name(chat, sender_name),
+      metadata: chat_metadata(chat)
+    }
+  end
+
+  defp channel_name(%{"type" => "private"}, sender_name)
+       when is_binary(sender_name) and sender_name != "",
+       do: sender_name
+
+  defp channel_name(%{"title" => title}, _sender_name) when is_binary(title) and title != "",
+    do: title
+
+  defp channel_name(%{"username" => username}, _sender_name)
+       when is_binary(username) and username != "",
+       do: username
+
+  defp channel_name(%{"id" => _chat_id}, sender_name)
+       when is_binary(sender_name) and sender_name != "",
+       do: sender_name
+
+  defp channel_name(%{"id" => chat_id}, _sender_name), do: "Chat #{chat_id}"
+
+  defp chat_metadata(chat) do
+    %{}
+    |> put_metadata("chat_type", Map.get(chat, "type"))
+    |> put_metadata("chat_title", Map.get(chat, "title"))
+    |> put_metadata("chat_username", Map.get(chat, "username"))
+  end
+
+  defp channel_attrs(context) do
+    %{
+      external_chat_id: context.chat_id,
+      external_user_id: context.sender_id,
+      external_username: context.channel_name,
+      metadata: context.metadata
+    }
+  end
+
+  defp sender_id(%{sender_id: nil}), do: nil
+  defp sender_id(%{sender_id: sender_id}), do: to_string(sender_id)
+
+  defp put_metadata(metadata, _key, nil), do: metadata
+  defp put_metadata(metadata, key, value), do: Map.put(metadata, key, value)
 end

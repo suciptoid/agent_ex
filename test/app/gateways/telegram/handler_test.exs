@@ -1,6 +1,7 @@
 defmodule App.Gateways.Telegram.HandlerTest do
   use App.DataCase, async: false
 
+  alias App.Chat
   alias App.Gateways
   alias App.Gateways.Telegram.Handler
 
@@ -189,6 +190,80 @@ defmodule App.Gateways.Telegram.HandlerTest do
 
     assert payload["text"] ==
              "Gateway Agent: Bitcoin \\(BTC\\) terhadap USD hari ini: *$70 993* per BTC\\. 🚀"
+  end
+
+  test "telegram group messages use the group title for the channel and preserve sender names", %{
+    user: user,
+    scope: scope
+  } do
+    provider = provider_fixture(user)
+    agent = agent_fixture(user, %{provider: provider, name: "Gateway Agent"})
+    stub_telegram_api(self())
+
+    {:ok, gateway} =
+      Gateways.create_gateway(scope, %{
+        "name" => "Support Bot",
+        "type" => "telegram",
+        "token" => "telegram-token",
+        "config" => %{
+          "agent_id" => agent.id,
+          "allow_all_users" => true
+        }
+      })
+
+    group_chat_id = -100_204_050_607
+
+    assert {:ok, _stream_pid} =
+             Handler.handle_update(gateway, %{
+               "message" => %{
+                 "chat" => %{
+                   "id" => group_chat_id,
+                   "type" => "supergroup",
+                   "title" => "Ops War Room"
+                 },
+                 "from" => %{"id" => 5678, "first_name" => "Alex"},
+                 "text" => "Need support"
+               }
+             })
+
+    assert_receive {:preloaded_provider_runner_called, streamed_agent, first_messages}
+    assert streamed_agent.id == agent.id
+
+    assert Enum.map(Enum.filter(first_messages, &(&1.role == "user")), &{&1.name, &1.content}) ==
+             [{"Alex", "Need support"}]
+
+    assert_receive {:telegram_send_message, "/bottelegram-token/sendMessage", first_payload}
+    assert first_payload["chat_id"] == to_string(group_chat_id)
+
+    channel = Gateways.get_channel(gateway, group_chat_id)
+    assert channel.external_username == "Ops War Room"
+    assert channel.metadata["chat_type"] == "supergroup"
+    assert channel.metadata["chat_title"] == "Ops War Room"
+
+    chat_room = Chat.get_chat_room!(scope, channel.chat_room_id)
+    assert chat_room.title == "Ops War Room"
+
+    assert {:ok, _stream_pid} =
+             Handler.handle_update(gateway, %{
+               "message" => %{
+                 "chat" => %{
+                   "id" => group_chat_id,
+                   "type" => "supergroup",
+                   "title" => "Ops War Room"
+                 },
+                 "from" => %{"id" => 9012, "first_name" => "Jamie"},
+                 "text" => "Fresh input"
+               }
+             })
+
+    assert_receive {:preloaded_provider_runner_called, next_agent, next_messages}
+    assert next_agent.id == agent.id
+
+    assert Enum.map(Enum.filter(next_messages, &(&1.role == "user")), &{&1.name, &1.content}) ==
+             [{"Alex", "Need support"}, {"Jamie", "Fresh input"}]
+
+    assert_receive {:telegram_send_message, "/bottelegram-token/sendMessage", second_payload}
+    assert second_payload["chat_id"] == to_string(group_chat_id)
   end
 
   defp stub_telegram_api(test_pid) do

@@ -35,9 +35,21 @@ defmodule AppWeb.GatewayLiveTest do
     agent = agent_fixture(user, %{name: "Telegram Support"})
     stub_telegram_webhook(self())
 
+    {:ok, index_view, _html} = live(conn, ~p"/gateways")
+
+    assert {:error, {:live_redirect, %{to: to}}} =
+             index_view
+             |> element("#new-gateway-button")
+             |> render_click()
+
+    assert to == "/gateways/new"
+
     {:ok, live_view, _html} = live(conn, ~p"/gateways/new")
 
+    assert has_element?(live_view, "#gateway-form-page")
     assert has_element?(live_view, "#gateway-form")
+    refute has_element?(live_view, "#gateway-dialog")
+    assert has_element?(live_view, "a", "Back to gateways")
 
     assert has_element?(
              live_view,
@@ -67,25 +79,28 @@ defmodule AppWeb.GatewayLiveTest do
              "#gateway-form input[type=\"checkbox\"][name=\"gateway[config][allow_all_users]\"][value=\"true\"]"
            )
 
-    live_view
-    |> element("#gateway-form")
-    |> render_submit(%{
-      "gateway" => %{
-        "name" => "Support Bot",
-        "type" => "telegram",
-        "token" => "123456:telegram-bot-token",
-        "status" => "active",
-        "config" => %{
-          "agent_id" => agent.id,
-          "allow_all_users" => "false",
-          "welcome_message" => "Hello from Telegram"
+    submit_result =
+      live_view
+      |> element("#gateway-form")
+      |> render_submit(%{
+        "gateway" => %{
+          "name" => "Support Bot",
+          "type" => "telegram",
+          "token" => "123456:telegram-bot-token",
+          "status" => "active",
+          "config" => %{
+            "agent_id" => agent.id,
+            "allow_all_users" => "false",
+            "welcome_message" => "Hello from Telegram"
+          }
         }
-      }
-    })
+      })
 
-    assert_patch(live_view, ~p"/gateways")
+    assert_redirect(live_view, ~p"/gateways")
 
     [gateway] = Gateways.list_gateways(scope)
+
+    {:ok, redirected_view, _html} = follow_redirect(submit_result, conn, ~p"/gateways")
 
     assert gateway.name == "Support Bot"
     assert gateway.type == :telegram
@@ -93,11 +108,58 @@ defmodule AppWeb.GatewayLiveTest do
     assert gateway.config.agent_id == agent.id
     assert gateway.config.allow_all_users == false
     assert gateway.config.welcome_message == "Hello from Telegram"
+    assert has_element?(redirected_view, "#edit-gateway-#{gateway.id}")
 
     assert_received {:telegram_set_webhook, "/bot123456:telegram-bot-token/setWebhook", payload}
     assert payload["url"] == TelegramWebhook.webhook_url(gateway)
     assert payload["secret_token"] == gateway.webhook_secret
     assert payload["allowed_updates"] == ["message", "callback_query"]
+  end
+
+  test "edit gateway opens as a dedicated page and saves changes", %{conn: conn, scope: scope} do
+    stub_telegram_webhook(self())
+
+    {:ok, gateway} =
+      Gateways.create_gateway(scope, %{
+        "name" => "Ops Bot",
+        "type" => "telegram",
+        "token" => "ops-token",
+        "status" => "inactive"
+      })
+
+    {:ok, index_view, _html} = live(conn, ~p"/gateways")
+
+    assert {:error, {:live_redirect, %{to: to}}} =
+             index_view
+             |> element("#edit-gateway-#{gateway.id}")
+             |> render_click()
+
+    assert to == "/gateways/#{gateway.id}/edit"
+
+    {:ok, live_view, _html} = live(conn, ~p"/gateways/#{gateway.id}/edit")
+
+    assert has_element?(live_view, "#gateway-form-page")
+    refute has_element?(live_view, "#gateway-dialog")
+
+    submit_result =
+      live_view
+      |> element("#gateway-form")
+      |> render_submit(%{
+        "gateway" => %{
+          "name" => "Ops Bot Updated",
+          "type" => "telegram",
+          "token" => "ops-token",
+          "status" => "inactive",
+          "config" => %{
+            "allow_all_users" => "true",
+            "welcome_message" => "Hello team"
+          }
+        }
+      })
+
+    assert_redirect(live_view, ~p"/gateways")
+    assert Gateways.get_gateway!(scope, gateway.id).name == "Ops Bot Updated"
+    {:ok, _redirected_view, _html} = follow_redirect(submit_result, conn, ~p"/gateways")
   end
 
   test "gateways appear under agents in the sidebar with consistent nav styling and can be enabled from the list",

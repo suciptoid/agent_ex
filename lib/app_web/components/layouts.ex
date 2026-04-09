@@ -372,11 +372,11 @@ defmodule AppWeb.Layouts do
             <div class="space-y-0.5">
               <div
                 :for={chat <- @sidebar_chat_rooms}
-                class="group/sidebar relative"
+                class="group/sidebar flex items-center gap-2.5 rounded-lg transition-colors hover:bg-accent hover:text-foreground"
               >
                 <.link
                   navigate={~p"/chat/#{chat.id}"}
-                  class="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 pr-10 text-sm text-foreground/65 transition-colors hover:bg-accent hover:text-foreground"
+                  class="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1.5 text-sm text-foreground/65 transition-colors"
                 >
                   <span
                     :if={chat.gateway_linked}
@@ -404,7 +404,7 @@ defmodule AppWeb.Layouts do
                   phx-click="delete-chat-room"
                   phx-value-id={chat.id}
                   data-confirm="Delete this chat?"
-                  class="absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-destructive/10 hover:text-destructive group-hover/sidebar:opacity-100 focus-visible:opacity-100"
+                  class="hidden size-7 flex-shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-accent hover:text-foreground group-hover/sidebar:flex focus-visible:flex focus-visible:bg-accent focus-visible:text-foreground"
                   title="Delete chat"
                   aria-label="Delete chat"
                 >

@@ -400,6 +400,22 @@ defmodule AppWeb.ChatLive.Show do
 
   def streaming_message?(%{status: status}), do: status in [:pending, :streaming]
 
+  def show_streaming_indicator?(message, streaming_message_id, agent_message_streams) do
+    cond do
+      not (assistant_message?(message) and streaming_message?(message)) ->
+        false
+
+      delegated_message?(message) ->
+        delegated_stream_started?(message, agent_message_streams)
+
+      message.id == streaming_message_id ->
+        true
+
+      true ->
+        true
+    end
+  end
+
   def reasoning_effort_options, do: @reasoning_effort_options
 
   def speaker_name(%{role: "user"}), do: "You"
@@ -757,6 +773,29 @@ defmodule AppWeb.ChatLive.Show do
 
   defp current_stream_metadata(socket) do
     build_message_metadata(%{}, socket.assigns.streaming_thinking, [])
+  end
+
+  defp delegated_stream_started?(message, agent_message_streams) do
+    case Map.get(agent_message_streams || %{}, message.id) do
+      nil ->
+        delegated_stream_started_from_message?(message)
+
+      stream_state ->
+        delegated_stream_started_from_state?(stream_state)
+    end
+  end
+
+  defp delegated_stream_started_from_message?(message) do
+    message_has_content?(message) or
+      message_thinking(message) not in [nil, ""] or
+      tool_responses(message) != [] or
+      message.status == :streaming
+  end
+
+  defp delegated_stream_started_from_state?(stream_state) do
+    (stream_state.content || "") != "" or
+      (stream_state.thinking || "") != "" or
+      (stream_state.tool_responses || []) != []
   end
 
   defp clear_agent_stream(socket, message_id) do

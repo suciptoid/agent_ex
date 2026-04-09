@@ -910,12 +910,14 @@ defmodule AppWeb.ChatLiveTest do
       _ = :sys.get_state(live_view.pid)
 
       assert has_element?(live_view, "#message-#{placeholder_message.id}")
+      refute has_element?(live_view, "#message-streaming-#{placeholder_message.id}")
 
       send(live_view.pid, {:agent_message_stream_chunk, placeholder_message.id, "Hello"})
       send(live_view.pid, {:agent_message_stream_chunk, placeholder_message.id, " world"})
       _ = :sys.get_state(live_view.pid)
 
       assert has_element?(live_view, "#message-#{placeholder_message.id}", "Hello world")
+      assert has_element?(live_view, "#message-streaming-#{placeholder_message.id}")
 
       assert {:ok, completed_message} =
                Chat.update_message(placeholder_message, %{

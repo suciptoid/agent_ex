@@ -201,21 +201,6 @@
                     </.accordion>
                   <% end %>
 
-                  <%= if assistant_message?(message) and streaming_message?(message) do %>
-                    <div
-                      id={"message-streaming-#{message.id}"}
-                      class="inline-flex max-w-fit items-center gap-2 rounded-full border border-border/60 bg-muted/40 px-3 py-1 text-xs text-muted-foreground"
-                    >
-                      <span class="inline-block size-1.5 rounded-full bg-primary animate-pulse">
-                      </span>
-                      <%= if message.status == :pending do %>
-                        Thinking...
-                      <% else %>
-                        Streaming...
-                      <% end %>
-                    </div>
-                  <% end %>
-
                   <%= if message_has_content?(message) do %>
                     <%= if user_message?(message) do %>
                       <p
@@ -228,6 +213,26 @@
                         phx-no-format
                       >{raw(render_markdown(message.content))}</div>
                     <% end %>
+                  <% end %>
+
+                  <%= if show_streaming_indicator?(
+                           message,
+                           @streaming_message_id,
+                           @agent_message_streams
+                         ) do %>
+                    <div
+                      id={"message-streaming-#{message.id}"}
+                      class="inline-flex max-w-fit py-1 text-muted-foreground"
+                    >
+                      <span
+                        class="chat-streaming-dots inline-flex items-center gap-1"
+                        aria-hidden="true"
+                      >
+                        <span class="chat-streaming-dot size-1.5 rounded-full bg-current"></span>
+                        <span class="chat-streaming-dot size-1.5 rounded-full bg-current"></span>
+                        <span class="chat-streaming-dot size-1.5 rounded-full bg-current"></span>
+                      </span>
+                    </div>
                   <% end %>
                 </div>
               </div>
@@ -291,12 +296,33 @@
         this.isNearLatest = true
         this.messagesRevision = this.readMessagesRevision()
         this._programmaticScroll = false
+        this.lastScrollTop = this.el.scrollTop
+        this.autoscrollPaused = false
+        this.touchStartY = null
         this.scrollBtn = document.getElementById("scroll-to-bottom-btn")
         this.pendingAccordionAnchor = null
 
         this.onScroll = () => {
           if (this._programmaticScroll) return
           this.checkScrollPosition()
+        }
+
+        this.onWheel = (event) => {
+          if (event.deltaY < 0) {
+            this.pauseAutoscroll()
+          }
+        }
+
+        this.onTouchStart = (event) => {
+          this.touchStartY = event.touches?.[0]?.clientY || null
+        }
+
+        this.onTouchMove = (event) => {
+          const currentY = event.touches?.[0]?.clientY
+
+          if (this.touchStartY !== null && currentY !== undefined && currentY - this.touchStartY > 4) {
+            this.pauseAutoscroll()
+          }
         }
 
         this.onSummaryClick = (event) => {
@@ -335,11 +361,14 @@
         }
 
         this.onScrollButtonClick = () => {
-          this.isNearLatest = true
+          this.resumeAutoscroll()
           this.scrollToLatest({ behavior: "smooth" })
         }
 
         this.el.addEventListener("scroll", this.onScroll)
+        this.el.addEventListener("wheel", this.onWheel, { passive: true })
+        this.el.addEventListener("touchstart", this.onTouchStart, { passive: true })
+        this.el.addEventListener("touchmove", this.onTouchMove, { passive: true })
         this.el.addEventListener("click", this.onSummaryClick)
         this.el.addEventListener("toggle", this.onAccordionToggle, true)
         if (this.scrollBtn) {
@@ -347,7 +376,7 @@
         }
 
         this.handleEvent("scroll-to-bottom", () => {
-          this.isNearLatest = true
+          this.resumeAutoscroll()
           window.requestAnimationFrame(() => this.scrollToLatest())
         })
 
@@ -361,7 +390,7 @@
         const messagesChanged = this.messagesRevision !== this.readMessagesRevision()
         this.messagesRevision = this.readMessagesRevision()
 
-        if (messagesChanged && this.isNearLatest) {
+        if (messagesChanged && this.isNearLatest && !this.autoscrollPaused) {
           window.requestAnimationFrame(() => {
             this.withProgrammaticScroll(() => this.scrollToLatest())
           })
@@ -372,6 +401,9 @@
 
       destroyed() {
         this.el.removeEventListener("scroll", this.onScroll)
+        this.el.removeEventListener("wheel", this.onWheel, { passive: true })
+        this.el.removeEventListener("touchstart", this.onTouchStart, { passive: true })
+        this.el.removeEventListener("touchmove", this.onTouchMove, { passive: true })
         this.el.removeEventListener("click", this.onSummaryClick)
         this.el.removeEventListener("toggle", this.onAccordionToggle, true)
         if (this.scrollBtn) {
@@ -384,7 +416,13 @@
         const distanceFromBottom =
           this.el.scrollHeight - this.el.clientHeight - this.el.scrollTop
 
-        this.isNearLatest = distanceFromBottom <= threshold
+        if (distanceFromBottom <= threshold) {
+          this.resumeAutoscroll()
+        } else {
+          this.pauseAutoscroll()
+        }
+
+        this.lastScrollTop = this.el.scrollTop
         this.updateButtonVisibility()
       },
 
@@ -412,8 +450,19 @@
           top: this.el.scrollHeight,
           behavior: options.behavior || "auto"
         })
-        this.isNearLatest = true
+        this.lastScrollTop = this.el.scrollHeight
+        this.resumeAutoscroll()
         this.updateButtonVisibility()
+      },
+
+      pauseAutoscroll() {
+        this.autoscrollPaused = true
+        this.isNearLatest = false
+      },
+
+      resumeAutoscroll() {
+        this.autoscrollPaused = false
+        this.isNearLatest = true
       }
     }
   </script>

@@ -329,11 +329,24 @@ defmodule App.Gateways.Telegram.Handler do
   defp telegram_reply_prompt do
     """
     You are replying through Telegram. Use only Telegram Bot API MarkdownV2.
-    Never use GitHub/CommonMark tables, pipe-delimited columns, or markdown separators like |---|.
-    Never use HTML and never use GitHub-style bold like **bold**.
-    If content is tabular or structured, rewrite it as short bullet points or Label: value lines.
-    Keep replies compatible with Telegram Bot API parse_mode=MarkdownV2.
-    If a format is not explicitly supported by Telegram MarkdownV2, use plain text instead.
+    Allowed formatting from Telegram docs:
+    - *bold text*
+    - _italic text_
+    - __underline__
+    - ~strikethrough~
+    - ||spoiler||
+    - `inline code`
+    - fenced code blocks with triple backticks
+    - blockquotes using lines that start with >
+
+    Important Telegram MarkdownV2 rules:
+    - Never use HTML.
+    - Never use GitHub/CommonMark tables, pipe-delimited columns, or markdown separators like |---|.
+    - Never use GitHub-style bold like **bold**; use *bold* instead.
+    - Prefer simple formatting. Use bullet lines starting with the literal bullet character •, not markdown list syntax.
+    - If content is structured or tabular, rewrite it as short bullet points or Label: value lines.
+    - Outside supported formatting entities, Telegram requires these characters to be escaped: _ * [ ] ( ) ~ ` > # + - = | { } . !
+    - If a format is not explicitly supported by Telegram MarkdownV2, use plain text instead.
     """
     |> String.trim()
   end

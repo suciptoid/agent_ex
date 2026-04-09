@@ -32,3 +32,12 @@ By: gpt-5.4 on GitHub Copilot
 - Added `test/app/gateways/telegram/client_test.exs` to cover both the table rewrite path and double-asterisk bold normalization.
 
 By: gpt-5.4 on GitHub Copilot
+
+## MarkdownV2 Sanitizing
+
+- Read Telegram's `formatting-options` and `MarkdownV2 style` docs to align the gateway with supported entities and escaping rules.
+- Changed the Telegram client to sanitize MarkdownV2 before the first send, preserving supported markers like `*bold*`, `_italic_`, `__underline__`, `~strikethrough~`, `||spoiler||`, inline code, fenced code blocks, and blockquotes while escaping surrounding reserved characters.
+- Added `Logger.warning/1` when Telegram rejects a MarkdownV2 payload and the client falls back to plain text.
+- Expanded Telegram client coverage with a screenshot-shaped regression test proving bold survives while punctuation is escaped, plus a warning/fallback test for markdown rejection.
+
+By: gpt-5.4 on GitHub Copilot

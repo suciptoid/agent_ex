@@ -3,7 +3,25 @@ defmodule App.Gateways.Telegram.Client do
   Telegram Bot API client using Req.
   """
 
+  require Logger
+
   @markdown_v2_entity_error "can't parse entities"
+
+  @sentinel_bold_open <<0xE000::utf8>>
+  @sentinel_bold_close <<0xE001::utf8>>
+  @sentinel_italic_open <<0xE002::utf8>>
+  @sentinel_italic_close <<0xE003::utf8>>
+  @sentinel_underline_open <<0xE004::utf8>>
+  @sentinel_underline_close <<0xE005::utf8>>
+  @sentinel_strike_open <<0xE006::utf8>>
+  @sentinel_strike_close <<0xE007::utf8>>
+  @sentinel_spoiler_open <<0xE008::utf8>>
+  @sentinel_spoiler_close <<0xE009::utf8>>
+  @sentinel_code_open <<0xE00A::utf8>>
+  @sentinel_code_close <<0xE00B::utf8>>
+  @sentinel_pre_open <<0xE00C::utf8>>
+  @sentinel_pre_close <<0xE00D::utf8>>
+  @sentinel_blockquote_open <<0xE00E::utf8>>
 
   defstruct [:token, :base_url]
 
@@ -51,14 +69,21 @@ defmodule App.Gateways.Telegram.Client do
       |> Map.drop([:parse_mode, "parse_mode"])
       |> then(&send_message(client, chat_id, markdown_table_to_plain_text(text), &1))
     else
-      params = Map.merge(%{chat_id: chat_id, text: text, parse_mode: "MarkdownV2"}, extra)
+      formatted_text = sanitize_markdown_v2(text)
+
+      params =
+        Map.merge(%{chat_id: chat_id, text: formatted_text, parse_mode: "MarkdownV2"}, extra)
 
       case request(client, "sendMessage", params) do
         {:error, {:telegram_api_error, 400, body}} = error ->
           if markdown_v2_entity_error?(body) do
-            params
-            |> Map.put(:text, escape_markdown_v2(text))
-            |> then(&request(client, "sendMessage", &1))
+            Logger.warning(
+              "Telegram rejected MarkdownV2 payload, falling back to plain text: #{markdown_error_description(body)}"
+            )
+
+            extra
+            |> Map.drop([:parse_mode, "parse_mode"])
+            |> then(&send_message(client, chat_id, strip_basic_markdown(text), &1))
           else
             error
           end
@@ -110,9 +135,26 @@ defmodule App.Gateways.Telegram.Client do
     |> String.replace("\r\n", "\n")
     |> String.replace(~r/\*\*(.+?)\*\*/us, "*\\1*")
     |> String.replace(~r/^\s{0,3}\#{1,6}\s+(.+)$/m, "*\\1*")
+    |> String.replace(~r/^(?:[-+*])\s+/m, "• ")
   end
 
   defp normalize_telegram_markdown(text), do: text
+
+  defp sanitize_markdown_v2(text) when is_binary(text) do
+    text
+    |> preserve_preformatted_blocks()
+    |> preserve_inline_code()
+    |> preserve_spoilers()
+    |> preserve_underline()
+    |> preserve_bold()
+    |> preserve_strikethrough()
+    |> preserve_italic()
+    |> preserve_blockquotes()
+    |> escape_markdown_v2()
+    |> restore_preserved_entities()
+  end
+
+  defp sanitize_markdown_v2(text), do: text
 
   defp contains_markdown_table?(text) when is_binary(text) do
     text
@@ -155,6 +197,83 @@ defmodule App.Gateways.Telegram.Client do
   end
 
   defp markdown_v2_entity_error?(_body), do: false
+
+  defp markdown_error_description(%{"description" => description}) when is_binary(description),
+    do: description
+
+  defp markdown_error_description(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, %{"description" => description}} when is_binary(description) -> description
+      _other -> body
+    end
+  end
+
+  defp markdown_error_description(body), do: inspect(body)
+
+  defp preserve_preformatted_blocks(text) do
+    Regex.replace(~r/```([A-Za-z0-9_+-]*)\n([\s\S]*?)```/u, text, fn _, language, body ->
+      @sentinel_pre_open <> language <> "\n" <> body <> @sentinel_pre_close
+    end)
+  end
+
+  defp preserve_inline_code(text) do
+    Regex.replace(~r/`([^`\n]+)`/u, text, fn _, body ->
+      @sentinel_code_open <> body <> @sentinel_code_close
+    end)
+  end
+
+  defp preserve_spoilers(text) do
+    Regex.replace(~r/\|\|(.+?)\|\|/us, text, fn _, body ->
+      @sentinel_spoiler_open <> body <> @sentinel_spoiler_close
+    end)
+  end
+
+  defp preserve_underline(text) do
+    Regex.replace(~r/__([^\n].*?)__/us, text, fn _, body ->
+      @sentinel_underline_open <> body <> @sentinel_underline_close
+    end)
+  end
+
+  defp preserve_bold(text) do
+    Regex.replace(~r/\*([^\s*](?:.*?[^\s*])?)\*/us, text, fn _, body ->
+      @sentinel_bold_open <> body <> @sentinel_bold_close
+    end)
+  end
+
+  defp preserve_strikethrough(text) do
+    Regex.replace(~r/~([^\n].*?)~/us, text, fn _, body ->
+      @sentinel_strike_open <> body <> @sentinel_strike_close
+    end)
+  end
+
+  defp preserve_italic(text) do
+    Regex.replace(~r/(?<!_)_([^\s_](?:.*?[^\s_])?)_(?!_)/us, text, fn _, body ->
+      @sentinel_italic_open <> body <> @sentinel_italic_close
+    end)
+  end
+
+  defp preserve_blockquotes(text) do
+    Regex.replace(~r/^>\s?/m, text, @sentinel_blockquote_open)
+  end
+
+  defp restore_preserved_entities(text) do
+    text
+    |> String.replace(@sentinel_pre_open, "```")
+    |> String.replace(@sentinel_pre_close, "```")
+    |> String.replace(@sentinel_code_open, "`")
+    |> String.replace(@sentinel_code_close, "`")
+    |> String.replace(@sentinel_spoiler_open, "||")
+    |> String.replace(@sentinel_spoiler_close, "||")
+    |> String.replace(@sentinel_underline_open, "__")
+    |> String.replace(@sentinel_underline_close, "__")
+    |> String.replace(@sentinel_bold_open, "*")
+    |> String.replace(@sentinel_bold_close, "*")
+    |> String.replace(@sentinel_strike_open, "~")
+    |> String.replace(@sentinel_strike_close, "~")
+    |> String.replace(@sentinel_italic_open, "_")
+    |> String.replace(@sentinel_italic_close, "_")
+    |> String.replace(@sentinel_blockquote_open, ">")
+  end
 
   defp replace_table_blocks([], [], acc), do: acc
   defp replace_table_blocks([], table_block, acc), do: acc ++ render_table_block(table_block)

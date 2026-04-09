@@ -3,6 +3,7 @@ defmodule App.ChatTest do
 
   alias App.Chat
   alias App.Chat.Orchestrator
+  alias App.Chat.ContextBuilder
 
   import App.AgentsFixtures
   import App.ChatFixtures
@@ -276,6 +277,84 @@ defmodule App.ChatTest do
       assert assistant_message.id == final_assistant_message.id
       assert final_assistant_message.metadata["thinking"] == "Summarizing the fetched payload"
     end
+
+    test "retries with forced checkpoint compaction after context overflow", %{
+      scope: scope,
+      user: user,
+      provider: provider
+    } do
+      previous_runner = Application.get_env(:app, :agent_runner)
+      previous_compaction = Application.get_env(:app, :chat_compaction)
+      previous_builder_config = Application.get_env(:app, ContextBuilder)
+      previous_runner_config = Application.get_env(:app, App.TestSupport.OverflowAwareRunnerStub)
+      previous_compaction_config = Application.get_env(:app, App.TestSupport.ChatCompactionStub)
+
+      Application.put_env(:app, :agent_runner, App.TestSupport.OverflowAwareRunnerStub)
+      Application.put_env(:app, :chat_compaction, App.TestSupport.ChatCompactionStub)
+
+      Application.put_env(:app, ContextBuilder,
+        raw_tail_tokens: 1,
+        force_raw_tail_tokens: 1,
+        checkpoint_source_tokens: 200,
+        force_checkpoint_source_tokens: 200
+      )
+
+      Application.put_env(:app, App.TestSupport.OverflowAwareRunnerStub, notify_pid: self())
+      Application.put_env(:app, App.TestSupport.ChatCompactionStub, notify_pid: self())
+
+      on_exit(fn ->
+        restore_app_env(:agent_runner, previous_runner)
+        restore_app_env(:chat_compaction, previous_compaction)
+        restore_app_env(ContextBuilder, previous_builder_config)
+        restore_app_env(App.TestSupport.OverflowAwareRunnerStub, previous_runner_config)
+        restore_app_env(App.TestSupport.ChatCompactionStub, previous_compaction_config)
+      end)
+
+      agent = agent_fixture(user, %{provider: provider, name: "Lead Agent"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Overflow Room",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      _old_user =
+        message_fixture(room, %{role: "user", content: String.duplicate("Earlier question ", 12)})
+
+      _old_assistant =
+        message_fixture(room, %{
+          role: "assistant",
+          content: String.duplicate("Earlier answer ", 12),
+          agent_id: agent.id
+        })
+
+      assert {:ok, assistant_message} = Chat.send_message(scope, room, "Need the latest answer")
+
+      assert_receive {:overflow_runner_call, :sync, first_attempt_messages}
+      refute Enum.any?(first_attempt_messages, &(&1.role == "checkpoint"))
+
+      assert_receive {:chat_compaction_called, _latest_checkpoint, compaction_messages}
+      assert Enum.map(compaction_messages, & &1.role) == ["user", "assistant"]
+
+      assert_receive {:overflow_runner_call, :sync, second_attempt_messages}
+      assert Enum.any?(second_attempt_messages, &(&1.role == "checkpoint"))
+
+      persisted_messages = Chat.list_messages(room)
+      checkpoint_message = Enum.find(persisted_messages, &(&1.role == "checkpoint"))
+
+      assert assistant_message.content == "Lead Agent: Need the latest answer"
+      assert checkpoint_message
+      assert checkpoint_message.metadata["up_to_position"] == 2
+
+      assert Enum.map(persisted_messages, & &1.role) == [
+               "user",
+               "assistant",
+               "user",
+               "checkpoint",
+               "assistant"
+             ]
+    end
   end
 
   describe "stream_message/3" do
@@ -407,6 +486,76 @@ defmodule App.ChatTest do
       assert final_assistant_message.role == "assistant"
       assert final_assistant_message.status == :completed
       assert final_assistant_message.position == 5
+    end
+
+    test "retries streaming after context overflow by inserting a checkpoint", %{
+      user: user,
+      provider: provider
+    } do
+      previous_runner = Application.get_env(:app, :agent_runner)
+      previous_compaction = Application.get_env(:app, :chat_compaction)
+      previous_builder_config = Application.get_env(:app, ContextBuilder)
+      previous_runner_config = Application.get_env(:app, App.TestSupport.OverflowAwareRunnerStub)
+      previous_compaction_config = Application.get_env(:app, App.TestSupport.ChatCompactionStub)
+
+      Application.put_env(:app, :agent_runner, App.TestSupport.OverflowAwareRunnerStub)
+      Application.put_env(:app, :chat_compaction, App.TestSupport.ChatCompactionStub)
+
+      Application.put_env(:app, ContextBuilder,
+        raw_tail_tokens: 1,
+        force_raw_tail_tokens: 1,
+        checkpoint_source_tokens: 200,
+        force_checkpoint_source_tokens: 200
+      )
+
+      Application.put_env(:app, App.TestSupport.OverflowAwareRunnerStub, notify_pid: self())
+      Application.put_env(:app, App.TestSupport.ChatCompactionStub, notify_pid: self())
+
+      on_exit(fn ->
+        restore_app_env(:agent_runner, previous_runner)
+        restore_app_env(:chat_compaction, previous_compaction)
+        restore_app_env(ContextBuilder, previous_builder_config)
+        restore_app_env(App.TestSupport.OverflowAwareRunnerStub, previous_runner_config)
+        restore_app_env(App.TestSupport.ChatCompactionStub, previous_compaction_config)
+      end)
+
+      agent = agent_fixture(user, %{provider: provider, name: "Lead Agent"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Overflow Stream",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      _old_user =
+        message_fixture(room, %{role: "user", content: String.duplicate("Earlier question ", 12)})
+
+      _old_assistant =
+        message_fixture(room, %{
+          role: "assistant",
+          content: String.duplicate("Earlier answer ", 12),
+          agent_id: agent.id
+        })
+
+      assert {:ok, _current_user} =
+               Chat.create_message(room, %{role: "user", content: "Need a streamed retry"})
+
+      messages = Chat.list_messages(room)
+
+      assert {:ok, %{content: content, agent_id: agent_id}} =
+               Orchestrator.stream_message(room, messages, self())
+
+      assert_receive {:overflow_runner_call, :streaming, first_attempt_messages}
+      refute Enum.any?(first_attempt_messages, &(&1.role == "checkpoint"))
+
+      assert_receive {:overflow_runner_call, :streaming, second_attempt_messages}
+      assert Enum.any?(second_attempt_messages, &(&1.role == "checkpoint"))
+
+      assert_receive {:stream_chunk, _token}
+      assert content == "Lead Agent: Need a streamed retry"
+      assert agent_id == agent.id
+      assert Enum.any?(Chat.list_messages(room), &(&1.role == "checkpoint"))
     end
   end
 

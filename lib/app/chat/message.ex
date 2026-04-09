@@ -5,7 +5,7 @@ defmodule App.Chat.Message do
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
-  @roles ~w(user assistant system tool)
+  @roles ~w(user assistant system tool checkpoint)
   @statuses [:pending, :streaming, :error, :completed]
   @incomplete_statuses [:pending, :streaming]
   @running_statuses [:pending, :streaming]
@@ -88,6 +88,9 @@ defmodule App.Chat.Message do
     |> Enum.map(&tool_call_id/1)
     |> Enum.reject(&is_nil/1)
   end
+
+  def checkpoint?(%__MODULE__{role: "checkpoint"}), do: true
+  def checkpoint?(%__MODULE__{}), do: false
 
   defp validate_content_required(changeset) do
     status = get_field(changeset, :status, :completed)

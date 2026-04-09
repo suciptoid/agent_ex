@@ -6,7 +6,7 @@ defmodule App.Chat.Orchestrator do
   require Logger
 
   alias App.Chat
-  alias App.Chat.{ChatRoom, ChatRoomAgent, Message}
+  alias App.Chat.{ChatRoom, ChatRoomAgent, ContextBuilder, Message}
 
   def send_message(_scope, %ChatRoom{} = chat_room, content) when is_binary(content) do
     content = String.trim(content)
@@ -33,7 +33,7 @@ defmodule App.Chat.Orchestrator do
 
         maybe_seed_initial_title(chat_room, messages, callbacks)
 
-        case agent_runner().run(agent, messages, run_opts) do
+        case run_sync_with_context_control(chat_room, agent, messages, run_opts) do
           {:ok, result} ->
             assistant_content = result.content || "The agent returned an empty response."
 
@@ -70,7 +70,13 @@ defmodule App.Chat.Orchestrator do
 
       maybe_seed_initial_title(chat_room, messages, callbacks)
 
-      case agent_runner().run_streaming(agent, messages, callbacks[:recipient], run_opts) do
+      case run_streaming_with_context_control(
+             chat_room,
+             agent,
+             messages,
+             callbacks[:recipient],
+             run_opts
+           ) do
         {:ok, result} ->
           {:ok,
            %{
@@ -299,7 +305,13 @@ defmodule App.Chat.Orchestrator do
       end
     ]
 
-    case agent_runner().run_streaming(target_agent, sub_messages, nil, stream_opts) do
+    case run_streaming_with_context_control(
+           chat_room,
+           target_agent,
+           sub_messages,
+           nil,
+           stream_opts
+         ) do
       {:ok, result} ->
         metadata =
           delegated_message_metadata(
@@ -473,6 +485,146 @@ defmodule App.Chat.Orchestrator do
   defp tool_call_id(_tool_call), do: nil
 
   defp blank?(value), do: value in [nil, ""]
+
+  defp run_sync_with_context_control(%ChatRoom{} = chat_room, agent, messages, run_opts) do
+    run_with_context_control(chat_room, agent, messages, run_opts, fn prepared_messages ->
+      agent_runner().run(agent, prepared_messages, run_opts)
+    end)
+  end
+
+  defp run_streaming_with_context_control(
+         %ChatRoom{} = chat_room,
+         agent,
+         messages,
+         recipient,
+         run_opts
+       ) do
+    run_with_context_control(chat_room, agent, messages, run_opts, fn prepared_messages ->
+      agent_runner().run_streaming(agent, prepared_messages, recipient, run_opts)
+    end)
+  end
+
+  defp run_with_context_control(%ChatRoom{} = chat_room, agent, messages, run_opts, runner_fun) do
+    with {:ok, prepared_messages} <-
+           prepare_context_messages(chat_room, agent, messages, run_opts, force_compaction: false),
+         result <- runner_fun.(prepared_messages) do
+      case result do
+        {:error, reason} ->
+          if context_window_error?(reason) do
+            retry_with_forced_compaction(chat_room, agent, messages, run_opts, runner_fun, reason)
+          else
+            {:error, reason}
+          end
+
+        other ->
+          other
+      end
+    end
+  end
+
+  defp retry_with_forced_compaction(
+         %ChatRoom{} = chat_room,
+         agent,
+         messages,
+         run_opts,
+         runner_fun,
+         initial_reason
+       ) do
+    Logger.warning(
+      "[Orchestrator] Context window overflow detected for room #{chat_room.id}; retrying with forced compaction: #{inspect(initial_reason)}"
+    )
+
+    :telemetry.execute(
+      [:app, :chat, :context, :overflow_retry],
+      %{count: 1},
+      %{
+        chat_room_id: chat_room.id,
+        agent_id: agent_id(agent),
+        reason: inspect(initial_reason)
+      }
+    )
+
+    with {:ok, prepared_messages} <-
+           prepare_context_messages(chat_room, agent, messages, run_opts, force_compaction: true),
+         result <- runner_fun.(prepared_messages) do
+      case result do
+        {:error, reason} ->
+          if context_window_error?(reason) do
+            {:error, overflow_retry_error()}
+          else
+            {:error, reason}
+          end
+
+        other ->
+          other
+      end
+    else
+      {:error, reason} ->
+        Logger.error(
+          "[Orchestrator] Failed to prepare forced-compaction context: #{inspect(reason)}"
+        )
+
+        {:error, overflow_retry_error()}
+    end
+  end
+
+  defp prepare_context_messages(%ChatRoom{} = chat_room, agent, messages, run_opts, opts) do
+    extra_system_prompt = Keyword.get(run_opts, :extra_system_prompt, "")
+    force_compaction? = Keyword.get(opts, :force_compaction, false)
+
+    {:ok, %{messages: prepared_messages, estimated_tokens: estimated_tokens}} =
+      ContextBuilder.prepare(chat_room, agent, messages,
+        extra_system_prompt: extra_system_prompt,
+        force_compaction: force_compaction?
+      )
+
+    Logger.debug(
+      "[Orchestrator] Prepared #{length(prepared_messages)} prompt messages for #{chat_room.id} (~#{estimated_tokens} tokens)"
+    )
+
+    :telemetry.execute(
+      [:app, :chat, :context, :prepared],
+      %{
+        estimated_tokens: estimated_tokens,
+        message_count: length(prepared_messages),
+        checkpoint_count: Enum.count(prepared_messages, &(&1.role == "checkpoint"))
+      },
+      %{
+        chat_room_id: chat_room.id,
+        agent_id: agent_id(agent),
+        force_compaction: force_compaction?
+      }
+    )
+
+    {:ok, prepared_messages}
+  end
+
+  defp context_window_error?(%{reason: reason}), do: context_window_error?(reason)
+  defp context_window_error?(%{message: message}), do: context_window_error?(message)
+
+  defp context_window_error?(reason) when is_binary(reason) do
+    normalized = String.downcase(reason)
+
+    Enum.any?(
+      [
+        "maximum context length",
+        "context length",
+        "context window",
+        "input is too long",
+        "prompt is too long"
+      ],
+      &String.contains?(normalized, &1)
+    )
+  end
+
+  defp context_window_error?(reason), do: reason |> inspect() |> context_window_error?()
+
+  defp agent_id(%{id: agent_id}), do: agent_id
+  defp agent_id(_agent), do: nil
+
+  defp overflow_retry_error do
+    "Conversation exceeded the model context window even after compacting older history. Start a new chat or trim earlier tool-heavy turns."
+  end
 
   defp normalize_stream_callbacks(recipient) when is_pid(recipient) do
     [

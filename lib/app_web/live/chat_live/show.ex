@@ -542,6 +542,7 @@ defmodule AppWeb.ChatLive.Show do
   end
 
   def visible_message?(%{role: "tool"}), do: false
+  def visible_message?(%{role: "checkpoint"}), do: false
 
   def visible_message?(message) do
     not assistant_message?(message) or

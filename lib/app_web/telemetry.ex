@@ -75,6 +75,16 @@ defmodule AppWeb.Telemetry do
           "The time the connection spent waiting before being checked out for the query"
       ),
 
+      # Chat context compaction metrics
+      summary("app.chat.context.prepared.estimated_tokens"),
+      summary("app.chat.context.prepared.message_count"),
+      sum("app.chat.context.prepared.checkpoint_count"),
+      sum("app.chat.context.checkpoint.count"),
+      summary("app.chat.context.checkpoint.estimated_tokens_before"),
+      summary("app.chat.context.checkpoint.estimated_tokens_after"),
+      summary("app.chat.context.checkpoint.compacted_message_count"),
+      sum("app.chat.context.overflow_retry.count"),
+
       # VM Metrics
       summary("vm.memory.total", unit: {:byte, :kilobyte}),
       summary("vm.total_run_queue_lengths.total"),

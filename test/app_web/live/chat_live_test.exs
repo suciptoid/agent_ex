@@ -138,6 +138,36 @@ defmodule AppWeb.ChatLiveTest do
       assert has_element?(live_view, "#sidebar-chat-loading-#{room.id}")
     end
 
+    test "does not render checkpoint messages in the visible transcript", %{
+      conn: conn,
+      user: user
+    } do
+      provider = provider_fixture(user)
+      agent = agent_fixture(user, %{provider: provider, name: "Checkpoint Agent"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Checkpoint Room",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      user_message = message_fixture(room, %{role: "user", content: "Visible message"})
+
+      checkpoint_message =
+        message_fixture(room, %{
+          role: "checkpoint",
+          content: "Checkpoint summary should stay hidden",
+          agent_id: agent.id,
+          metadata: %{"up_to_position" => user_message.position}
+        })
+
+      {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
+
+      assert has_element?(live_view, "#message-#{user_message.id}")
+      refute has_element?(live_view, "#message-#{checkpoint_message.id}")
+    end
+
     test "shows reasoning controls for Gemini models and forwards the selected effort", %{
       conn: conn,
       user: user,

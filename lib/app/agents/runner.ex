@@ -7,6 +7,7 @@ defmodule App.Agents.Runner do
 
   alias App.Agents.Agent
   alias App.Agents.Runner.DoomLoop
+  alias App.Chat.ContextBuilder
   alias App.Chat.Message
   alias App.Providers.Provider
 
@@ -187,7 +188,7 @@ defmodule App.Agents.Runner do
     messages =
       [ReqLLM.Context.system(system_prompt)] ++
         (messages
-         |> Enum.flat_map(&expand_history_message/1)
+         |> ContextBuilder.canonical_messages()
          |> Enum.map(&to_req_llm_message/1))
 
     ReqLLM.Context.new(messages)
@@ -197,7 +198,8 @@ defmodule App.Agents.Runner do
     req_llm_message(role, content,
       name: message.name,
       tool_call_id: message.tool_call_id,
-      tool_calls: Message.tool_calls(message)
+      tool_calls: Message.tool_calls(message),
+      metadata: message.metadata || %{}
     )
   end
 
@@ -205,7 +207,8 @@ defmodule App.Agents.Runner do
     req_llm_message(role, message_content(message),
       name: Map.get(message, :name) || Map.get(message, "name"),
       tool_call_id: Map.get(message, :tool_call_id) || Map.get(message, "tool_call_id"),
-      tool_calls: message_tool_calls(message)
+      tool_calls: message_tool_calls(message),
+      metadata: Map.get(message, :metadata) || Map.get(message, "metadata") || %{}
     )
   end
 
@@ -217,6 +220,7 @@ defmodule App.Agents.Runner do
   end
 
   defp req_llm_message("system", content, _opts), do: ReqLLM.Context.system(content || "")
+  defp req_llm_message("checkpoint", content, _opts), do: ReqLLM.Context.system(content || "")
 
   defp req_llm_message("tool", content, opts) do
     tool_call_id = Keyword.get(opts, :tool_call_id) || ""
@@ -391,86 +395,11 @@ defmodule App.Agents.Runner do
   defp normalize_metadata(nil), do: nil
   defp normalize_metadata(value), do: value |> Jason.encode!() |> Jason.decode!()
 
-  defp expand_history_message(%Message{role: "assistant"} = message) do
-    tool_call_turns = Message.tool_call_turns(message)
-
-    if tool_call_turns == [] do
-      [message]
-    else
-      tool_messages = history_tool_messages(message)
-      tool_messages_by_call_id = Enum.group_by(tool_messages, &tool_call_message_id/1)
-
-      {expanded_turns, used_tool_call_ids} =
-        Enum.map_reduce(tool_call_turns, MapSet.new(), fn tool_call_turn, used_ids ->
-          tool_calls = turn_tool_calls(tool_call_turn)
-
-          related_tool_messages =
-            tool_calls
-            |> Enum.flat_map(fn tool_call ->
-              Map.get(tool_messages_by_call_id, tool_call_id(tool_call), [])
-            end)
-
-          updated_used_ids =
-            Enum.reduce(related_tool_messages, used_ids, fn related_message, acc ->
-              MapSet.put(acc, tool_call_message_id(related_message))
-            end)
-
-          {[build_tool_call_turn_message(tool_call_turn) | related_tool_messages],
-           updated_used_ids}
-        end)
-
-      extra_tool_messages =
-        Enum.reject(tool_messages, fn tool_message ->
-          MapSet.member?(used_tool_call_ids, tool_call_message_id(tool_message))
-        end)
-
-      List.flatten(expanded_turns) ++ extra_tool_messages ++ [message]
-    end
-  end
-
-  defp expand_history_message(%Message{} = message), do: [message]
-  defp expand_history_message(%{} = message), do: [message]
-
-  defp history_tool_messages(%Message{tool_messages: tool_messages})
-       when is_list(tool_messages) and tool_messages != [],
-       do: tool_messages
-
-  defp history_tool_messages(%Message{} = message) do
-    Enum.map(Message.tool_responses(message), &build_virtual_tool_message/1)
-  end
-
   defp build_tool_call_turn(text, thinking, tool_calls) do
     %{}
     |> maybe_put_map_value("content", blank_to_nil(text))
     |> maybe_put_map_value("thinking", blank_to_nil(thinking))
     |> Map.put("tool_calls", normalize_metadata(tool_calls) || [])
-  end
-
-  defp build_tool_call_turn_message(tool_call_turn) do
-    %{
-      role: "assistant",
-      content: turn_content(tool_call_turn),
-      tool_calls: turn_tool_calls(tool_call_turn)
-    }
-  end
-
-  defp build_virtual_tool_message(tool_response) do
-    %{
-      role: "tool",
-      content: Map.get(tool_response, "content"),
-      name: Map.get(tool_response, "name"),
-      tool_call_id: Map.get(tool_response, "id")
-    }
-  end
-
-  defp turn_content(%{} = tool_call_turn) do
-    Map.get(tool_call_turn, "content") || Map.get(tool_call_turn, :content)
-  end
-
-  defp turn_tool_calls(%{} = tool_call_turn) do
-    tool_call_turn
-    |> Map.get("tool_calls", Map.get(tool_call_turn, :tool_calls, []))
-    |> List.wrap()
   end
 
   defp message_tool_calls(%{} = message) do
@@ -481,14 +410,6 @@ defmodule App.Agents.Runner do
 
   defp message_content(%{} = message),
     do: Map.get(message, :content) || Map.get(message, "content")
-
-  defp tool_call_message_id(%Message{} = message), do: message.tool_call_id
-
-  defp tool_call_message_id(%{} = message),
-    do: Map.get(message, :tool_call_id) || Map.get(message, "tool_call_id")
-
-  defp tool_call_id(%{} = tool_call), do: Map.get(tool_call, :id) || Map.get(tool_call, "id")
-  defp tool_call_id(_tool_call), do: nil
 
   defp maybe_put_map_value(map, _key, nil), do: map
   defp maybe_put_map_value(map, key, value), do: Map.put(map, key, value)

@@ -79,6 +79,37 @@ defmodule App.ChatTest do
       assert loading_entry.loading
       refute idle_entry.loading
     end
+
+    test "marks rooms linked to gateway channels", %{scope: scope, user: user, agent: agent} do
+      alias App.Gateways
+
+      linked_provider = provider_fixture(user)
+      linked_agent = agent_fixture(user, %{provider: linked_provider, name: "Gateway Agent"})
+
+      {:ok, gateway} =
+        Gateways.create_gateway(scope, %{
+          "name" => "Telegram Bot",
+          "type" => "telegram",
+          "token" => "telegram-token",
+          "config" => %{"agent_id" => linked_agent.id, "allow_all_users" => true}
+        })
+
+      {:ok, linked_channel} =
+        Gateways.find_or_create_channel(gateway, %{
+          external_chat_id: "1234",
+          external_user_id: "5678",
+          external_username: "Gateway User"
+        })
+
+      regular_room = chat_room_fixture(user, %{title: "Regular Room", agents: [agent]})
+
+      sidebar_rooms = Chat.list_chat_rooms_for_sidebar(scope)
+      linked_entry = Enum.find(sidebar_rooms, &(&1.id == linked_channel.chat_room_id))
+      regular_entry = Enum.find(sidebar_rooms, &(&1.id == regular_room.id))
+
+      assert linked_entry.gateway_linked
+      refute regular_entry.gateway_linked
+    end
   end
 
   describe "create_chat_room/2" do
@@ -353,6 +384,84 @@ defmodule App.ChatTest do
                "user",
                "checkpoint",
                "assistant"
+             ]
+    end
+
+    test "persists a checkpoint even when overflow still cannot be recovered", %{
+      scope: scope,
+      user: user,
+      provider: provider
+    } do
+      previous_runner = Application.get_env(:app, :agent_runner)
+      previous_compaction = Application.get_env(:app, :chat_compaction)
+      previous_builder_config = Application.get_env(:app, ContextBuilder)
+      previous_runner_config = Application.get_env(:app, App.TestSupport.OverflowAwareRunnerStub)
+      previous_compaction_config = Application.get_env(:app, App.TestSupport.ChatCompactionStub)
+
+      Application.put_env(:app, :agent_runner, App.TestSupport.OverflowAwareRunnerStub)
+      Application.put_env(:app, :chat_compaction, App.TestSupport.ChatCompactionStub)
+
+      Application.put_env(:app, ContextBuilder,
+        raw_tail_tokens: 1,
+        force_raw_tail_tokens: 1,
+        checkpoint_source_tokens: 200,
+        force_checkpoint_source_tokens: 200
+      )
+
+      Application.put_env(:app, App.TestSupport.OverflowAwareRunnerStub,
+        notify_pid: self(),
+        succeed_after_checkpoint: false
+      )
+
+      Application.put_env(:app, App.TestSupport.ChatCompactionStub, notify_pid: self())
+
+      on_exit(fn ->
+        restore_app_env(:agent_runner, previous_runner)
+        restore_app_env(:chat_compaction, previous_compaction)
+        restore_app_env(ContextBuilder, previous_builder_config)
+        restore_app_env(App.TestSupport.OverflowAwareRunnerStub, previous_runner_config)
+        restore_app_env(App.TestSupport.ChatCompactionStub, previous_compaction_config)
+      end)
+
+      agent = agent_fixture(user, %{provider: provider, name: "Lead Agent"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Overflow Fallback",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      _old_user =
+        message_fixture(room, %{role: "user", content: String.duplicate("Earlier question ", 12)})
+
+      _old_assistant =
+        message_fixture(room, %{
+          role: "assistant",
+          content: String.duplicate("Earlier answer ", 12),
+          agent_id: agent.id
+        })
+
+      assert {:error, message} = Chat.send_message(scope, room, "Need the latest answer")
+      assert message =~ "Conversation exceeded the model context window"
+
+      persisted_messages = Chat.list_messages(room)
+      checkpoint_message = Enum.find(persisted_messages, &(&1.role == "checkpoint"))
+
+      assert checkpoint_message
+      assert checkpoint_message.metadata["up_to_position"] == 2
+      assert checkpoint_message.content =~ "Checkpoint summary"
+
+      assert Enum.any?(
+               persisted_messages,
+               &(&1.role == "user" && &1.content == "Need the latest answer")
+             )
+
+      assert Enum.map(persisted_messages, & &1.role) == [
+               "user",
+               "assistant",
+               "user",
+               "checkpoint"
              ]
     end
   end

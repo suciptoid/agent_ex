@@ -2,6 +2,7 @@ defmodule AppWeb.ChatLiveTest do
   use AppWeb.ConnCase, async: false
 
   alias App.Chat
+  alias App.Gateways
 
   import App.AgentsFixtures
   import App.ChatFixtures
@@ -136,6 +137,61 @@ defmodule AppWeb.ChatLiveTest do
       {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
 
       assert has_element?(live_view, "#sidebar-chat-loading-#{room.id}")
+    end
+
+    test "renders sidebar controls for gateway-linked rooms", %{
+      conn: conn,
+      user: user,
+      scope: scope
+    } do
+      provider = provider_fixture(user)
+      agent = agent_fixture(user, %{provider: provider, name: "Gateway Agent"})
+
+      {:ok, gateway} =
+        Gateways.create_gateway(scope, %{
+          "name" => "Support Bot",
+          "type" => "telegram",
+          "token" => "telegram-token",
+          "config" => %{"agent_id" => agent.id, "allow_all_users" => true}
+        })
+
+      {:ok, channel} =
+        Gateways.find_or_create_channel(gateway, %{
+          external_chat_id: "1234",
+          external_user_id: "5678",
+          external_username: "Alex"
+        })
+
+      {:ok, live_view, _html} = live(conn, ~p"/chat/#{channel.chat_room_id}")
+
+      assert has_element?(live_view, "#sidebar-chat-gateway-icon-#{channel.chat_room_id}")
+      assert has_element?(live_view, "#sidebar-delete-chat-#{channel.chat_room_id}")
+    end
+
+    test "deletes the current chat room from the sidebar and navigates to /chat", %{
+      conn: conn,
+      user: user,
+      scope: scope
+    } do
+      provider = provider_fixture(user)
+      agent = agent_fixture(user, %{provider: provider, name: "Delete Agent"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Delete Me",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
+
+      assert {:error, {:live_redirect, %{to: to}}} =
+               live_view
+               |> element("#sidebar-delete-chat-#{room.id}")
+               |> render_click()
+
+      assert to == "/chat"
+      refute Chat.get_chat_room(scope, room.id)
     end
 
     test "does not render checkpoint messages in the visible transcript", %{

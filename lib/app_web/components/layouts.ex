@@ -370,20 +370,47 @@ defmodule AppWeb.Layouts do
               </.link>
             </div>
             <div class="space-y-0.5">
-              <.link
+              <div
                 :for={chat <- @sidebar_chat_rooms}
-                navigate={~p"/chat/#{chat.id}"}
-                class="flex items-center gap-3 px-2.5 py-1.5 text-sm text-foreground/65 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+                class="group/sidebar relative"
               >
-                <span class="min-w-0 flex-1 truncate">{chat.title || "Untitled"}</span>
-                <span
-                  :if={chat.loading}
-                  id={"sidebar-chat-loading-#{chat.id}"}
-                  class="inline-flex size-4 flex-shrink-0 items-center justify-center text-muted-foreground"
+                <.link
+                  navigate={~p"/chat/#{chat.id}"}
+                  class="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 pr-10 text-sm text-foreground/65 transition-colors hover:bg-accent hover:text-foreground"
                 >
-                  <.icon name="hero-arrow-path" class="size-3.5 animate-spin" />
-                </span>
-              </.link>
+                  <span
+                    :if={chat.gateway_linked}
+                    id={"sidebar-chat-gateway-icon-#{chat.id}"}
+                    class="inline-flex size-5 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+                    title="Linked to a gateway channel"
+                  >
+                    <.icon name="hero-signal" class="size-3" />
+                  </span>
+                  <span class="min-w-0 flex-1 truncate">{sidebar_chat_room_title(chat)}</span>
+                  <span class="inline-flex flex-shrink-0 items-center gap-1.5">
+                    <span
+                      :if={chat.loading}
+                      id={"sidebar-chat-loading-#{chat.id}"}
+                      class="inline-flex size-4 items-center justify-center text-muted-foreground"
+                    >
+                      <.icon name="hero-arrow-path" class="size-3.5 animate-spin" />
+                    </span>
+                  </span>
+                </.link>
+
+                <button
+                  id={"sidebar-delete-chat-#{chat.id}"}
+                  type="button"
+                  phx-click="delete-chat-room"
+                  phx-value-id={chat.id}
+                  data-confirm="Delete this chat?"
+                  class="absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-destructive/10 hover:text-destructive group-hover/sidebar:opacity-100 focus-visible:opacity-100"
+                  title="Delete chat"
+                  aria-label="Delete chat"
+                >
+                  <.icon name="hero-trash" class="size-4" />
+                </button>
+              </div>
 
               <p
                 :if={@sidebar_chat_rooms == []}
@@ -544,4 +571,7 @@ defmodule AppWeb.Layouts do
   end
 
   defp organization_active?(_membership, _scope), do: false
+
+  defp sidebar_chat_room_title(%{title: title}) when title in [nil, ""], do: "Untitled"
+  defp sidebar_chat_room_title(%{title: title}), do: title
 end

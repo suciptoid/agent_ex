@@ -121,6 +121,7 @@ defmodule App.Chat do
 
   def delete_chat_room(%Scope{} = scope, %ChatRoom{} = chat_room) do
     ensure_user_owns_chat_room!(scope, chat_room)
+    cancel_active_room_streams(chat_room.id)
     Repo.delete(chat_room)
   end
 
@@ -499,6 +500,24 @@ defmodule App.Chat do
     )
   end
 
+  defp cancel_active_room_streams(chat_room_id) do
+    Message
+    |> where(
+      [message],
+      message.chat_room_id == ^chat_room_id and message.role == "assistant" and
+        message.status in [:pending, :streaming]
+    )
+    |> select([message], message.id)
+    |> Repo.all()
+    |> Enum.each(fn message_id ->
+      case cancel_stream(message_id) do
+        :ok -> :ok
+        {:error, :not_found} -> :ok
+        {:error, _reason} -> :ok
+      end
+    end)
+  end
+
   @doc """
   Returns a lightweight list of chat rooms for the sidebar.
 
@@ -507,6 +526,7 @@ defmodule App.Chat do
   - `title`
   - `updated_at`
   - `loading` - true while the room has a pending or streaming assistant message
+  - `gateway_linked` - true when the room is linked to a gateway channel
 
   Limited to 30 most recent.
   """
@@ -520,9 +540,12 @@ defmodule App.Chat do
       |> Repo.all()
 
     loading_ids = sidebar_loading_chat_room_ids(chat_rooms)
+    gateway_linked_ids = sidebar_gateway_linked_chat_room_ids(chat_rooms)
 
     Enum.map(chat_rooms, fn chat_room ->
-      Map.put(chat_room, :loading, MapSet.member?(loading_ids, chat_room.id))
+      chat_room
+      |> Map.put(:loading, MapSet.member?(loading_ids, chat_room.id))
+      |> Map.put(:gateway_linked, MapSet.member?(gateway_linked_ids, chat_room.id))
     end)
   end
 
@@ -572,6 +595,20 @@ defmodule App.Chat do
     )
     |> distinct([message], message.chat_room_id)
     |> select([message], message.chat_room_id)
+    |> Repo.all()
+    |> MapSet.new()
+  end
+
+  defp sidebar_gateway_linked_chat_room_ids([]), do: MapSet.new()
+
+  defp sidebar_gateway_linked_chat_room_ids(chat_rooms) do
+    chat_room_ids = Enum.map(chat_rooms, & &1.id)
+
+    from(channel in App.Gateways.Channel,
+      where: channel.chat_room_id in ^chat_room_ids,
+      distinct: channel.chat_room_id,
+      select: channel.chat_room_id
+    )
     |> Repo.all()
     |> MapSet.new()
   end

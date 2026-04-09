@@ -4,6 +4,7 @@ defmodule AppWeb.UserAuth do
   import Plug.Conn
   import Phoenix.Controller
 
+  alias App.Chat
   alias App.Organizations
   alias App.Users
   alias App.Users.Scope
@@ -210,6 +211,7 @@ defmodule AppWeb.UserAuth do
         |> Phoenix.Component.assign_new(:sidebar_organizations, fn ->
           Organizations.list_memberships(scope.user)
         end)
+        |> attach_sidebar_chat_room_hook()
 
       {:cont, socket}
     else
@@ -244,6 +246,91 @@ defmodule AppWeb.UserAuth do
 
   defp session_active_organization_id(session) do
     session["active_organization_id"] || session[:active_organization_id]
+  end
+
+  defp attach_sidebar_chat_room_hook(socket) do
+    case socket do
+      %{private: %{lifecycle: _lifecycle}} ->
+        Phoenix.LiveView.attach_hook(
+          socket,
+          :sidebar_chat_room_actions,
+          :handle_event,
+          &handle_sidebar_chat_room_event/3
+        )
+
+      _other ->
+        socket
+    end
+  end
+
+  defp handle_sidebar_chat_room_event("delete-chat-room", %{"id" => id}, socket) do
+    scope = socket.assigns.current_scope
+
+    socket =
+      case Chat.get_chat_room(scope, id) do
+        nil ->
+          socket
+          |> refresh_sidebar_chat_rooms()
+          |> Phoenix.LiveView.put_flash(:error, "Conversation not found.")
+
+        chat_room ->
+          case Chat.delete_chat_room(scope, chat_room) do
+            {:ok, _deleted_chat_room} ->
+              socket
+              |> refresh_sidebar_chat_rooms()
+              |> refresh_chat_room_dependent_assigns()
+              |> Phoenix.LiveView.put_flash(:info, "Conversation deleted.")
+              |> maybe_navigate_after_chat_delete(chat_room.id)
+
+            {:error, _reason} ->
+              socket
+              |> refresh_sidebar_chat_rooms()
+              |> Phoenix.LiveView.put_flash(:error, "Failed to delete conversation.")
+          end
+      end
+
+    {:halt, socket}
+  end
+
+  defp handle_sidebar_chat_room_event(_event, _params, socket), do: {:cont, socket}
+
+  defp refresh_sidebar_chat_rooms(socket) do
+    scope = socket.assigns.current_scope
+
+    Phoenix.Component.assign(
+      socket,
+      :sidebar_chat_rooms,
+      if(Scope.organization_selected?(scope),
+        do: Chat.list_chat_rooms_for_sidebar(scope),
+        else: []
+      )
+    )
+  end
+
+  defp refresh_chat_room_dependent_assigns(socket) do
+    scope = socket.assigns.current_scope
+
+    socket
+    |> maybe_assign(:recent_chat_rooms, fn -> Chat.list_recent_chat_rooms(scope, 5) end)
+    |> maybe_assign(:conversations_count, fn -> Chat.count_chat_rooms(scope) end)
+  end
+
+  defp maybe_navigate_after_chat_delete(socket, deleted_chat_room_id) do
+    case Map.get(socket.assigns, :chat_room) do
+      %{id: ^deleted_chat_room_id} ->
+        Phoenix.LiveView.push_navigate(socket, to: ~p"/chat")
+
+      _other ->
+        socket
+    end
+  end
+
+  defp maybe_assign(socket, key, loader) when is_function(loader, 0) do
+    if Map.has_key?(socket.assigns, key) do
+      Phoenix.Component.assign(socket, key, loader.())
+    else
+      socket
+    end
   end
 
   @doc "Returns the path to redirect to after log in."

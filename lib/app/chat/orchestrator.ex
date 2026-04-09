@@ -544,12 +544,21 @@ defmodule App.Chat.Orchestrator do
       }
     )
 
+    budget_overrides = overflow_budget_overrides(initial_reason)
+
     with {:ok, prepared_messages} <-
-           prepare_context_messages(chat_room, agent, messages, run_opts, force_compaction: true),
+           prepare_context_messages(chat_room, agent, messages, run_opts,
+             force_compaction: true,
+             budget_overrides: budget_overrides
+           ),
          result <- runner_fun.(prepared_messages) do
       case result do
         {:error, reason} ->
           if context_window_error?(reason) do
+            if not checkpoint_message_present?(prepared_messages) do
+              ensure_overflow_checkpoint(chat_room, agent, messages, run_opts, budget_overrides)
+            end
+
             {:error, overflow_retry_error()}
           else
             {:error, reason}
@@ -564,6 +573,7 @@ defmodule App.Chat.Orchestrator do
           "[Orchestrator] Failed to prepare forced-compaction context: #{inspect(reason)}"
         )
 
+        ensure_overflow_checkpoint(chat_room, agent, messages, run_opts, budget_overrides)
         {:error, overflow_retry_error()}
     end
   end
@@ -571,11 +581,13 @@ defmodule App.Chat.Orchestrator do
   defp prepare_context_messages(%ChatRoom{} = chat_room, agent, messages, run_opts, opts) do
     extra_system_prompt = Keyword.get(run_opts, :extra_system_prompt, "")
     force_compaction? = Keyword.get(opts, :force_compaction, false)
+    budget_overrides = Keyword.get(opts, :budget_overrides, %{})
 
     {:ok, %{messages: prepared_messages, estimated_tokens: estimated_tokens}} =
       ContextBuilder.prepare(chat_room, agent, messages,
         extra_system_prompt: extra_system_prompt,
-        force_compaction: force_compaction?
+        force_compaction: force_compaction?,
+        budget_overrides: budget_overrides
       )
 
     Logger.debug(
@@ -621,6 +633,66 @@ defmodule App.Chat.Orchestrator do
 
   defp agent_id(%{id: agent_id}), do: agent_id
   defp agent_id(_agent), do: nil
+
+  defp checkpoint_message_present?(messages) when is_list(messages) do
+    Enum.any?(messages, &((Map.get(&1, :role) || Map.get(&1, "role")) == "checkpoint"))
+  end
+
+  defp checkpoint_message_present?(_messages), do: false
+
+  defp overflow_budget_overrides(reason) do
+    case parse_context_window_limit(reason) do
+      nil -> %{}
+      context_window_tokens -> %{context_window_tokens: context_window_tokens}
+    end
+  end
+
+  defp parse_context_window_limit(%{reason: reason}), do: parse_context_window_limit(reason)
+  defp parse_context_window_limit(%{message: message}), do: parse_context_window_limit(message)
+
+  defp parse_context_window_limit(reason) when is_binary(reason) do
+    case Regex.run(~r/maximum context length is (\d+)/i, reason, capture: :all_but_first) do
+      [token_limit] ->
+        case Integer.parse(token_limit) do
+          {context_window_tokens, _rest} -> context_window_tokens
+          :error -> nil
+        end
+
+      _other ->
+        nil
+    end
+  end
+
+  defp parse_context_window_limit(_reason), do: nil
+
+  defp ensure_overflow_checkpoint(
+         %ChatRoom{} = chat_room,
+         agent,
+         messages,
+         run_opts,
+         budget_overrides
+       ) do
+    extra_system_prompt = Keyword.get(run_opts, :extra_system_prompt, "")
+
+    aggressive_overrides =
+      budget_overrides
+      |> Map.new()
+      |> Map.merge(%{
+        raw_tail_tokens: 0,
+        force_raw_tail_tokens: 0,
+        checkpoint_source_tokens: 8_000,
+        force_checkpoint_source_tokens: 8_000
+      })
+
+    {:ok, _prepared} =
+      ContextBuilder.prepare(chat_room, agent, messages,
+        extra_system_prompt: extra_system_prompt,
+        force_compaction: true,
+        budget_overrides: aggressive_overrides
+      )
+
+    :ok
+  end
 
   defp overflow_retry_error do
     "Conversation exceeded the model context window even after compacting older history. Start a new chat or trim earlier tool-heavy turns."

@@ -35,15 +35,18 @@ defmodule App.Gateways.Telegram.Handler do
     user_id = Map.get(from, "id")
     username = display_name(from)
 
-    case text |> String.trim() do
-      "/start" ->
+    case telegram_command(text) do
+      :start ->
         handle_start(gateway, chat_id, user_id, username)
 
-      "" ->
+      :new ->
+        handle_new(gateway, chat_id, user_id, username)
+
+      :blank ->
         :ok
 
-      content ->
-        handle_user_message(gateway, chat_id, user_id, username, content)
+      :message ->
+        handle_user_message(gateway, chat_id, user_id, username, String.trim(text))
     end
   end
 
@@ -65,6 +68,33 @@ defmodule App.Gateways.Telegram.Handler do
       Client.send_message(client, chat_id, welcome)
     else
       client = Client.new(gateway.token)
+      Client.send_message(client, chat_id, "Sorry, you're not authorized to use this bot.")
+    end
+  end
+
+  defp handle_new(%Gateway{} = gateway, chat_id, user_id, username) do
+    client = Client.new(gateway.token)
+
+    if Gateways.user_allowed?(gateway, to_string(user_id)) do
+      case reset_or_create_channel(gateway, chat_id, user_id, username) do
+        {:ok, _channel} ->
+          config = gateway.config || %{}
+
+          Client.send_message(
+            client,
+            chat_id,
+            config_value(
+              config,
+              :new_chat_message,
+              "Started a fresh chat. Send your next message when you're ready."
+            )
+          )
+
+        {:error, reason} ->
+          Logger.error("Failed to rotate Telegram channel chat room: #{inspect(reason)}")
+          Client.send_message(client, chat_id, "Sorry, I couldn't start a new chat right now.")
+      end
+    else
       Client.send_message(client, chat_id, "Sorry, you're not authorized to use this bot.")
     end
   end
@@ -197,6 +227,43 @@ defmodule App.Gateways.Telegram.Handler do
   defp display_name(%{"username" => username}), do: username
   defp display_name(_), do: nil
 
+  defp telegram_command(text) do
+    trimmed = String.trim(text || "")
+
+    cond do
+      trimmed == "" ->
+        :blank
+
+      Regex.match?(~r/^\/start(?:@[\w_]+)?(?:\s+.*)?$/u, trimmed) ->
+        :start
+
+      Regex.match?(~r/^\/new(?:@[\w_]+)?(?:\s+.*)?$/u, trimmed) ->
+        :new
+
+      true ->
+        :message
+    end
+  end
+
+  defp reset_or_create_channel(%Gateway{} = gateway, chat_id, user_id, username) do
+    attrs = %{
+      external_chat_id: chat_id,
+      external_user_id: user_id,
+      external_username: username
+    }
+
+    case Gateways.get_channel(gateway, chat_id) do
+      nil ->
+        Gateways.find_or_create_channel(gateway, attrs)
+
+      %Channel{} = channel ->
+        channel
+        |> Map.put(:external_user_id, to_string(user_id))
+        |> Map.put(:external_username, username)
+        |> Gateways.reset_channel_chat_room()
+    end
+  end
+
   defp active_agent(%{chat_room_agents: chat_room_agents}) do
     case Enum.find(chat_room_agents, & &1.is_active) || List.first(chat_room_agents) do
       %{agent: agent} -> agent
@@ -230,8 +297,8 @@ defmodule App.Gateways.Telegram.Handler do
     end
   end
 
-  defp config_value(%Gateway.Config{} = config, key, _default) do
-    Map.get(config, key)
+  defp config_value(%Gateway.Config{} = config, key, default) do
+    Map.get(config, key) || default
   end
 
   defp config_value(%{} = config, key, default) do

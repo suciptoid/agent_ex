@@ -2,7 +2,7 @@ defmodule App.TestSupport.OverflowAwareRunnerStub do
   def run(agent, messages, _opts \\ []) do
     notify(:sync, messages)
 
-    if checkpoint_present?(messages) do
+    if succeed_after_checkpoint?(messages) do
       {:ok, result(agent, messages)}
     else
       {:error, overflow_error()}
@@ -12,7 +12,7 @@ defmodule App.TestSupport.OverflowAwareRunnerStub do
   def run_streaming(agent, messages, recipient, opts \\ []) do
     notify(:streaming, messages)
 
-    if checkpoint_present?(messages) do
+    if succeed_after_checkpoint?(messages) do
       content = stub_content(agent, messages)
 
       emit_chunk =
@@ -27,6 +27,11 @@ defmodule App.TestSupport.OverflowAwareRunnerStub do
 
   defp checkpoint_present?(messages) do
     Enum.any?(messages, &((Map.get(&1, :role) || Map.get(&1, "role")) == "checkpoint"))
+  end
+
+  defp succeed_after_checkpoint?(messages) do
+    checkpoint_present?(messages) and
+      Application.get_env(:app, __MODULE__, []) |> Keyword.get(:succeed_after_checkpoint, true)
   end
 
   defp result(agent, messages) do

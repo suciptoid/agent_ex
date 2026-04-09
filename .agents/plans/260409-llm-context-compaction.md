@@ -152,3 +152,11 @@
 - Do not mutate or destroy old `chat_messages`; append checkpoint messages plus prompt-time pruning instead.
 - Fixing duplicate history replay should happen before checkpointing, because otherwise token estimates and compaction decisions will be wrong.
 - The `ReqLLM` error mentions a context-compression plugin, but the current dependency tree does not provide a clear app-facing integration point in this repo. Treat any library plugin as optional follow-up, not as the primary plan.
+
+## Follow-up after first implementation
+
+1. Use the provider-reported context window from overflow errors to tighten the retry budget when the static model policy is too optimistic.
+2. Persist a checkpoint even when forced compaction still cannot fit the next request, so the room has a durable summary for the next turn.
+3. Add Telegram `/new` to rotate a gateway channel onto a fresh chat room and reset context without losing prior transcript history.
+4. Extend sidebar chat-room data/rendering so gateway-linked rooms show the gateway icon and expose a hover delete affordance.
+5. Cover the new overflow fallback, Telegram reset, sidebar deletion, and linked-room rendering with focused tests.

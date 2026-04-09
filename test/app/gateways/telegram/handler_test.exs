@@ -76,6 +76,75 @@ defmodule App.Gateways.Telegram.HandlerTest do
     assert %App.Gateways.Channel{} = Gateways.get_channel(gateway, 1234)
   end
 
+  test "telegram /new rotates the channel onto a fresh chat room", %{user: user, scope: scope} do
+    provider = provider_fixture(user)
+    agent = agent_fixture(user, %{provider: provider, name: "Gateway Agent"})
+    stub_telegram_api(self())
+
+    {:ok, gateway} =
+      Gateways.create_gateway(scope, %{
+        "name" => "Support Bot",
+        "type" => "telegram",
+        "token" => "telegram-token",
+        "config" => %{
+          "agent_id" => agent.id,
+          "allow_all_users" => true
+        }
+      })
+
+    assert {:ok, _stream_pid} =
+             Handler.handle_update(gateway, %{
+               "message" => %{
+                 "chat" => %{"id" => 1234},
+                 "from" => %{"id" => 5678, "first_name" => "Alex"},
+                 "text" => "Need support"
+               }
+             })
+
+    assert_receive {:preloaded_provider_runner_called, initial_agent, initial_messages}
+    assert initial_agent.id == agent.id
+    assert Enum.map(initial_messages, &{&1.role, &1.content}) == [{"user", "Need support"}]
+
+    assert_receive {:telegram_send_message, "/bottelegram-token/sendMessage", initial_payload}
+    assert initial_payload["text"] == "Gateway Agent: Need support"
+
+    original_channel = Gateways.get_channel(gateway, 1234)
+    original_chat_room_id = original_channel.chat_room_id
+
+    assert {:ok, _response} =
+             Handler.handle_update(gateway, %{
+               "message" => %{
+                 "chat" => %{"id" => 1234},
+                 "from" => %{"id" => 5678, "first_name" => "Alex"},
+                 "text" => "/new"
+               }
+             })
+
+    assert_receive {:telegram_send_message, "/bottelegram-token/sendMessage", reset_payload}
+
+    assert reset_payload["text"] ==
+             "Started a fresh chat. Send your next message when you're ready."
+
+    rotated_channel = Gateways.get_channel(gateway, 1234)
+    assert rotated_channel.chat_room_id != original_chat_room_id
+
+    assert {:ok, _stream_pid} =
+             Handler.handle_update(gateway, %{
+               "message" => %{
+                 "chat" => %{"id" => 1234},
+                 "from" => %{"id" => 5678, "first_name" => "Alex"},
+                 "text" => "Fresh context"
+               }
+             })
+
+    assert_receive {:preloaded_provider_runner_called, streamed_agent, messages}
+    assert streamed_agent.id == agent.id
+    assert Enum.map(messages, &{&1.role, &1.content}) == [{"user", "Fresh context"}]
+
+    assert_receive {:telegram_send_message, "/bottelegram-token/sendMessage", fresh_payload}
+    assert fresh_payload["text"] == "Gateway Agent: Fresh context"
+  end
+
   defp stub_telegram_api(test_pid) do
     Req.Test.stub(__MODULE__, fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)

@@ -1,6 +1,8 @@
 defmodule AppWeb.DashboardLiveTest do
   use AppWeb.ConnCase, async: true
 
+  alias App.Chat
+
   import App.AgentsFixtures
   import App.ChatFixtures
   import App.ProvidersFixtures
@@ -48,5 +50,33 @@ defmodule AppWeb.DashboardLiveTest do
     assert has_element?(live_view, "#recent-chat-#{chat_room.id}", "Strategy Room")
     assert has_element?(live_view, "#recent-agent-#{agent.id}", "Planner")
     assert has_element?(live_view, "#dashboard-primary-action[href='/chat']")
+  end
+
+  test "deletes a chat room from the sidebar through LiveView and refreshes dashboard state", %{
+    conn: conn,
+    user: user,
+    scope: scope
+  } do
+    provider = provider_fixture(user, %{name: "Anthropic Sandbox", provider: "anthropic"})
+    agent = agent_fixture(user, %{provider: provider, name: "Planner"})
+
+    chat_room =
+      chat_room_fixture(user, %{
+        title: "Strategy Room",
+        agents: [agent],
+        active_agent_id: agent.id
+      })
+
+    {:ok, live_view, _html} = live(conn, ~p"/dashboard")
+
+    assert has_element?(live_view, "#sidebar-delete-chat-#{chat_room.id}")
+
+    live_view
+    |> element("#sidebar-delete-chat-#{chat_room.id}")
+    |> render_click()
+
+    refute Chat.get_chat_room(scope, chat_room.id)
+    refute has_element?(live_view, "#sidebar-delete-chat-#{chat_room.id}")
+    assert has_element?(live_view, "#dashboard-stat-conversations-value", "0")
   end
 end

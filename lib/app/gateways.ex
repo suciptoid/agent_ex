@@ -85,10 +85,36 @@ defmodule App.Gateways do
 
     case get_channel(gateway, external_chat_id) do
       %Channel{} = channel ->
-        {:ok, Repo.preload(channel, [:chat_room, :gateway])}
+        channel
+        |> Repo.preload([:chat_room, :gateway])
+        |> ensure_channel_chat_room()
 
       nil ->
         create_channel_with_chat_room(gateway, attrs)
+    end
+  end
+
+  def reset_channel_chat_room(%Channel{} = channel) do
+    channel = Repo.preload(channel, [:chat_room, :gateway])
+
+    case channel.gateway do
+      %Gateway{} = gateway ->
+        Multi.new()
+        |> gateway_chat_room_multi(gateway, channel.external_username, channel.external_chat_id)
+        |> Multi.update(:channel, fn %{chat_room: chat_room} ->
+          Channel.changeset(channel, %{chat_room_id: chat_room.id})
+        end)
+        |> Repo.transaction()
+        |> case do
+          {:ok, %{channel: updated_channel}} ->
+            {:ok, Repo.preload(updated_channel, [:chat_room, :gateway])}
+
+          {:error, _step, changeset, _changes} ->
+            {:error, changeset}
+        end
+
+      nil ->
+        {:error, :missing_gateway}
     end
   end
 
@@ -117,43 +143,8 @@ defmodule App.Gateways do
     external_user_id = attrs[:external_user_id] || attrs["external_user_id"]
     external_username = attrs[:external_username] || attrs["external_username"]
 
-    config = gateway.config || %{}
-    agent_id = config_value(config, :agent_id, nil)
-    title = channel_title(external_username, external_chat_id)
-
-    chat_room_attrs = %{title: title}
-
-    chat_room_attrs =
-      if agent_id do
-        Map.put(chat_room_attrs, :agent_ids, [agent_id])
-      else
-        chat_room_attrs
-      end
-
     Multi.new()
-    |> Multi.insert(:chat_room, fn _changes ->
-      %ChatRoom{organization_id: gateway.organization_id}
-      |> ChatRoom.changeset(chat_room_attrs)
-    end)
-    |> Multi.run(:chat_room_agent, fn repo, %{chat_room: chat_room} ->
-      if agent_id do
-        case repo.get(Agent, agent_id) do
-          nil ->
-            {:ok, nil}
-
-          _agent ->
-            %App.Chat.ChatRoomAgent{}
-            |> App.Chat.ChatRoomAgent.changeset(%{
-              chat_room_id: chat_room.id,
-              agent_id: agent_id,
-              is_active: true
-            })
-            |> repo.insert()
-        end
-      else
-        {:ok, nil}
-      end
-    end)
+    |> gateway_chat_room_multi(gateway, external_username, external_chat_id)
     |> Multi.insert(:channel, fn %{chat_room: chat_room} ->
       %Channel{gateway_id: gateway.id}
       |> Channel.changeset(%{
@@ -173,12 +164,51 @@ defmodule App.Gateways do
     end
   end
 
+  defp ensure_channel_chat_room(%Channel{chat_room_id: nil} = channel),
+    do: reset_channel_chat_room(channel)
+
+  defp ensure_channel_chat_room(%Channel{} = channel), do: {:ok, channel}
+
+  defp gateway_chat_room_multi(multi, %Gateway{} = gateway, external_username, external_chat_id) do
+    title = channel_title(external_username, external_chat_id)
+    agent_id = gateway_agent_id(gateway.config || %{})
+
+    multi
+    |> Multi.insert(:chat_room, fn _changes ->
+      %ChatRoom{organization_id: gateway.organization_id}
+      |> ChatRoom.changeset(%{title: title})
+    end)
+    |> Multi.run(:chat_room_agent, fn repo, %{chat_room: chat_room} ->
+      maybe_insert_gateway_chat_room_agent(repo, chat_room, agent_id)
+    end)
+  end
+
+  defp maybe_insert_gateway_chat_room_agent(_repo, _chat_room, nil), do: {:ok, nil}
+
+  defp maybe_insert_gateway_chat_room_agent(repo, chat_room, agent_id) do
+    case repo.get(Agent, agent_id) do
+      nil ->
+        {:ok, nil}
+
+      _agent ->
+        %App.Chat.ChatRoomAgent{}
+        |> App.Chat.ChatRoomAgent.changeset(%{
+          chat_room_id: chat_room.id,
+          agent_id: agent_id,
+          is_active: true
+        })
+        |> repo.insert()
+    end
+  end
+
+  defp gateway_agent_id(config), do: config_value(config, :agent_id, nil)
+
   defp channel_title(nil, external_chat_id), do: "Chat #{external_chat_id}"
   defp channel_title("", external_chat_id), do: "Chat #{external_chat_id}"
   defp channel_title(username, _external_chat_id), do: username
 
-  defp config_value(%Gateway.Config{} = config, key, _default) do
-    Map.get(config, key)
+  defp config_value(%Gateway.Config{} = config, key, default) do
+    Map.get(config, key) || default
   end
 
   defp config_value(%{} = config, key, default) do

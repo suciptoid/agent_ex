@@ -248,7 +248,11 @@ defmodule App.Chat.ContextBuilder do
     messages_after_checkpoint = uncovered_messages(canonical_messages, checkpoint)
     raw_tail_tokens = raw_tail_tokens(policy, force_compaction?)
     protected_start_index = protected_start_index(messages_after_checkpoint, raw_tail_tokens)
-    checkpoint_candidates = Enum.take(messages_after_checkpoint, protected_start_index)
+
+    checkpoint_candidates =
+      messages_after_checkpoint
+      |> Enum.take(protected_start_index)
+      |> fallback_checkpoint_candidates(messages_after_checkpoint, force_compaction?)
 
     checkpoint_chunk =
       checkpoint_candidates
@@ -454,6 +458,24 @@ defmodule App.Chat.ContextBuilder do
       end,
       fn -> nil end
     )
+  end
+
+  defp fallback_checkpoint_candidates(candidates, _messages_after_checkpoint, _force_compaction?)
+       when candidates != [] do
+    candidates
+  end
+
+  defp fallback_checkpoint_candidates([], messages_after_checkpoint, true) do
+    emergency_checkpoint_candidates(messages_after_checkpoint)
+  end
+
+  defp fallback_checkpoint_candidates([], _messages_after_checkpoint, false), do: []
+
+  defp emergency_checkpoint_candidates(messages_after_checkpoint) do
+    case length(messages_after_checkpoint) do
+      count when count > 1 -> Enum.take(messages_after_checkpoint, count - 1)
+      _other -> []
+    end
   end
 
   defp protected_start_index(messages, raw_tail_tokens) do

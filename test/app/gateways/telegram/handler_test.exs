@@ -54,6 +54,8 @@ defmodule App.Gateways.Telegram.HandlerTest do
         }
       })
 
+    flush_mailbox()
+
     assert {:ok, _stream_pid} =
              Handler.handle_update(gateway, %{
                "message" => %{
@@ -62,6 +64,10 @@ defmodule App.Gateways.Telegram.HandlerTest do
                  "text" => "Need support"
                }
              })
+
+    assert_receive {:telegram_chat_action, "/bottelegram-token/sendChatAction", action_payload}
+    assert action_payload["chat_id"] == "1234"
+    assert action_payload["action"] == "typing"
 
     assert_receive {:preloaded_provider_runner_called, streamed_agent, messages}
     assert streamed_agent.id == agent.id
@@ -72,6 +78,7 @@ defmodule App.Gateways.Telegram.HandlerTest do
     assert_receive {:telegram_send_message, "/bottelegram-token/sendMessage", payload}
     assert payload["chat_id"] == "1234"
     assert payload["text"] == "Gateway Agent: Need support"
+    assert payload["parse_mode"] == "MarkdownV2"
 
     assert %App.Gateways.Channel{} = Gateways.get_channel(gateway, 1234)
   end
@@ -148,11 +155,31 @@ defmodule App.Gateways.Telegram.HandlerTest do
   defp stub_telegram_api(test_pid) do
     Req.Test.stub(__MODULE__, fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
-      send(test_pid, {:telegram_send_message, conn.request_path, Jason.decode!(body)})
+      payload = Jason.decode!(body)
+
+      case conn.request_path do
+        "/bottelegram-token/sendChatAction" ->
+          send(test_pid, {:telegram_chat_action, conn.request_path, payload})
+
+        "/bottelegram-token/sendMessage" ->
+          send(test_pid, {:telegram_send_message, conn.request_path, payload})
+
+        _other ->
+          send(test_pid, {:telegram_request, conn.request_path, payload})
+      end
+
       Plug.Conn.send_resp(conn, 200, ~s({"ok":true,"result":true}))
     end)
   end
 
   defp restore_app_env(key, nil), do: Application.delete_env(:app, key)
   defp restore_app_env(key, value), do: Application.put_env(:app, key, value)
+
+  defp flush_mailbox do
+    receive do
+      _ -> flush_mailbox()
+    after
+      0 -> :ok
+    end
+  end
 end

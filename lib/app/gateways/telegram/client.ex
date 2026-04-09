@@ -41,6 +41,15 @@ defmodule App.Gateways.Telegram.Client do
     request(client, "sendMessage", params)
   end
 
+  def send_markdown_message(client, chat_id, text, extra \\ %{}) do
+    params = Map.merge(%{chat_id: chat_id, text: text, parse_mode: "MarkdownV2"}, extra)
+    request(client, "sendMessage", params)
+  end
+
+  def send_chat_action(client, chat_id, action \\ "typing") do
+    request(client, "sendChatAction", %{chat_id: chat_id, action: action})
+  end
+
   def answer_callback_query(client, callback_query_id, extra \\ %{}) do
     params = Map.put(extra, :callback_query_id, callback_query_id)
     request(client, "answerCallbackQuery", params)

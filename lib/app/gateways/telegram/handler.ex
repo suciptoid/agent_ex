@@ -161,7 +161,10 @@ defmodule App.Gateways.Telegram.Handler do
         {:ok, assistant_message} ->
           messages = chat_room.messages
           :ok = start_relay(gateway, channel, chat_room, assistant_message)
-          Chat.start_stream(chat_room, messages, assistant_message)
+
+          Chat.start_stream(chat_room, messages, assistant_message,
+            extra_system_prompt: telegram_reply_prompt()
+          )
 
         {:error, reason} ->
           Logger.error("Failed to create assistant message: #{inspect(reason)}")
@@ -177,22 +180,11 @@ defmodule App.Gateways.Telegram.Handler do
     end
   end
 
-  @doc """
-  Subscribes to ChatRoom broadcasts and relays completed assistant messages
-  back to the Telegram chat.
-  """
-  def relay_response(%Gateway{} = gateway, %Channel{} = channel, chat_room, %{id: message_id}) do
-    Chat.subscribe_chat_room(chat_room)
-    receive_loop(gateway, channel, message_id)
-  after
-    Chat.unsubscribe_chat_room(chat_room)
-  end
-
   defp receive_loop(gateway, channel, message_id) do
     receive do
       {:stream_complete, ^message_id, content} when is_binary(content) and content != "" ->
         client = Client.new(gateway.token)
-        Client.send_message(client, channel.external_chat_id, content)
+        Client.send_markdown_message(client, channel.external_chat_id, content)
 
       {:stream_error, ^message_id, _reason} ->
         client = Client.new(gateway.token)
@@ -278,11 +270,13 @@ defmodule App.Gateways.Telegram.Handler do
     {:ok, _relay_pid} =
       Task.start(fn ->
         Chat.subscribe_chat_room(chat_room)
+        typing_pid = start_typing_indicator(gateway, channel.external_chat_id)
         send(parent, {:gateway_relay_ready, ready_ref})
 
         try do
           receive_loop(gateway, channel, assistant_message.id)
         after
+          stop_typing_indicator(typing_pid)
           Chat.unsubscribe_chat_room(chat_room)
         end
       end)
@@ -295,6 +289,43 @@ defmodule App.Gateways.Telegram.Handler do
         Logger.warning("Relay subscription setup timed out for message #{assistant_message.id}")
         :ok
     end
+  end
+
+  defp start_typing_indicator(%Gateway{} = gateway, chat_id) do
+    client = Client.new(gateway.token)
+    _ = Client.send_chat_action(client, chat_id)
+
+    case Task.start(fn -> typing_loop(client, chat_id) end) do
+      {:ok, pid} ->
+        pid
+
+      {:error, reason} ->
+        Logger.warning("Failed to start Telegram typing indicator: #{inspect(reason)}")
+        nil
+    end
+  end
+
+  defp stop_typing_indicator(nil), do: :ok
+  defp stop_typing_indicator(pid), do: send(pid, :stop)
+
+  defp typing_loop(client, chat_id) do
+    receive do
+      :stop ->
+        :ok
+    after
+      4_000 ->
+        _ = Client.send_chat_action(client, chat_id)
+        typing_loop(client, chat_id)
+    end
+  end
+
+  defp telegram_reply_prompt do
+    """
+    When replying through Telegram, use Telegram-supported MarkdownV2 only.
+    Do not use HTML formatting or unsupported Markdown features.
+    Keep replies compatible with Telegram Bot API parse_mode=MarkdownV2.
+    """
+    |> String.trim()
   end
 
   defp config_value(%Gateway.Config{} = config, key, default) do

@@ -23,3 +23,12 @@ By: gpt-5.4-mini on GitHub Copilot
 - Added explicit logging for failed Telegram assistant reply delivery after retries.
 
 By: gpt-5.4 on GitHub Copilot
+
+## Formatting Guardrails
+
+- Strengthened the Telegram gateway prompt so agents explicitly avoid tables, GitHub/CommonMark formatting, and `**bold**`, and prefer bullet lists or `Label: value` lines.
+- Added Telegram client normalization for common non-Telegram markdown, including converting `**bold**` to Telegram-style bold.
+- Added a table-specific safeguard that rewrites markdown tables into readable plain text before sending, so Telegram users never see raw pipe tables.
+- Added `test/app/gateways/telegram/client_test.exs` to cover both the table rewrite path and double-asterisk bold normalization.
+
+By: gpt-5.4 on GitHub Copilot

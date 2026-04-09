@@ -328,9 +328,12 @@ defmodule App.Gateways.Telegram.Handler do
 
   defp telegram_reply_prompt do
     """
-    When replying through Telegram, use Telegram-supported MarkdownV2 only.
-    Do not use HTML formatting or unsupported Markdown features.
+    You are replying through Telegram. Use only Telegram Bot API MarkdownV2.
+    Never use GitHub/CommonMark tables, pipe-delimited columns, or markdown separators like |---|.
+    Never use HTML and never use GitHub-style bold like **bold**.
+    If content is tabular or structured, rewrite it as short bullet points or Label: value lines.
     Keep replies compatible with Telegram Bot API parse_mode=MarkdownV2.
+    If a format is not explicitly supported by Telegram MarkdownV2, use plain text instead.
     """
     |> String.trim()
   end

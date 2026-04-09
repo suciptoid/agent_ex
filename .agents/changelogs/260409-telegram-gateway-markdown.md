@@ -15,3 +15,11 @@
 - `mix precommit`
 
 By: gpt-5.4-mini on GitHub Copilot
+
+## Follow-up Fix
+
+- Fixed Telegram delivery for normal assistant text under `MarkdownV2`: the client now retries `sendMessage` with an escaped MarkdownV2 payload when Telegram returns a `can't parse entities` error.
+- Added a regression test that simulates Telegram rejecting the first raw MarkdownV2 attempt and verifies the escaped retry is sent successfully.
+- Added explicit logging for failed Telegram assistant reply delivery after retries.
+
+By: gpt-5.4 on GitHub Copilot

@@ -3,6 +3,8 @@ defmodule App.Gateways.Telegram.Client do
   Telegram Bot API client using Req.
   """
 
+  @markdown_v2_entity_error "can't parse entities"
+
   defstruct [:token, :base_url]
 
   def new(token, opts \\ []) do
@@ -43,7 +45,20 @@ defmodule App.Gateways.Telegram.Client do
 
   def send_markdown_message(client, chat_id, text, extra \\ %{}) do
     params = Map.merge(%{chat_id: chat_id, text: text, parse_mode: "MarkdownV2"}, extra)
-    request(client, "sendMessage", params)
+
+    case request(client, "sendMessage", params) do
+      {:error, {:telegram_api_error, 400, body}} = error ->
+        if markdown_v2_entity_error?(body) do
+          params
+          |> Map.put(:text, escape_markdown_v2(text))
+          |> then(&request(client, "sendMessage", &1))
+        else
+          error
+        end
+
+      result ->
+        result
+    end
   end
 
   def send_chat_action(client, chat_id, action \\ "typing") do
@@ -81,4 +96,26 @@ defmodule App.Gateways.Telegram.Client do
     Application.get_env(:app, __MODULE__, [])
     |> Keyword.get(:req_options, [])
   end
+
+  defp escape_markdown_v2(text) when is_binary(text) do
+    Regex.replace(~r/([_*\[\]()~`>#+\-=|{}.!\\])/u, text, fn _, char -> "\\" <> char end)
+  end
+
+  defp escape_markdown_v2(text), do: text
+
+  defp markdown_v2_entity_error?(%{"description" => description}) when is_binary(description) do
+    String.contains?(description, @markdown_v2_entity_error)
+  end
+
+  defp markdown_v2_entity_error?(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, %{"description" => description}} when is_binary(description) ->
+        String.contains?(description, @markdown_v2_entity_error)
+
+      _other ->
+        String.contains?(body, @markdown_v2_entity_error)
+    end
+  end
+
+  defp markdown_v2_entity_error?(_body), do: false
 end

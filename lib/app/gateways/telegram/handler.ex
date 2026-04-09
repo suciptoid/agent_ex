@@ -184,7 +184,14 @@ defmodule App.Gateways.Telegram.Handler do
     receive do
       {:stream_complete, ^message_id, content} when is_binary(content) and content != "" ->
         client = Client.new(gateway.token)
-        Client.send_markdown_message(client, channel.external_chat_id, content)
+
+        case Client.send_markdown_message(client, channel.external_chat_id, content) do
+          {:ok, _response} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.error("Failed to send Telegram assistant reply: #{inspect(reason)}")
+        end
 
       {:stream_error, ^message_id, _reason} ->
         client = Client.new(gateway.token)

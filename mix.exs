@@ -41,6 +41,8 @@ defmodule App.MixProject do
   defp deps do
     [
       {:bcrypt_elixir, "~> 3.0"},
+      {:ueberauth, "~> 0.10.8"},
+      {:ueberauth_google, "~> 0.12.1"},
       {:phoenix, "~> 1.8.5"},
       {:phoenix_ecto, "~> 4.5"},
       {:ecto_sql, "~> 3.13"},

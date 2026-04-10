@@ -7,13 +7,18 @@ defmodule App.UsersFixtures do
   import Ecto.Query
 
   alias App.Users
+  alias App.Users.User
 
   def unique_user_email, do: "user-#{Ecto.UUID.generate()}@example.com"
   def valid_user_password, do: "hello world!"
 
   def valid_user_attributes(attrs \\ %{}) do
+    password = valid_user_password()
+
     Enum.into(attrs, %{
-      email: unique_user_email()
+      email: unique_user_email(),
+      password: password,
+      password_confirmation: password
     })
   end
 
@@ -28,16 +33,7 @@ defmodule App.UsersFixtures do
 
   def user_fixture(attrs \\ %{}) do
     user = unconfirmed_user_fixture(attrs)
-
-    token =
-      extract_user_token(fn url ->
-        Users.deliver_login_instructions(user, url)
-      end)
-
-    {:ok, {user, _expired_tokens}} =
-      Users.login_user_by_magic_link(token)
-
-    user
+    App.Repo.update!(User.confirm_changeset(user))
   end
 
   def user_scope_fixture do
@@ -69,12 +65,6 @@ defmodule App.UsersFixtures do
       ),
       set: [authenticated_at: authenticated_at]
     )
-  end
-
-  def generate_user_magic_link_token(user) do
-    {encoded_token, user_token} = Users.UserToken.build_email_token(user, "login")
-    App.Repo.insert!(user_token)
-    {encoded_token, user_token.token}
   end
 
   def offset_user_token(token, amount_to_add, unit) do

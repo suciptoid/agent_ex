@@ -1,15 +1,16 @@
 defmodule AppWeb.UserLive.RegistrationTest do
   use AppWeb.ConnCase, async: true
 
-  import Phoenix.LiveViewTest
   import App.UsersFixtures
+  import Phoenix.LiveViewTest
 
   describe "Registration page" do
-    test "renders registration page", %{conn: conn} do
-      {:ok, _lv, html} = live(conn, ~p"/users/register")
+    test "renders password and Google signup options", %{conn: conn} do
+      {:ok, view, html} = live(conn, ~p"/users/register")
 
-      assert html =~ "Register"
-      assert html =~ "Log in"
+      assert html =~ "Create your account"
+      assert has_element?(view, "#registration_form")
+      assert has_element?(view, "#registration_google_button")
     end
 
     test "redirects if already logged in", %{conn: conn} do
@@ -23,14 +24,21 @@ defmodule AppWeb.UserLive.RegistrationTest do
     end
 
     test "renders errors for invalid data", %{conn: conn} do
+      password = valid_user_password()
       {:ok, lv, _html} = live(conn, ~p"/users/register")
 
       result =
         lv
         |> element("#registration_form")
-        |> render_change(user: %{"email" => "with spaces"})
+        |> render_change(
+          user: %{
+            "email" => "with spaces",
+            "password" => password,
+            "password_confirmation" => password
+          }
+        )
 
-      assert result =~ "Register"
+      assert result =~ "Create your account"
       assert result =~ "must have the @ sign and no spaces"
     end
   end
@@ -46,19 +54,22 @@ defmodule AppWeb.UserLive.RegistrationTest do
         render_submit(form)
         |> follow_redirect(conn, ~p"/users/log-in")
 
-      assert html =~
-               ~r/An email was sent to .*, please access it to confirm your account/
+      assert html =~ "Account created successfully. Log in to continue."
     end
 
     test "renders errors for duplicated email", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/users/register")
-
       user = user_fixture(%{email: "test@email.com"})
+      password = valid_user_password()
 
       result =
         lv
         |> form("#registration_form",
-          user: %{"email" => user.email}
+          user: %{
+            "email" => user.email,
+            "password" => password,
+            "password_confirmation" => password
+          }
         )
         |> render_submit()
 
@@ -67,7 +78,7 @@ defmodule AppWeb.UserLive.RegistrationTest do
   end
 
   describe "registration navigation" do
-    test "redirects to login page when the Log in button is clicked", %{conn: conn} do
+    test "redirects to login page when the Log in link is clicked", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/users/register")
 
       {:ok, _login_live, login_html} =

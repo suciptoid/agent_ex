@@ -7,90 +7,112 @@ defmodule AppWeb.UserLive.Login do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <div class="mx-auto max-w-sm space-y-4">
-        <div class="text-center">
-          <.header>
-            <p>Log in</p>
-            <:subtitle>
-              <%= if @current_scope do %>
-                You need to reauthenticate to perform sensitive actions on your account.
-              <% else %>
-                Don't have an account? <.link
-                  navigate={~p"/users/register"}
-                  class="font-semibold text-primary hover:text-primary/80 hover:underline"
-                  phx-no-format
-                >Sign up</.link> for an account now.
-              <% end %>
-            </:subtitle>
-          </.header>
-        </div>
+      <div class="mx-auto max-w-md px-4 py-10 sm:px-6">
+        <div class="overflow-hidden rounded-[2rem] border border-slate-200/70 bg-white shadow-[0_30px_90px_-45px_rgba(15,23,42,0.45)]">
+          <div class="bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.14),_transparent_55%),linear-gradient(135deg,#f8fafc_0%,#eef2ff_52%,#ffffff_100%)] px-6 py-8 sm:px-8">
+            <.header>
+              Log in
+              <:subtitle>
+                <%= if @current_scope && @current_scope.user do %>
+                  Reauthenticate to continue with sensitive account changes.
+                <% else %>
+                  Need an account?
+                  <.link
+                    navigate={~p"/users/register"}
+                    class="font-semibold text-sky-700 transition hover:text-sky-600 hover:underline"
+                  >
+                    Create one here
+                  </.link>
+                  .
+                <% end %>
+              </:subtitle>
+            </.header>
 
-        <div
-          :if={local_mail_adapter?()}
-          class="rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4 flex items-start gap-3"
-        >
-          <.icon name="hero-information-circle" class="size-6 shrink-0 text-blue-600" />
-          <div class="text-sm text-blue-900 dark:text-blue-100">
-            <p class="font-medium">You are running the local mail adapter.</p>
-            <p class="mt-1">
-              To see sent emails, visit <.link
-                href="/dev/mailbox"
-                class="underline hover:text-blue-700"
-              >the mailbox page</.link>.
+            <p class="mt-4 text-sm leading-6 text-slate-600">
+              Sign in with your password or continue with Google using the same verified email.
             </p>
           </div>
+
+          <div class="space-y-6 px-6 py-6 sm:px-8 sm:py-8">
+            <.link
+              :if={@google_auth_enabled?}
+              id="login_google_button"
+              href={~p"/auth/google"}
+              class={[
+                "group flex w-full items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 transition",
+                "shadow-[0_12px_30px_-24px_rgba(15,23,42,0.9)] hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50"
+              ]}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" class="size-5">
+                <path
+                  d="M21.805 10.023H12v3.955h5.627c-.243 1.275-.97 2.355-2.062 3.081v2.56h3.34c1.956-1.801 3.08-4.456 3.08-7.619 0-.664-.06-1.302-.18-1.977Z"
+                  fill="#4285F4"
+                />
+                <path
+                  d="M12 22c2.79 0 5.13-.925 6.84-2.381l-3.34-2.56c-.925.622-2.11.992-3.5.992-2.688 0-4.964-1.815-5.78-4.254H2.77v2.64A10 10 0 0 0 12 22Z"
+                  fill="#34A853"
+                />
+                <path
+                  d="M6.22 13.797A5.997 5.997 0 0 1 5.89 12c0-.624.11-1.228.33-1.797V7.563H2.77A10 10 0 0 0 2 12c0 1.6.383 3.114 1.07 4.437l3.15-2.64Z"
+                  fill="#FBBC05"
+                />
+                <path
+                  d="M12 5.95c1.52 0 2.88.523 3.95 1.55l2.96-2.96C17.125 2.91 14.785 2 12 2A10 10 0 0 0 2.77 7.563l3.45 2.64C7.036 7.765 9.312 5.95 12 5.95Z"
+                  fill="#EA4335"
+                />
+              </svg>
+              Continue with Google
+            </.link>
+
+            <div :if={@google_auth_enabled?} class="relative">
+              <div class="absolute inset-0 flex items-center">
+                <div class="w-full border-t border-slate-200"></div>
+              </div>
+              <div class="relative flex justify-center">
+                <span class="bg-white px-3 text-[0.65rem] font-semibold uppercase tracking-[0.35em] text-slate-400">
+                  Or use email
+                </span>
+              </div>
+            </div>
+
+            <.form
+              for={@form}
+              id="login_form_password"
+              action={~p"/users/log-in"}
+              phx-submit="submit_password"
+              phx-trigger-action={@trigger_submit}
+              class="space-y-4"
+            >
+              <.input
+                readonly={!!(@current_scope && @current_scope.user)}
+                field={@form[:email]}
+                type="email"
+                label="Email"
+                autocomplete="username"
+                spellcheck="false"
+                required
+                phx-mounted={JS.focus()}
+                id="login_password_email"
+              />
+              <.input
+                field={@form[:password]}
+                type="password"
+                label="Password"
+                autocomplete="current-password"
+                spellcheck="false"
+                required
+              />
+              <div class="grid gap-3 sm:grid-cols-2">
+                <.button class="w-full rounded-2xl" name={@form[:remember_me].name} value="true">
+                  Stay logged in
+                </.button>
+                <.button class="w-full rounded-2xl" variant="outline">
+                  Log in once
+                </.button>
+              </div>
+            </.form>
+          </div>
         </div>
-
-        <.form for={@form} id="login_form_magic" action={~p"/users/log-in"} phx-submit="submit_magic">
-          <.input
-            readonly={!!@current_scope}
-            field={@form[:email]}
-            type="email"
-            label="Email"
-            autocomplete="username"
-            spellcheck="false"
-            required
-            phx-mounted={JS.focus()}
-            id="login_magic_email"
-          />
-          <.button class="w-full mt-4">
-            Log in with email <span aria-hidden="true">→</span>
-          </.button>
-        </.form>
-
-        <div class="border-t border-gray-200 dark:border-gray-700 my-4"></div>
-
-        <.form
-          for={@form}
-          id="login_form_password"
-          action={~p"/users/log-in"}
-          phx-submit="submit_password"
-          phx-trigger-action={@trigger_submit}
-        >
-          <.input
-            readonly={!!@current_scope}
-            field={@form[:email]}
-            type="email"
-            label="Email"
-            autocomplete="username"
-            spellcheck="false"
-            required
-            id="login_password_email"
-          />
-          <.input
-            field={@form[:password]}
-            type="password"
-            label="Password"
-            autocomplete="current-password"
-            spellcheck="false"
-          />
-          <.button class="w-full mt-4" name={@form[:remember_me].name} value="true">
-            Log in and stay logged in <span aria-hidden="true">→</span>
-          </.button>
-          <.button class="w-full mt-2" variant="outline">
-            Log in only this time
-          </.button>
-        </.form>
       </div>
     </Layouts.app>
     """
@@ -100,11 +122,16 @@ defmodule AppWeb.UserLive.Login do
   def mount(_params, _session, socket) do
     email =
       Phoenix.Flash.get(socket.assigns.flash, :email) ||
-        get_in(socket.assigns, [:current_scope, Access.key(:user), Access.key(:email)])
+        current_scope_email(socket.assigns.current_scope)
 
     form = to_form(%{"email" => email}, as: "user")
 
-    {:ok, assign(socket, form: form, trigger_submit: false)}
+    {:ok,
+     assign(socket,
+       form: form,
+       trigger_submit: false,
+       google_auth_enabled?: Users.google_auth_enabled?()
+     )}
   end
 
   @impl true
@@ -112,24 +139,6 @@ defmodule AppWeb.UserLive.Login do
     {:noreply, assign(socket, :trigger_submit, true)}
   end
 
-  def handle_event("submit_magic", %{"user" => %{"email" => email}}, socket) do
-    if user = Users.get_user_by_email(email) do
-      Users.deliver_login_instructions(
-        user,
-        &url(~p"/users/log-in/#{&1}")
-      )
-    end
-
-    info =
-      "If your email is in our system, you will receive instructions for logging in shortly."
-
-    {:noreply,
-     socket
-     |> put_flash(:info, info)
-     |> push_navigate(to: ~p"/users/log-in")}
-  end
-
-  defp local_mail_adapter? do
-    Application.get_env(:app, App.Mailer)[:adapter] == Swoosh.Adapters.Local
-  end
+  defp current_scope_email(%{user: %{email: email}}) when is_binary(email), do: email
+  defp current_scope_email(_current_scope), do: nil
 end

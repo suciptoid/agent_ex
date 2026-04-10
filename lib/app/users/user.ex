@@ -6,6 +6,7 @@ defmodule App.Users.User do
   @foreign_key_type :binary_id
   schema "users" do
     field :email, :string
+    field :google_id, :string
     field :password, :string, virtual: true, redact: true
     field :hashed_password, :string, redact: true
     field :confirmed_at, :utc_datetime
@@ -34,7 +35,31 @@ defmodule App.Users.User do
   def email_changeset(user, attrs, opts \\ []) do
     user
     |> cast(attrs, [:email])
-    |> validate_email(opts)
+    |> validate_email(Keyword.put_new(opts, :validate_changed, true))
+  end
+
+  @doc """
+  A user changeset for password-based registration.
+  """
+  def registration_changeset(user, attrs, opts \\ []) do
+    user
+    |> cast(attrs, [:email])
+    |> validate_email(Keyword.put_new(opts, :validate_changed, false))
+    |> cast(attrs, [:password])
+    |> validate_confirmation(:password, message: "does not match password")
+    |> validate_password(opts)
+  end
+
+  @doc """
+  A user changeset for linking or creating a Google-backed account.
+  """
+  def google_changeset(user, attrs, opts \\ []) do
+    user
+    |> cast(attrs, [:email, :google_id, :confirmed_at])
+    |> validate_email(Keyword.put_new(opts, :validate_changed, false))
+    |> validate_required([:google_id])
+    |> validate_length(:google_id, max: 255)
+    |> unique_constraint(:google_id)
   end
 
   defp validate_email(changeset, opts) do
@@ -50,7 +75,15 @@ defmodule App.Users.User do
       changeset
       |> unsafe_validate_unique(:email, App.Repo)
       |> unique_constraint(:email)
-      |> validate_email_changed()
+      |> maybe_validate_email_changed(opts)
+    else
+      changeset
+    end
+  end
+
+  defp maybe_validate_email_changed(changeset, opts) do
+    if Keyword.get(opts, :validate_changed, false) do
+      validate_email_changed(changeset)
     else
       changeset
     end

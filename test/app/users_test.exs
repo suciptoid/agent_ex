@@ -2,9 +2,9 @@ defmodule App.UsersTest do
   use App.DataCase
 
   alias App.Users
+  alias App.Users.{User, UserToken}
 
   import App.UsersFixtures
-  alias App.Users.{User, UserToken}
 
   describe "get_user_by_email/1" do
     test "does not return the user if the email does not exist" do
@@ -23,15 +23,33 @@ defmodule App.UsersTest do
     end
 
     test "does not return the user if the password is not valid" do
-      user = user_fixture() |> set_password()
+      user = user_fixture()
       refute Users.get_user_by_email_and_password(user.email, "invalid")
     end
 
     test "returns the user if the email and password are valid" do
-      %{id: id} = user = user_fixture() |> set_password()
+      %{id: id} = user = user_fixture()
 
       assert %User{id: ^id} =
                Users.get_user_by_email_and_password(user.email, valid_user_password())
+    end
+  end
+
+  describe "get_user_by_google_id/1" do
+    test "returns nil when no user is linked" do
+      refute Users.get_user_by_google_id("google-123")
+    end
+
+    test "returns the linked user" do
+      {:ok, user} =
+        Users.get_or_register_user_by_google(%{
+          google_id: "google-123",
+          email: unique_user_email(),
+          email_verified?: true
+        })
+
+      assert linked_user = Users.get_user_by_google_id("google-123")
+      assert linked_user.id == user.id
     end
   end
 
@@ -49,41 +67,143 @@ defmodule App.UsersTest do
   end
 
   describe "register_user/1" do
-    test "requires email to be set" do
+    test "requires email and password to be set" do
       {:error, changeset} = Users.register_user(%{})
 
-      assert %{email: ["can't be blank"]} = errors_on(changeset)
+      assert %{email: ["can't be blank"], password: ["can't be blank"]} = errors_on(changeset)
     end
 
     test "validates email when given" do
-      {:error, changeset} = Users.register_user(%{email: "not valid"})
+      password = valid_user_password()
+
+      {:error, changeset} =
+        Users.register_user(%{
+          email: "not valid",
+          password: password,
+          password_confirmation: password
+        })
 
       assert %{email: ["must have the @ sign and no spaces"]} = errors_on(changeset)
     end
 
     test "validates maximum values for email for security" do
       too_long = String.duplicate("db", 100)
-      {:error, changeset} = Users.register_user(%{email: too_long})
+      password = valid_user_password()
+
+      {:error, changeset} =
+        Users.register_user(%{
+          email: too_long,
+          password: password,
+          password_confirmation: password
+        })
+
       assert "should be at most 160 character(s)" in errors_on(changeset).email
     end
 
     test "validates email uniqueness" do
       %{email: email} = user_fixture()
-      {:error, changeset} = Users.register_user(%{email: email})
+
+      {:error, changeset} =
+        Users.register_user(valid_user_attributes(email: email))
+
       assert "has already been taken" in errors_on(changeset).email
 
-      # Now try with the uppercased email too, to check that email case is ignored.
-      {:error, changeset} = Users.register_user(%{email: String.upcase(email)})
+      {:error, changeset} =
+        Users.register_user(valid_user_attributes(email: String.upcase(email)))
+
       assert "has already been taken" in errors_on(changeset).email
     end
 
-    test "registers users without password" do
+    test "hashes the password when the data is valid" do
       email = unique_user_email()
       {:ok, user} = Users.register_user(valid_user_attributes(email: email))
+
       assert user.email == email
-      assert is_nil(user.hashed_password)
+      assert user.hashed_password
       assert is_nil(user.confirmed_at)
       assert is_nil(user.password)
+    end
+  end
+
+  describe "change_user_registration/3" do
+    test "returns a registration changeset" do
+      assert %Ecto.Changeset{} = changeset = Users.change_user_registration(%User{})
+      assert Enum.sort(changeset.required) == [:email, :password]
+    end
+  end
+
+  describe "get_or_register_user_by_google/1" do
+    test "creates a confirmed user for a verified Google email" do
+      email = unique_user_email()
+
+      assert {:ok, user} =
+               Users.get_or_register_user_by_google(%{
+                 google_id: "google-new",
+                 email: email,
+                 email_verified?: true
+               })
+
+      assert user.email == email
+      assert user.google_id == "google-new"
+      assert user.confirmed_at
+      assert is_nil(user.hashed_password)
+    end
+
+    test "links Google to an existing email account" do
+      user = unconfirmed_user_fixture()
+      refute user.confirmed_at
+
+      assert {:ok, linked_user} =
+               Users.get_or_register_user_by_google(%{
+                 google_id: "google-linked",
+                 email: user.email,
+                 email_verified?: true
+               })
+
+      assert linked_user.id == user.id
+      assert linked_user.google_id == "google-linked"
+      assert linked_user.confirmed_at
+    end
+
+    test "returns the existing user when the Google account is already linked" do
+      {:ok, user} =
+        Users.get_or_register_user_by_google(%{
+          google_id: "google-repeat",
+          email: unique_user_email(),
+          email_verified?: true
+        })
+
+      assert {:ok, same_user} =
+               Users.get_or_register_user_by_google(%{
+                 google_id: "google-repeat",
+                 email: "changed@example.com",
+                 email_verified?: true
+               })
+
+      assert same_user.id == user.id
+    end
+
+    test "rejects unverified Google emails" do
+      assert {:error, :email_not_verified} =
+               Users.get_or_register_user_by_google(%{
+                 google_id: "google-unverified",
+                 email: unique_user_email(),
+                 email_verified?: false
+               })
+    end
+
+    test "rejects a conflicting linked Google account" do
+      user =
+        user_fixture()
+        |> Ecto.Changeset.change(google_id: "google-original")
+        |> Repo.update!()
+
+      assert {:error, :google_account_conflict} =
+               Users.get_or_register_user_by_google(%{
+                 google_id: "google-other",
+                 email: user.email,
+                 email_verified?: true
+               })
     end
   end
 
@@ -244,7 +364,6 @@ defmodule App.UsersTest do
       assert user_token.context == "session"
       assert user_token.authenticated_at != nil
 
-      # Creating the same token for another user should fail
       assert_raise Ecto.ConstraintError, fn ->
         Repo.insert!(%UserToken{
           token: user_token.token,
@@ -288,90 +407,12 @@ defmodule App.UsersTest do
     end
   end
 
-  describe "get_user_by_magic_link_token/1" do
-    setup do
-      user = user_fixture()
-      {encoded_token, _hashed_token} = generate_user_magic_link_token(user)
-      %{user: user, token: encoded_token}
-    end
-
-    test "returns user by token", %{user: user, token: token} do
-      assert session_user = Users.get_user_by_magic_link_token(token)
-      assert session_user.id == user.id
-    end
-
-    test "does not return user for invalid token" do
-      refute Users.get_user_by_magic_link_token("oops")
-    end
-
-    test "does not return user for expired token", %{token: token} do
-      {1, nil} = Repo.update_all(UserToken, set: [inserted_at: ~N[2020-01-01 00:00:00]])
-      refute Users.get_user_by_magic_link_token(token)
-    end
-  end
-
-  describe "login_user_by_magic_link/1" do
-    test "confirms user and expires tokens" do
-      user = unconfirmed_user_fixture()
-      refute user.confirmed_at
-      {encoded_token, hashed_token} = generate_user_magic_link_token(user)
-
-      assert {:ok, {user, [%{token: ^hashed_token}]}} =
-               Users.login_user_by_magic_link(encoded_token)
-
-      assert user.confirmed_at
-    end
-
-    test "returns user and (deleted) token for confirmed user" do
-      user = user_fixture()
-      assert user.confirmed_at
-      {encoded_token, _hashed_token} = generate_user_magic_link_token(user)
-      assert {:ok, {^user, []}} = Users.login_user_by_magic_link(encoded_token)
-      # one time use only
-      assert {:error, :not_found} = Users.login_user_by_magic_link(encoded_token)
-    end
-
-    test "raises when unconfirmed user has password set" do
-      user = unconfirmed_user_fixture()
-
-      {1, nil} =
-        Repo.update_all(from(u in User, where: u.id == ^user.id),
-          set: [hashed_password: "hashed"]
-        )
-
-      {encoded_token, _hashed_token} = generate_user_magic_link_token(user)
-
-      assert_raise RuntimeError, ~r/magic link log in is not allowed/, fn ->
-        Users.login_user_by_magic_link(encoded_token)
-      end
-    end
-  end
-
   describe "delete_user_session_token/1" do
     test "deletes the token" do
       user = user_fixture()
       token = Users.generate_user_session_token(user)
       assert Users.delete_user_session_token(token) == :ok
       refute Users.get_user_by_session_token(token)
-    end
-  end
-
-  describe "deliver_login_instructions/2" do
-    setup do
-      %{user: unconfirmed_user_fixture()}
-    end
-
-    test "sends token through notification", %{user: user} do
-      token =
-        extract_user_token(fn url ->
-          Users.deliver_login_instructions(user, url)
-        end)
-
-      {:ok, token} = Base.url_decode64(token, padding: false)
-      assert user_token = Repo.get_by(UserToken, token: :crypto.hash(:sha256, token))
-      assert user_token.user_id == user.id
-      assert user_token.sent_to == user.email
-      assert user_token.context == "login"
     end
   end
 

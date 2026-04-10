@@ -54,7 +54,25 @@ if config_env() == :prod do
 
   host = System.get_env("PHX_HOST") || "example.com"
 
+  google_client_id =
+    System.get_env("GOOGLE_CLIENT_ID") ||
+      raise """
+      environment variable GOOGLE_CLIENT_ID is missing.
+      Google OAuth sign-in requires a configured client ID.
+      """
+
+  google_client_secret =
+    System.get_env("GOOGLE_CLIENT_SECRET") ||
+      raise """
+      environment variable GOOGLE_CLIENT_SECRET is missing.
+      Google OAuth sign-in requires a configured client secret.
+      """
+
   config :app, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
+
+  config :ueberauth, Ueberauth.Strategy.Google.OAuth,
+    client_id: google_client_id,
+    client_secret: google_client_secret
 
   config :app, AppWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],

@@ -43,6 +43,10 @@ config :phoenix_live_view,
 config :phoenix,
   sort_verified_routes_query_params: true
 
+config :ueberauth, Ueberauth.Strategy.Google.OAuth,
+  client_id: "test-google-client-id",
+  client_secret: "test-google-client-secret"
+
 # Configure Vault for tests with an ephemeral key so Cloak types work in CI
 config :app, App.Vault,
   ciphers: [

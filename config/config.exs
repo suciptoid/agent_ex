@@ -28,6 +28,19 @@ config :req_llm,
   load_dotenv: false,
   stream_receive_timeout: 60_000
 
+config :tesla, disable_deprecated_builder_warning: true
+
+config :ueberauth, Ueberauth,
+  providers: [
+    google:
+      {Ueberauth.Strategy.Google,
+       [default_scope: "openid email profile", prompt: "select_account"]}
+  ]
+
+config :ueberauth, Ueberauth.Strategy.Google.OAuth,
+  client_id: {System, :get_env, ["GOOGLE_CLIENT_ID"]},
+  client_secret: {System, :get_env, ["GOOGLE_CLIENT_SECRET"]}
+
 # Configure the endpoint
 config :app, AppWeb.Endpoint,
   url: [host: "localhost"],

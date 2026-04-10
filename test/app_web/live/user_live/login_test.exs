@@ -1,51 +1,24 @@
 defmodule AppWeb.UserLive.LoginTest do
   use AppWeb.ConnCase, async: true
 
-  import Phoenix.LiveViewTest
   import App.UsersFixtures
+  import Phoenix.LiveViewTest
 
   describe "login page" do
-    test "renders login page", %{conn: conn} do
-      {:ok, _lv, html} = live(conn, ~p"/users/log-in")
+    test "renders password and Google login options", %{conn: conn} do
+      {:ok, view, html} = live(conn, ~p"/users/log-in")
 
       assert html =~ "Log in"
-      assert html =~ "Sign up"
-      assert html =~ "Log in with email"
-    end
-  end
-
-  describe "user login - magic link" do
-    test "sends magic link email when user exists", %{conn: conn} do
-      user = user_fixture()
-
-      {:ok, lv, _html} = live(conn, ~p"/users/log-in")
-
-      {:ok, _lv, html} =
-        form(lv, "#login_form_magic", user: %{email: user.email})
-        |> render_submit()
-        |> follow_redirect(conn, ~p"/users/log-in")
-
-      assert html =~ "If your email is in our system"
-
-      assert App.Repo.get_by!(App.Users.UserToken, user_id: user.id).context ==
-               "login"
-    end
-
-    test "does not disclose if user is registered", %{conn: conn} do
-      {:ok, lv, _html} = live(conn, ~p"/users/log-in")
-
-      {:ok, _lv, html} =
-        form(lv, "#login_form_magic", user: %{email: "idonotexist@example.com"})
-        |> render_submit()
-        |> follow_redirect(conn, ~p"/users/log-in")
-
-      assert html =~ "If your email is in our system"
+      assert html =~ "Create one here"
+      assert has_element?(view, "#login_form_password")
+      assert has_element?(view, "#login_google_button")
+      refute html =~ "Log in with email"
     end
   end
 
   describe "user login - password" do
     test "redirects if user logs in with valid credentials", %{conn: conn} do
-      user = user_fixture() |> set_password()
+      user = user_fixture()
 
       {:ok, lv, _html} = live(conn, ~p"/users/log-in")
 
@@ -59,9 +32,7 @@ defmodule AppWeb.UserLive.LoginTest do
       assert redirected_to(conn) == ~p"/organizations/select"
     end
 
-    test "redirects to login page with a flash error if credentials are invalid", %{
-      conn: conn
-    } do
+    test "redirects to login page with a flash error if credentials are invalid", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/users/log-in")
 
       form =
@@ -76,16 +47,16 @@ defmodule AppWeb.UserLive.LoginTest do
   end
 
   describe "login navigation" do
-    test "redirects to registration page when the Register button is clicked", %{conn: conn} do
+    test "redirects to registration page when the sign up link is clicked", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/users/log-in")
 
-      {:ok, _login_live, login_html} =
+      {:ok, _login_live, registration_html} =
         lv
-        |> element("main a", "Sign up")
+        |> element("main a", "Create one here")
         |> render_click()
         |> follow_redirect(conn, ~p"/users/register")
 
-      assert login_html =~ "Register"
+      assert registration_html =~ "Create your account"
     end
   end
 end

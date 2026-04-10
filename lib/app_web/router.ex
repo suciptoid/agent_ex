@@ -98,11 +98,13 @@ defmodule AppWeb.Router do
   scope "/", AppWeb do
     pipe_through [:browser]
 
+    get "/auth/:provider", UserOAuthController, :request
+    get "/auth/:provider/callback", UserOAuthController, :callback
+
     live_session :current_user,
       on_mount: [{AppWeb.UserAuth, :mount_current_scope}] do
       live "/users/register", UserLive.Registration, :new
       live "/users/log-in", UserLive.Login, :new
-      live "/users/log-in/:token", UserLive.Confirmation, :new
     end
 
     post "/users/log-in", UserSessionController, :create

@@ -1,18 +1,28 @@
-# App
+# Agent EX
 
-To start your Phoenix server:
+A multi-agent AI workspace built with Phoenix, featuring chat orchestration, Telegram integration, and extensible tools.
 
-* Run `mix setup` to install and setup dependencies
-* Start Phoenix endpoint with `mix phx.server` or inside IEx with `iex -S mix phx.server`
+## Features
 
-Now you can visit [`localhost:4000`](http://localhost:4000) from your browser.
+- **Multi-Agent Orchestration** - Run and manage multiple AI agents
+- **Real-Time Streaming** - Streaming AI responses
+- **Telegram Gateway** - Connect Telegram groups/channels as AI assistants
+- **Tool System** - Create and manage custom tools for agents
+- **Organizations & Teams** - Multi-tenant workspace support
+- **Context Management** - LLM context compaction
 
-Ready to run in production? Please [check our deployment guides](https://hexdocs.pm/phoenix/deployment.html).
+## Tech Stack
 
-## Learn more
+- Phoenix v1.8 (LiveView)
+- Ecto/PostgreSQL
+- Tailwind CSS + [PUI](https://pui.sukacipta.com)
+- Req (HTTP client)
 
-* Official website: https://www.phoenixframework.org/
-* Guides: https://hexdocs.pm/phoenix/overview.html
-* Docs: https://hexdocs.pm/phoenix
-* Forum: https://elixirforum.com/c/phoenix-forum
-* Source: https://github.com/phoenixframework/phoenix
+## Getting Started
+
+```bash
+mix setup
+mix phx.server
+```
+
+Visit [`localhost:4000`](https://localhost:4000)

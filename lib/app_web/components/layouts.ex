@@ -250,22 +250,22 @@ defmodule AppWeb.Layouts do
 
       <%!-- Sidebar --%>
       <aside class={[
-        "fixed inset-y-2 left-2 z-50 flex h-[calc(100vh-1rem)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl transition-all duration-300 ease-in-out",
-        "w-[260px]",
+        "fixed inset-y-2 left-2 z-50 flex h-[calc(100vh-1rem)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl transition-all duration-300 ease-in-out",
+        "w-[240px]",
         "[[data-sidebar-collapsed=true]_&]:-translate-x-[calc(100%+0.75rem)] lg:[[data-sidebar-collapsed=true]_&]:translate-x-0",
-        "lg:relative lg:inset-y-0 lg:left-0 lg:h-full lg:max-w-none lg:rounded-none lg:border-y-0 lg:border-l-0 lg:shadow-none lg:w-[260px]",
-        "lg:[[data-sidebar-collapsed=true]_&]:w-14"
+        "lg:relative lg:inset-y-0 lg:left-0 lg:h-full lg:max-w-none lg:rounded-none lg:border-y-0 lg:border-l-0 lg:shadow-none lg:w-[240px]",
+        "lg:[[data-sidebar-collapsed=true]_&]:w-[52px]"
       ]}>
         <%!-- Sidebar top: hamburger + organization switcher --%>
-        <div class="flex items-center gap-2 px-3 py-3 border-b border-border">
+        <div class="flex items-center gap-1.5 px-2.5 py-2 border-b border-border">
           <button
             type="button"
-            class="flex-shrink-0 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            class="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
             aria-label="Toggle sidebar"
             data-sidebar-toggle
             aria-expanded="true"
           >
-            <.icon name="hero-bars-3" class="size-5" />
+            <.icon name="hero-bars-3" class="size-4.5" />
           </button>
 
           <div class="min-w-0 flex-1 [[data-sidebar-collapsed=true]_&]:hidden">
@@ -273,22 +273,22 @@ defmodule AppWeb.Layouts do
               id="sidebar-organization-switcher"
               variant="unstyled"
               content_class="w-64 z-50 bg-popover text-popover-foreground rounded-md border border-border p-1 shadow-md mb-2 aria-hidden:hidden not-aria-hidden:animate-in not-aria-hidden:fade-in-0 not-aria-hidden:zoom-in-95 aria-hidden:animate-out aria-hidden:fade-out-0 aria-hidden:zoom-out-95"
-              class="flex w-full! min-w-0 items-center gap-3 rounded-xl border border-border/60 bg-background/70 px-2.5 py-2 text-left shadow-none transition hover:bg-accent/60"
+              class="flex w-full! min-w-0 items-center gap-2 rounded-lg border border-border/60 bg-background/70 px-2 py-1.5 text-left shadow-none transition hover:bg-accent/60"
             >
-              <div class="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                <.icon name="hero-building-office-2" class="size-4.5" />
+              <div class="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <.icon name="hero-building-office-2" class="size-4" />
               </div>
 
               <div class="min-w-0 flex-1 overflow-hidden">
-                <p class="truncate text-sm font-semibold text-foreground">
+                <p class="truncate text-xs font-semibold text-foreground">
                   {active_organization_name(@current_scope)}
                 </p>
-                <p class="truncate text-xs text-muted-foreground">
+                <p class="truncate text-[10px] text-muted-foreground">
                   {active_organization_subtitle(@current_scope, @sidebar_organizations)}
                 </p>
               </div>
 
-              <.icon name="hero-chevron-up-down" class="size-4 shrink-0 text-muted-foreground" />
+              <.icon name="hero-chevron-up-down" class="size-3.5 shrink-0 text-muted-foreground" />
 
               <:items>
                 <.menu_item
@@ -318,46 +318,46 @@ defmodule AppWeb.Layouts do
         </div>
 
         <%!-- Navigation Links --%>
-        <nav class="px-2 py-3 space-y-0.5">
+        <nav class="px-1.5 py-2 space-y-0.5">
           <.link
             navigate={~p"/dashboard"}
-            class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+            class="flex items-center gap-2.5 px-2 py-1.5 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
           >
-            <.icon name="hero-home" class="size-5 flex-shrink-0" />
+            <.icon name="hero-home" class="size-4.5 flex-shrink-0" />
             <span class="[[data-sidebar-collapsed=true]_&]:hidden">Dashboard</span>
           </.link>
 
           <.link
             navigate={~p"/providers"}
-            class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+            class="flex items-center gap-2.5 px-2 py-1.5 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
           >
-            <.icon name="hero-server-stack" class="size-5 flex-shrink-0" />
+            <.icon name="hero-server-stack" class="size-4.5 flex-shrink-0" />
             <span class="[[data-sidebar-collapsed=true]_&]:hidden">Providers</span>
           </.link>
 
           <.link
             navigate={~p"/tools/list"}
-            class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+            class="flex items-center gap-2.5 px-2 py-1.5 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
           >
-            <.icon name="hero-wrench-screwdriver" class="size-5 flex-shrink-0" />
+            <.icon name="hero-wrench-screwdriver" class="size-4.5 flex-shrink-0" />
             <span class="[[data-sidebar-collapsed=true]_&]:hidden">Tools</span>
           </.link>
 
           <div id="sidebar-agents-group" class="space-y-0.5">
             <.link
               navigate={~p"/agents"}
-              class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+              class="flex items-center gap-2.5 px-2 py-1.5 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
             >
-              <.icon name="hero-cpu-chip" class="size-5 flex-shrink-0" />
+              <.icon name="hero-cpu-chip" class="size-4.5 flex-shrink-0" />
               <span class="[[data-sidebar-collapsed=true]_&]:hidden">Agents</span>
             </.link>
 
             <.link
               id="sidebar-gateways-link"
               navigate={~p"/gateways"}
-              class="flex items-center gap-3 px-2.5 py-2 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+              class="flex items-center gap-2.5 px-2 py-1.5 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
             >
-              <.icon name="hero-signal" class="size-5 flex-shrink-0" />
+              <.icon name="hero-signal" class="size-4.5 flex-shrink-0" />
               <span class="[[data-sidebar-collapsed=true]_&]:hidden">Gateways</span>
             </.link>
           </div>
@@ -365,45 +365,45 @@ defmodule AppWeb.Layouts do
 
         <%!-- Chat History --%>
         <div class="flex-1 overflow-y-auto border-t border-border [[data-sidebar-collapsed=true]_&]:hidden">
-          <div class="px-2 pb-1">
-            <div class="sticky top-0 z-10 mb-1 flex items-center justify-between bg-card px-2.5 pb-2 pt-3">
-              <h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <div class="px-1.5 pb-1">
+            <div class="sticky top-0 z-10 mb-1 flex items-center justify-between bg-card px-2 py-1.5">
+              <h3 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Chats
               </h3>
               <.link
                 id="sidebar-new-chat-link"
                 navigate={~p"/chat"}
-                class="inline-flex items-center justify-center size-5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                class="inline-flex items-center justify-center size-4.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                 title="New Chat"
               >
-                <.icon name="hero-plus" class="size-3.5" />
+                <.icon name="hero-plus" class="size-3" />
               </.link>
             </div>
             <div class="space-y-0.5">
               <div
                 :for={chat <- @sidebar_chat_rooms}
-                class="group/sidebar flex items-center gap-2.5 rounded-lg transition-colors hover:bg-accent hover:text-foreground"
+                class="group/sidebar flex items-center gap-2 rounded-md transition-colors hover:bg-accent hover:text-foreground"
               >
                 <.link
                   navigate={~p"/chat/#{chat.id}"}
-                  class="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1.5 text-sm text-foreground/65 transition-colors"
+                  class="flex min-w-0 flex-1 items-center gap-2 px-2 py-1 text-xs text-foreground/65 transition-colors"
                 >
                   <span
                     :if={chat.gateway_linked}
                     id={"sidebar-chat-gateway-icon-#{chat.id}"}
-                    class="inline-flex size-5 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+                    class="inline-flex size-4 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
                     title="Linked to a gateway channel"
                   >
-                    <.icon name="hero-signal" class="size-3" />
+                    <.icon name="hero-signal" class="size-2.5" />
                   </span>
                   <span class="min-w-0 flex-1 truncate">{sidebar_chat_room_title(chat)}</span>
-                  <span class="inline-flex flex-shrink-0 items-center gap-1.5">
+                  <span class="inline-flex flex-shrink-0 items-center gap-1">
                     <span
                       :if={chat.loading}
                       id={"sidebar-chat-loading-#{chat.id}"}
-                      class="inline-flex size-4 items-center justify-center text-muted-foreground"
+                      class="inline-flex size-3.5 items-center justify-center text-muted-foreground"
                     >
-                      <.icon name="hero-arrow-path" class="size-3.5 animate-spin" />
+                      <.icon name="hero-arrow-path" class="size-3 animate-spin" />
                     </span>
                   </span>
                 </.link>
@@ -414,17 +414,17 @@ defmodule AppWeb.Layouts do
                   phx-click="delete-chat-room"
                   phx-value-id={chat.id}
                   data-confirm="Delete this chat?"
-                  class="hidden size-7 flex-shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-accent hover:text-foreground group-hover/sidebar:flex focus-visible:flex focus-visible:bg-accent focus-visible:text-foreground"
+                  class="hidden size-6 flex-shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-accent hover:text-foreground group-hover/sidebar:flex focus-visible:flex focus-visible:bg-accent focus-visible:text-foreground"
                   title="Delete chat"
                   aria-label="Delete chat"
                 >
-                  <.icon name="hero-trash" class="size-4" />
+                  <.icon name="hero-trash" class="size-3.5" />
                 </button>
               </div>
 
               <p
                 :if={@sidebar_chat_rooms == []}
-                class="px-2.5 py-1.5 text-xs text-muted-foreground/60"
+                class="px-2 py-1 text-xs text-muted-foreground/60"
               >
                 No conversations yet
               </p>
@@ -433,13 +433,13 @@ defmodule AppWeb.Layouts do
         </div>
 
         <%!-- Collapsed chat icon --%>
-        <div class="hidden [[data-sidebar-collapsed=true]_&]:flex flex-1 justify-center pt-3 border-t border-border">
+        <div class="hidden [[data-sidebar-collapsed=true]_&]:flex flex-1 justify-center pt-2 border-t border-border">
           <.link
             navigate={~p"/chat"}
             class="p-1.5 text-muted-foreground hover:text-foreground transition-colors"
             title="Chat"
           >
-            <.icon name="hero-chat-bubble-left-right" class="size-5" />
+            <.icon name="hero-chat-bubble-left-right" class="size-4.5" />
           </.link>
         </div>
 
@@ -450,18 +450,18 @@ defmodule AppWeb.Layouts do
               id="sidebar-user-menu"
               variant="unstyled"
               content_class="w-56 z-50 bg-popover text-popover-foreground rounded-md border border-border p-1 shadow-md mb-2 aria-hidden:hidden not-aria-hidden:animate-in not-aria-hidden:fade-in-0 not-aria-hidden:zoom-in-95 aria-hidden:animate-out aria-hidden:fade-out-0 aria-hidden:zoom-out-95"
-              class="flex w-full! min-w-0 items-center gap-2.5 overflow-hidden rounded-xl bg-background/70 px-2 py-1.5 text-left shadow-none transition hover:bg-accent/60"
+              class="flex w-full! min-w-0 items-center gap-2 overflow-hidden rounded-lg bg-background/70 px-2 py-1.5 text-left shadow-none transition hover:bg-accent/60"
             >
-              <.icon name="hero-user-circle" class="size-7 text-muted-foreground shrink-0" />
+              <.icon name="hero-user-circle" class="size-6 text-muted-foreground shrink-0" />
               <div class="min-w-0 flex-1 overflow-hidden">
-                <p class="truncate text-sm font-medium text-foreground">
+                <p class="truncate text-xs font-medium text-foreground">
                   {sidebar_user_label(@current_scope.user)}
                 </p>
-                <p class="truncate text-xs text-muted-foreground">
+                <p class="truncate text-[10px] text-muted-foreground">
                   {@current_scope.user.email}
                 </p>
               </div>
-              <.icon name="hero-chevron-up-down" class="size-4 text-muted-foreground shrink-0" />
+              <.icon name="hero-chevron-up-down" class="size-3.5 text-muted-foreground shrink-0" />
               <:items>
                 <.menu_item navigate={~p"/users/settings"}>
                   <.icon name="hero-cog-6-tooth" class="size-4" /> Settings
@@ -480,7 +480,7 @@ defmodule AppWeb.Layouts do
           <%!-- Icon-only user icon when collapsed --%>
           <div class="hidden [[data-sidebar-collapsed=true]_&]:flex justify-center">
             <span class="p-1.5 text-muted-foreground">
-              <.icon name="hero-user-circle" class="size-6" />
+              <.icon name="hero-user-circle" class="size-5" />
             </span>
           </div>
         </div>

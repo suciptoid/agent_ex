@@ -182,7 +182,7 @@ defmodule AppWeb.GatewayLiveTest do
 
     assert has_element?(live_view, "#sidebar-agents-group #sidebar-gateways-link", "Gateways")
     assert has_element?(live_view, "#sidebar-gateways-link.rounded-lg")
-    assert has_element?(live_view, "#sidebar-gateways-link .size-5")
+    assert has_element?(live_view, "#sidebar-gateways-link .size-4\\.5")
     refute has_element?(live_view, "#sidebar-gateways-link.text-muted-foreground")
     assert has_element?(live_view, "#gateway-switch-#{gateway.id}[role=\"switch\"]")
 

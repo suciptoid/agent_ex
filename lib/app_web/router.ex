@@ -107,6 +107,8 @@ defmodule AppWeb.Router do
       on_mount: [{AppWeb.UserAuth, :mount_current_scope}] do
       live "/users/register", UserLive.Registration, :new
       live "/users/log-in", UserLive.Login, :new
+      live "/users/reset-password", UserLive.ForgotPassword, :new
+      live "/users/reset-password/:token", UserLive.ResetPassword, :edit
     end
 
     post "/users/log-in", UserSessionController, :create

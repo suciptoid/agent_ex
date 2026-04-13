@@ -421,4 +421,85 @@ defmodule App.UsersTest do
       refute inspect(%User{password: "123456"}) =~ "password: \"123456\""
     end
   end
+
+  describe "deliver_user_reset_password_instructions/2" do
+    setup do
+      %{user: user_fixture()}
+    end
+
+    test "sends token through notification", %{user: user} do
+      token =
+        extract_user_token(fn url ->
+          Users.deliver_user_reset_password_instructions(user, url)
+        end)
+
+      {:ok, decoded_token} = Base.url_decode64(token, padding: false)
+      assert user_token = Repo.get_by(UserToken, token: :crypto.hash(:sha256, decoded_token))
+      assert user_token.user_id == user.id
+      assert user_token.sent_to == user.email
+      assert user_token.context == "reset_password"
+    end
+  end
+
+  describe "get_user_by_reset_password_token/1" do
+    setup do
+      user = user_fixture()
+
+      token =
+        extract_user_token(fn url ->
+          Users.deliver_user_reset_password_instructions(user, url)
+        end)
+
+      %{user: user, token: token}
+    end
+
+    test "returns the user with valid token", %{user: user, token: token} do
+      assert reset_user = Users.get_user_by_reset_password_token(token)
+      assert reset_user.id == user.id
+    end
+
+    test "does not return the user with invalid token", %{token: token} do
+      refute Users.get_user_by_reset_password_token("invalid" <> token)
+    end
+
+    test "does not return the user if token expired", %{token: token} do
+      {1, nil} = Repo.update_all(UserToken, set: [inserted_at: ~N[2020-01-01 00:00:00]])
+      refute Users.get_user_by_reset_password_token(token)
+    end
+  end
+
+  describe "reset_user_password/2" do
+    setup do
+      %{user: user_fixture()}
+    end
+
+    test "validates password", %{user: user} do
+      {:error, changeset} =
+        Users.reset_user_password(user, %{
+          password: "too short",
+          password_confirmation: "does not match"
+        })
+
+      assert %{
+               password: ["should be at least 12 character(s)"],
+               password_confirmation: ["does not match password"]
+             } = errors_on(changeset)
+    end
+
+    test "updates password and invalidates existing tokens", %{user: user} do
+      _token = Users.generate_user_session_token(user)
+      {:ok, _} = Users.deliver_user_reset_password_instructions(user, &"[TOKEN]#{&1}[TOKEN]")
+
+      {:ok, {updated_user, tokens_to_expire}} =
+        Users.reset_user_password(user, %{
+          password: "new valid password",
+          password_confirmation: "new valid password"
+        })
+
+      assert Enum.any?(tokens_to_expire, &(&1.context == "session"))
+      assert Enum.any?(tokens_to_expire, &(&1.context == "reset_password"))
+      assert updated_user.hashed_password != user.hashed_password
+      refute Repo.get_by(UserToken, user_id: user.id)
+    end
+  end
 end

@@ -102,12 +102,21 @@ defmodule AppWeb.UserLive.Login do
                 spellcheck="false"
                 required
               />
-              <div class="grid gap-3 sm:grid-cols-2">
-                <.button class="w-full rounded-2xl" name={@form[:remember_me].name} value="true">
-                  Stay logged in
-                </.button>
-                <.button class="w-full rounded-2xl" variant="outline">
-                  Log in once
+              <.input
+                field={@form[:remember_me]}
+                type="checkbox"
+                label="Remember me on this device"
+                id="login_remember_me"
+              />
+              <div class="flex items-center justify-between gap-4">
+                <.link
+                  navigate={~p"/users/reset-password"}
+                  class="text-sm font-semibold text-sky-700 transition hover:text-sky-600 hover:underline"
+                >
+                  Forgot password?
+                </.link>
+                <.button class="rounded-2xl px-8">
+                  Log in
                 </.button>
               </div>
             </.form>

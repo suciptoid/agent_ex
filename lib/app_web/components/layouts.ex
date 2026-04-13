@@ -329,9 +329,8 @@ defmodule AppWeb.Layouts do
             navigate={~p"/dashboard"}
             data-sidebar-nav-link
             data-sidebar-match="exact"
-            class="group/nav flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground aria-[current=page]:bg-background/80 aria-[current=page]:text-foreground aria-[current=page]:shadow-sm"
+            class="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground aria-[current=page]:bg-background/80 aria-[current=page]:text-foreground aria-[current=page]:shadow-sm"
           >
-            <span class="hidden size-1.5 rounded-full bg-primary group-aria-[current=page]/nav:block" />
             <.icon name="hero-home" class="size-4.5 flex-shrink-0" />
             <span class="[[data-sidebar-collapsed=true]_&]:hidden">Dashboard</span>
           </.link>
@@ -340,9 +339,8 @@ defmodule AppWeb.Layouts do
             navigate={~p"/providers"}
             data-sidebar-nav-link
             data-sidebar-match="prefix"
-            class="group/nav flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground aria-[current=page]:bg-background/80 aria-[current=page]:text-foreground aria-[current=page]:shadow-sm"
+            class="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground aria-[current=page]:bg-background/80 aria-[current=page]:text-foreground aria-[current=page]:shadow-sm"
           >
-            <span class="hidden size-1.5 rounded-full bg-primary group-aria-[current=page]/nav:block" />
             <.icon name="hero-server-stack" class="size-4.5 flex-shrink-0" />
             <span class="[[data-sidebar-collapsed=true]_&]:hidden">Providers</span>
           </.link>
@@ -352,9 +350,8 @@ defmodule AppWeb.Layouts do
             data-sidebar-nav-link
             data-sidebar-match="prefix"
             data-sidebar-prefix="/tools"
-            class="group/nav flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground aria-[current=page]:bg-background/80 aria-[current=page]:text-foreground aria-[current=page]:shadow-sm"
+            class="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground aria-[current=page]:bg-background/80 aria-[current=page]:text-foreground aria-[current=page]:shadow-sm"
           >
-            <span class="hidden size-1.5 rounded-full bg-primary group-aria-[current=page]/nav:block" />
             <.icon name="hero-wrench-screwdriver" class="size-4.5 flex-shrink-0" />
             <span class="[[data-sidebar-collapsed=true]_&]:hidden">Tools</span>
           </.link>
@@ -364,9 +361,8 @@ defmodule AppWeb.Layouts do
               navigate={~p"/agents"}
               data-sidebar-nav-link
               data-sidebar-match="prefix"
-              class="group/nav flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground aria-[current=page]:bg-background/80 aria-[current=page]:text-foreground aria-[current=page]:shadow-sm"
+              class="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground aria-[current=page]:bg-background/80 aria-[current=page]:text-foreground aria-[current=page]:shadow-sm"
             >
-              <span class="hidden size-1.5 rounded-full bg-primary group-aria-[current=page]/nav:block" />
               <.icon name="hero-cpu-chip" class="size-4.5 flex-shrink-0" />
               <span class="[[data-sidebar-collapsed=true]_&]:hidden">Agents</span>
             </.link>
@@ -376,9 +372,8 @@ defmodule AppWeb.Layouts do
               navigate={~p"/gateways"}
               data-sidebar-nav-link
               data-sidebar-match="prefix"
-              class="group/nav flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground aria-[current=page]:bg-background/80 aria-[current=page]:text-foreground aria-[current=page]:shadow-sm"
+              class="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground aria-[current=page]:bg-background/80 aria-[current=page]:text-foreground aria-[current=page]:shadow-sm"
             >
-              <span class="hidden size-1.5 rounded-full bg-primary group-aria-[current=page]/nav:block" />
               <.icon name="hero-signal" class="size-4.5 flex-shrink-0" />
               <span class="[[data-sidebar-collapsed=true]_&]:hidden">Gateways</span>
             </.link>
@@ -404,14 +399,13 @@ defmodule AppWeb.Layouts do
             <div class="space-y-0.5">
               <div
                 :for={chat <- @sidebar_chat_rooms}
-                class="group/sidebar flex items-center gap-2 rounded-md py-1 transition-colors hover:bg-background/85 hover:text-foreground hover:shadow-sm"
+                class="group/sidebar flex items-center gap-2 rounded-md py-0.5 transition-colors hover:bg-background/85 hover:text-foreground hover:shadow-sm"
               >
                 <.link
                   navigate={~p"/chat/#{chat.id}"}
                   data-sidebar-chat-link
-                  class="group/chat flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-xs text-foreground/65 transition-colors aria-[current=page]:font-semibold aria-[current=page]:text-foreground"
+                  class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-xs text-foreground/65 transition-colors aria-[current=page]:bg-background/85 aria-[current=page]:font-semibold aria-[current=page]:text-foreground aria-[current=page]:shadow-sm"
                 >
-                  <span class="hidden size-1.5 rounded-full bg-primary group-aria-[current=page]/chat:block" />
                   <span
                     :if={chat.gateway_linked}
                     id={"sidebar-chat-gateway-icon-#{chat.id}"}

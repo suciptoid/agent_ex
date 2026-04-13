@@ -19,7 +19,13 @@ defmodule AppWeb.UserLive.ResetPassword do
           </div>
 
           <div class="space-y-6 px-6 py-6 sm:px-8 sm:py-8">
-            <.form for={@form} id="reset_password_form" phx-submit="reset_password" phx-change="validate" class="space-y-4">
+            <.form
+              for={@form}
+              id="reset_password_form"
+              phx-submit="reset_password"
+              phx-change="validate"
+              class="space-y-4"
+            >
               <.input
                 field={@form[:password]}
                 type="password"

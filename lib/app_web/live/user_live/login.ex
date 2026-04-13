@@ -102,9 +102,8 @@ defmodule AppWeb.UserLive.Login do
                 spellcheck="false"
                 required
               />
-              <.input
+              <.checkbox
                 field={@form[:remember_me]}
-                type="checkbox"
                 label="Remember me on this device"
                 id="login_remember_me"
               />

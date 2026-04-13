@@ -12,6 +12,8 @@ defmodule AppWeb.UserLive.LoginTest do
       assert html =~ "Create one here"
       assert has_element?(view, "#login_form_password")
       assert has_element?(view, "#login_google_button")
+      assert has_element?(view, "#login_remember_me")
+      assert has_element?(view, "a[href='/users/reset-password']")
       refute html =~ "Log in with email"
     end
   end

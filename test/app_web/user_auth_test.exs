@@ -263,6 +263,23 @@ defmodule AppWeb.UserAuthTest do
     end
   end
 
+  describe "redirect_if_user_is_authenticated/2" do
+    setup %{conn: conn} do
+      %{conn: UserAuth.fetch_current_scope_for_user(conn, [])}
+    end
+
+    test "redirects authenticated users to their signed-in path", %{conn: conn, user: user} do
+      conn =
+        conn
+        |> log_in_user(user)
+        |> UserAuth.fetch_current_scope_for_user([])
+        |> UserAuth.redirect_if_user_is_authenticated([])
+
+      assert conn.halted
+      assert redirected_to(conn) == UserAuth.signed_in_path(conn)
+    end
+  end
+
   describe "on_mount :require_authenticated" do
     test "authenticates current_scope based on a valid user_token", %{conn: conn, user: user} do
       user_token = Users.generate_user_session_token(user)

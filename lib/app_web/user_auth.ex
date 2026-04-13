@@ -193,6 +193,16 @@ defmodule AppWeb.UserAuth do
     {:cont, mount_current_scope(socket, session)}
   end
 
+  def on_mount(:redirect_if_user_is_authenticated, _params, session, socket) do
+    socket = mount_current_scope(socket, session)
+
+    if socket.assigns.current_scope && socket.assigns.current_scope.user do
+      {:halt, Phoenix.LiveView.redirect(socket, to: signed_in_path(socket))}
+    else
+      {:cont, socket}
+    end
+  end
+
   def on_mount(:require_authenticated, _params, session, socket) do
     socket = mount_current_scope(socket, session)
 
@@ -345,6 +355,19 @@ defmodule AppWeb.UserAuth do
   end
 
   def signed_in_path(_), do: ~p"/"
+
+  @doc """
+  Plug for routes that should only be shown to unauthenticated users.
+  """
+  def redirect_if_user_is_authenticated(conn, _opts) do
+    if conn.assigns.current_scope && conn.assigns.current_scope.user do
+      conn
+      |> redirect(to: signed_in_path(conn))
+      |> halt()
+    else
+      conn
+    end
+  end
 
   @doc """
   Plug for routes that require the user to be authenticated.

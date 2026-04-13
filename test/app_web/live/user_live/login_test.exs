@@ -16,6 +16,16 @@ defmodule AppWeb.UserLive.LoginTest do
       assert has_element?(view, "a[href='/users/reset-password']")
       refute html =~ "Log in with email"
     end
+
+    test "redirects if already logged in", %{conn: conn} do
+      result =
+        conn
+        |> log_in_user(user_fixture())
+        |> live(~p"/users/log-in")
+        |> follow_redirect(conn, ~p"/organizations/select")
+
+      assert {:ok, _conn} = result
+    end
   end
 
   describe "user login - password" do

@@ -98,20 +98,29 @@ defmodule AppWeb.Router do
   end
 
   scope "/", AppWeb do
-    pipe_through [:browser]
+    pipe_through [:browser, :redirect_if_user_is_authenticated]
 
     get "/auth/:provider", UserOAuthController, :request
     get "/auth/:provider/callback", UserOAuthController, :callback
 
-    live_session :current_user,
-      on_mount: [{AppWeb.UserAuth, :mount_current_scope}] do
+    live_session :redirect_if_user_is_authenticated,
+      on_mount: [{AppWeb.UserAuth, :redirect_if_user_is_authenticated}] do
       live "/users/register", UserLive.Registration, :new
       live "/users/log-in", UserLive.Login, :new
+    end
+
+    post "/users/log-in", UserSessionController, :create
+  end
+
+  scope "/", AppWeb do
+    pipe_through [:browser]
+
+    live_session :current_user,
+      on_mount: [{AppWeb.UserAuth, :mount_current_scope}] do
       live "/users/reset-password", UserLive.ForgotPassword, :new
       live "/users/reset-password/:token", UserLive.ResetPassword, :edit
     end
 
-    post "/users/log-in", UserSessionController, :create
     delete "/users/log-out", UserSessionController, :delete
   end
 end

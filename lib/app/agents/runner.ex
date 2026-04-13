@@ -16,6 +16,14 @@ defmodule App.Agents.Runner do
     "temperature" => :temperature,
     "max_tokens" => :max_tokens
   }
+  @reasoning_effort_atoms %{
+    "none" => :none,
+    "minimal" => :minimal,
+    "low" => :low,
+    "medium" => :medium,
+    "high" => :high,
+    "xhigh" => :xhigh
+  }
 
   def run(agent, messages, opts \\ [])
 
@@ -28,7 +36,7 @@ defmodule App.Agents.Runner do
 
     llm_opts =
       [api_key: api_key, tools: tools]
-      |> merge_extra_params(agent.extra_params)
+      |> merge_extra_params(agent)
       |> Keyword.merge(keyword_stream_opts(opts))
 
     Logger.debug(
@@ -56,7 +64,7 @@ defmodule App.Agents.Runner do
 
     llm_opts =
       [api_key: api_key, tools: tools]
-      |> merge_extra_params(agent.extra_params)
+      |> merge_extra_params(agent)
       |> Keyword.merge(keyword_stream_opts(opts))
 
     Logger.debug("[Runner] Streaming agent #{agent.name}, tools: #{inspect(agent.tools)}")
@@ -233,10 +241,15 @@ defmodule App.Agents.Runner do
 
   defp req_llm_message(_role, content, _opts), do: ReqLLM.Context.user(content || "")
 
-  defp merge_extra_params(opts, nil), do: opts
-  defp merge_extra_params(opts, extra_params) when extra_params == %{}, do: opts
+  defp merge_extra_params(opts, %Agent{extra_params: extra_params, model: model}) do
+    opts
+    |> merge_standard_extra_params(extra_params || %{})
+    |> maybe_put_agent_reasoning_effort(model, extra_params || %{})
+  end
 
-  defp merge_extra_params(opts, extra_params) do
+  defp merge_standard_extra_params(opts, extra_params) when extra_params == %{}, do: opts
+
+  defp merge_standard_extra_params(opts, extra_params) do
     Enum.reduce(extra_params, opts, fn {key, value}, acc ->
       case Map.get(@supported_extra_params, to_string(key)) do
         nil -> acc
@@ -244,6 +257,28 @@ defmodule App.Agents.Runner do
       end
     end)
   end
+
+  defp maybe_put_agent_reasoning_effort(opts, model, extra_params) do
+    reasoning_effort =
+      Map.get(extra_params, "reasoning_effort") || Map.get(extra_params, :reasoning_effort)
+
+    with effort when effort not in [nil, "", "default"] <- reasoning_effort,
+         {:ok, effort_atom} <- Map.fetch(@reasoning_effort_atoms, to_string(effort)),
+         true <- reasoning_supported_for_model?(model) do
+      Keyword.put(opts, :reasoning_effort, effort_atom)
+    else
+      _ -> opts
+    end
+  end
+
+  defp reasoning_supported_for_model?(model) when is_binary(model) do
+    case ReqLLM.model(model) do
+      {:ok, llm_model} -> ReqLLM.ModelHelpers.reasoning_enabled?(llm_model)
+      _ -> false
+    end
+  end
+
+  defp reasoning_supported_for_model?(_model), do: false
 
   defp blank?(value), do: value in [nil, ""]
   defp blank_to_nil(value) when value in [nil, ""], do: nil
@@ -335,7 +370,8 @@ defmodule App.Agents.Runner do
   defp resolve_callback(_callback, _recipient, _message_builder), do: fn _payload -> :ok end
 
   defp keyword_stream_opts(opts) do
-    Keyword.drop(opts, [
+    opts
+    |> Keyword.drop([
       :extra_tools,
       :extra_system_prompt,
       :on_result,
@@ -344,6 +380,23 @@ defmodule App.Agents.Runner do
       :on_tool_start,
       :on_tool_result
     ])
+    |> normalize_reasoning_effort_option()
+  end
+
+  defp normalize_reasoning_effort_option(opts) do
+    case Keyword.fetch(opts, :reasoning_effort) do
+      {:ok, effort} when effort in [nil, "", "default", :default] ->
+        Keyword.delete(opts, :reasoning_effort)
+
+      {:ok, effort} ->
+        case Map.fetch(@reasoning_effort_atoms, to_string(effort)) do
+          {:ok, effort_atom} -> Keyword.put(opts, :reasoning_effort, effort_atom)
+          :error -> Keyword.delete(opts, :reasoning_effort)
+        end
+
+      :error ->
+        opts
+    end
   end
 
   defp initial_result_state do

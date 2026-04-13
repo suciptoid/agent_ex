@@ -44,20 +44,6 @@
         </div>
       <% end %>
 
-      <%= if @live_action == :edit do %>
-        <.live_component
-          module={AppWeb.AgentLive.FormComponent}
-          id={@agent.id}
-          title={@page_title}
-          action={@live_action}
-          agent={@agent}
-          providers={@providers}
-          available_tools={@available_tools}
-          current_scope={@current_scope}
-          on_close={JS.patch(~p"/agents")}
-        />
-      <% end %>
-
       <div id="agents" phx-update="stream" class="space-y-3" data-layout="single-column">
         <div
           :for={{dom_id, agent} <- @streams.agents}
@@ -94,7 +80,7 @@
               :if={@can_manage_organization?}
               class="flex shrink-0 items-center gap-2 self-end sm:self-auto"
             >
-              <.link id={"edit-agent-#{agent.id}"} patch={~p"/agents/#{agent.id}/edit"}>
+              <.link id={"edit-agent-#{agent.id}"} navigate={~p"/agents/#{agent.id}/edit"}>
                 <.button
                   variant="outline"
                   size="icon"

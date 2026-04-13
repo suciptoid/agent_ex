@@ -250,14 +250,14 @@ defmodule AppWeb.Layouts do
 
       <%!-- Sidebar --%>
       <aside class={[
-        "fixed inset-y-2 left-2 z-50 flex h-[calc(100vh-1rem)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl transition-all duration-300 ease-in-out",
+        "fixed inset-y-2 left-2 z-50 flex h-[calc(100vh-1rem)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-xl border border-border bg-secondary shadow-xl transition-all duration-300 ease-in-out",
         "w-[240px]",
         "[[data-sidebar-collapsed=true]_&]:-translate-x-[calc(100%+0.75rem)] lg:[[data-sidebar-collapsed=true]_&]:translate-x-0",
         "lg:relative lg:inset-y-0 lg:left-0 lg:h-full lg:max-w-none lg:rounded-none lg:border-y-0 lg:border-l-0 lg:shadow-none lg:w-[240px]",
         "lg:[[data-sidebar-collapsed=true]_&]:w-[52px]"
       ]}>
-        <%!-- Sidebar top: hamburger + organization switcher --%>
-        <div class="flex items-center gap-1.5 px-2.5 py-2 border-b border-border">
+        <%!-- Sidebar top: hamburger + app name --%>
+        <div class="flex items-center gap-2 px-2.5 py-2 border-b border-border">
           <button
             type="button"
             class="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
@@ -269,6 +269,15 @@ defmodule AppWeb.Layouts do
           </button>
 
           <div class="min-w-0 flex-1 [[data-sidebar-collapsed=true]_&]:hidden">
+            <p class="truncate text-sm font-semibold tracking-tight text-foreground">
+              AgentEx
+            </p>
+          </div>
+        </div>
+
+        <%!-- Navigation Links --%>
+        <nav class="px-1.5 py-2 space-y-0.5">
+          <div class="[[data-sidebar-collapsed=true]_&]:hidden py-1 *:w-full">
             <.menu_button
               id="sidebar-organization-switcher"
               variant="unstyled"
@@ -315,30 +324,37 @@ defmodule AppWeb.Layouts do
               </:items>
             </.menu_button>
           </div>
-        </div>
 
-        <%!-- Navigation Links --%>
-        <nav class="px-1.5 py-2 space-y-0.5">
           <.link
             navigate={~p"/dashboard"}
-            class="flex items-center gap-2.5 px-2 py-1.5 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+            data-sidebar-nav-link
+            data-sidebar-match="exact"
+            class="group/nav flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground aria-[current=page]:bg-background/80 aria-[current=page]:text-foreground aria-[current=page]:shadow-sm"
           >
+            <span class="hidden size-1.5 rounded-full bg-primary group-aria-[current=page]/nav:block" />
             <.icon name="hero-home" class="size-4.5 flex-shrink-0" />
             <span class="[[data-sidebar-collapsed=true]_&]:hidden">Dashboard</span>
           </.link>
 
           <.link
             navigate={~p"/providers"}
-            class="flex items-center gap-2.5 px-2 py-1.5 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+            data-sidebar-nav-link
+            data-sidebar-match="prefix"
+            class="group/nav flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground aria-[current=page]:bg-background/80 aria-[current=page]:text-foreground aria-[current=page]:shadow-sm"
           >
+            <span class="hidden size-1.5 rounded-full bg-primary group-aria-[current=page]/nav:block" />
             <.icon name="hero-server-stack" class="size-4.5 flex-shrink-0" />
             <span class="[[data-sidebar-collapsed=true]_&]:hidden">Providers</span>
           </.link>
 
           <.link
             navigate={~p"/tools/list"}
-            class="flex items-center gap-2.5 px-2 py-1.5 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+            data-sidebar-nav-link
+            data-sidebar-match="prefix"
+            data-sidebar-prefix="/tools"
+            class="group/nav flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground aria-[current=page]:bg-background/80 aria-[current=page]:text-foreground aria-[current=page]:shadow-sm"
           >
+            <span class="hidden size-1.5 rounded-full bg-primary group-aria-[current=page]/nav:block" />
             <.icon name="hero-wrench-screwdriver" class="size-4.5 flex-shrink-0" />
             <span class="[[data-sidebar-collapsed=true]_&]:hidden">Tools</span>
           </.link>
@@ -346,8 +362,11 @@ defmodule AppWeb.Layouts do
           <div id="sidebar-agents-group" class="space-y-0.5">
             <.link
               navigate={~p"/agents"}
-              class="flex items-center gap-2.5 px-2 py-1.5 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+              data-sidebar-nav-link
+              data-sidebar-match="prefix"
+              class="group/nav flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground aria-[current=page]:bg-background/80 aria-[current=page]:text-foreground aria-[current=page]:shadow-sm"
             >
+              <span class="hidden size-1.5 rounded-full bg-primary group-aria-[current=page]/nav:block" />
               <.icon name="hero-cpu-chip" class="size-4.5 flex-shrink-0" />
               <span class="[[data-sidebar-collapsed=true]_&]:hidden">Agents</span>
             </.link>
@@ -355,8 +374,11 @@ defmodule AppWeb.Layouts do
             <.link
               id="sidebar-gateways-link"
               navigate={~p"/gateways"}
-              class="flex items-center gap-2.5 px-2 py-1.5 text-sm font-medium text-foreground/75 rounded-lg hover:bg-accent hover:text-foreground transition-colors"
+              data-sidebar-nav-link
+              data-sidebar-match="prefix"
+              class="group/nav flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground aria-[current=page]:bg-background/80 aria-[current=page]:text-foreground aria-[current=page]:shadow-sm"
             >
+              <span class="hidden size-1.5 rounded-full bg-primary group-aria-[current=page]/nav:block" />
               <.icon name="hero-signal" class="size-4.5 flex-shrink-0" />
               <span class="[[data-sidebar-collapsed=true]_&]:hidden">Gateways</span>
             </.link>
@@ -365,8 +387,8 @@ defmodule AppWeb.Layouts do
 
         <%!-- Chat History --%>
         <div class="flex-1 overflow-y-auto border-t border-border [[data-sidebar-collapsed=true]_&]:hidden">
-          <div class="px-1.5 pb-1">
-            <div class="sticky top-0 z-10 mb-1 flex items-center justify-between bg-card px-2 py-1.5">
+          <div class="px-1.5 py-1">
+            <div class="sticky top-0 z-10 mb-1 flex items-center justify-between bg-secondary px-2 py-1.5">
               <h3 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Chats
               </h3>
@@ -382,12 +404,14 @@ defmodule AppWeb.Layouts do
             <div class="space-y-0.5">
               <div
                 :for={chat <- @sidebar_chat_rooms}
-                class="group/sidebar flex items-center gap-2 rounded-md transition-colors hover:bg-accent hover:text-foreground"
+                class="group/sidebar flex items-center gap-2 rounded-md py-1 transition-colors hover:bg-background/85 hover:text-foreground hover:shadow-sm"
               >
                 <.link
                   navigate={~p"/chat/#{chat.id}"}
-                  class="flex min-w-0 flex-1 items-center gap-2 px-2 py-1 text-xs text-foreground/65 transition-colors"
+                  data-sidebar-chat-link
+                  class="group/chat flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-xs text-foreground/65 transition-colors aria-[current=page]:font-semibold aria-[current=page]:text-foreground"
                 >
+                  <span class="hidden size-1.5 rounded-full bg-primary group-aria-[current=page]/chat:block" />
                   <span
                     :if={chat.gateway_linked}
                     id={"sidebar-chat-gateway-icon-#{chat.id}"}
@@ -436,7 +460,9 @@ defmodule AppWeb.Layouts do
         <div class="hidden [[data-sidebar-collapsed=true]_&]:flex flex-1 justify-center pt-2 border-t border-border">
           <.link
             navigate={~p"/chat"}
-            class="p-1.5 text-muted-foreground hover:text-foreground transition-colors"
+            data-sidebar-nav-link
+            data-sidebar-match="prefix"
+            class="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground aria-[current=page]:bg-background/80 aria-[current=page]:text-foreground"
             title="Chat"
           >
             <.icon name="hero-chat-bubble-left-right" class="size-4.5" />
@@ -530,6 +556,41 @@ defmodule AppWeb.Layouts do
               this.applyState(this.defaultState(), { persistDesktop: false });
             };
 
+            this.activePath = () => window.location.pathname.replace(/\/$/, "") || "/";
+
+            this.linkPath = (link) => {
+              try {
+                return new URL(link.getAttribute("href"), window.location.origin).pathname.replace(/\/$/, "") || "/";
+              } catch (_error) {
+                return "";
+              }
+            };
+
+            this.linkMatchesPath = (link, currentPath) => {
+              const linkPath = link.dataset.sidebarPrefix || this.linkPath(link);
+              const normalizedLinkPath = linkPath.replace(/\/$/, "") || "/";
+
+              if (link.dataset.sidebarMatch === "prefix") {
+                return currentPath === normalizedLinkPath ||
+                  currentPath.startsWith(`${normalizedLinkPath}/`);
+              }
+
+              return currentPath === normalizedLinkPath;
+            };
+
+            this.syncActiveLinks = () => {
+              const currentPath = this.activePath();
+
+              this.el.querySelectorAll("[data-sidebar-nav-link], [data-sidebar-chat-link]")
+                .forEach((link) => {
+                  if (this.linkMatchesPath(link, currentPath)) {
+                    link.setAttribute("aria-current", "page");
+                  } else {
+                    link.removeAttribute("aria-current");
+                  }
+                });
+            };
+
             this.bindToggles = () => {
               this.toggles = Array.from(this.el.querySelectorAll("[data-sidebar-toggle]"));
 
@@ -547,12 +608,14 @@ defmodule AppWeb.Layouts do
             this.bindToggles();
             this.desktopMedia.addEventListener("change", this.handleViewportChange);
             this.applyState(this.defaultState(), { persistDesktop: false });
+            this.syncActiveLinks();
           },
 
           updated() {
             this.unbindToggles();
             this.bindToggles();
             this.applyState(this.collapsed ?? this.defaultState(), { persistDesktop: false });
+            this.syncActiveLinks();
           },
 
           destroyed() {

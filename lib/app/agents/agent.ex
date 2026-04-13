@@ -3,6 +3,8 @@ defmodule App.Agents.Agent do
 
   import Ecto.Changeset
 
+  @reasoning_efforts ~w(default none minimal low medium high xhigh)
+
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
   schema "agents" do
@@ -13,6 +15,7 @@ defmodule App.Agents.Agent do
     field :tools, {:array, :string}, default: []
     field :temperature, :float, virtual: true
     field :max_tokens, :integer, virtual: true
+    field :reasoning_effort, :string, virtual: true, default: "default"
 
     belongs_to :provider, App.Providers.Provider
     belongs_to :organization, App.Organizations.Organization
@@ -32,7 +35,8 @@ defmodule App.Agents.Agent do
       :provider_id,
       :tools,
       :temperature,
-      :max_tokens
+      :max_tokens,
+      :reasoning_effort
     ])
     |> update_change(:name, &trim_text/1)
     |> update_change(:system_prompt, &normalize_optional_text/1)
@@ -43,6 +47,7 @@ defmodule App.Agents.Agent do
     |> validate_format(:model, ~r/^[^:\s]+:.+$/, message: "must use provider:model format")
     |> validate_number(:temperature, greater_than_or_equal_to: 0, less_than_or_equal_to: 2)
     |> validate_number(:max_tokens, greater_than: 0)
+    |> validate_inclusion(:reasoning_effort, @reasoning_efforts)
     |> validate_tools(Keyword.get(opts, :allowed_tools, App.Agents.Tools.available_tools()))
     |> put_extra_params()
     |> foreign_key_constraint(:provider_id)
@@ -74,15 +79,22 @@ defmodule App.Agents.Agent do
 
     extra_params =
       existing_extra_params
-      |> Map.drop(["temperature", "max_tokens"])
+      |> Map.drop(["temperature", "max_tokens", "reasoning_effort"])
       |> maybe_put_extra_param("temperature", get_field(changeset, :temperature))
       |> maybe_put_extra_param("max_tokens", get_field(changeset, :max_tokens))
+      |> maybe_put_reasoning_effort(get_field(changeset, :reasoning_effort))
 
     put_change(changeset, :extra_params, extra_params)
   end
 
   defp maybe_put_extra_param(extra_params, _key, nil), do: extra_params
   defp maybe_put_extra_param(extra_params, key, value), do: Map.put(extra_params, key, value)
+
+  defp maybe_put_reasoning_effort(extra_params, value) when value in [nil, "", "default"],
+    do: extra_params
+
+  defp maybe_put_reasoning_effort(extra_params, value),
+    do: Map.put(extra_params, "reasoning_effort", value)
 
   defp trim_text(value) when is_binary(value), do: String.trim(value)
   defp trim_text(value), do: value

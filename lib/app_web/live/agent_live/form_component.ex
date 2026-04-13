@@ -3,6 +3,16 @@ defmodule AppWeb.AgentLive.FormComponent do
 
   alias App.Agents
 
+  @reasoning_effort_options [
+    {"default", "Auto"},
+    {"none", "Disabled"},
+    {"minimal", "Minimal"},
+    {"low", "Low"},
+    {"medium", "Medium"},
+    {"high", "High"},
+    {"xhigh", "X-High"}
+  ]
+
   @impl true
   def render(assigns) do
     selected_tools =
@@ -19,6 +29,7 @@ defmodule AppWeb.AgentLive.FormComponent do
       assigns
       |> assign(:selected_tools, selected_tools)
       |> assign(:provider_options, provider_options)
+      |> assign(:reasoning_effort_options, @reasoning_effort_options)
       |> assign_new(:model_options, fn -> [] end)
       |> assign_new(:display_mode, fn -> :dialog end)
       |> assign_new(:navigation, fn -> :patch end)
@@ -34,6 +45,7 @@ defmodule AppWeb.AgentLive.FormComponent do
               providers={@providers}
               provider_options={@provider_options}
               model_options={@model_options}
+              reasoning_effort_options={@reasoning_effort_options}
               available_tools={@available_tools}
               selected_tools={@selected_tools}
               display_mode={@display_mode}
@@ -74,6 +86,7 @@ defmodule AppWeb.AgentLive.FormComponent do
                 providers={@providers}
                 provider_options={@provider_options}
                 model_options={@model_options}
+                reasoning_effort_options={@reasoning_effort_options}
                 available_tools={@available_tools}
                 selected_tools={@selected_tools}
                 display_mode={@display_mode}
@@ -188,6 +201,7 @@ defmodule AppWeb.AgentLive.FormComponent do
   attr :providers, :list, required: true
   attr :provider_options, :list, required: true
   attr :model_options, :list, required: true
+  attr :reasoning_effort_options, :list, required: true
   attr :available_tools, :list, required: true
   attr :selected_tools, :list, required: true
   attr :display_mode, :atom, required: true
@@ -241,13 +255,21 @@ defmodule AppWeb.AgentLive.FormComponent do
           />
         </div>
 
-        <.select
-          field={@form[:model]}
-          label="Model"
-          placeholder="Select a model"
-          searchable={true}
-          options={@model_options}
-        />
+        <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_12rem]">
+          <.select
+            field={@form[:model]}
+            label="Model"
+            placeholder="Select a model"
+            searchable={true}
+            options={@model_options}
+          />
+
+          <.select
+            field={@form[:reasoning_effort]}
+            label="Reasoning"
+            options={@reasoning_effort_options}
+          />
+        </div>
 
         <.textarea
           field={@form[:system_prompt]}

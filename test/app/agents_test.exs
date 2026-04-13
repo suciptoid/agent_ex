@@ -43,13 +43,20 @@ defmodule App.AgentsTest do
         "provider_id" => provider.id,
         "temperature" => "0.4",
         "max_tokens" => "512",
+        "reasoning_effort" => "high",
         "tools" => ["web_fetch", "create_tool"]
       }
 
       assert {:ok, agent} = Agents.create_agent(scope, attrs)
       assert agent.name == "Planner"
       assert agent.tools == ["web_fetch", "create_tool"]
-      assert agent.extra_params == %{"max_tokens" => 512, "temperature" => 0.4}
+
+      assert agent.extra_params == %{
+               "max_tokens" => 512,
+               "reasoning_effort" => "high",
+               "temperature" => 0.4
+             }
+
       assert agent.provider.id == provider.id
     end
 
@@ -111,12 +118,19 @@ defmodule App.AgentsTest do
 
   describe "change_agent/2" do
     test "preloads virtual extra params for forms", %{user: user, provider: provider} do
-      agent = agent_fixture(user, %{provider: provider, temperature: 0.6, max_tokens: 1024})
+      agent =
+        agent_fixture(user, %{
+          provider: provider,
+          temperature: 0.6,
+          max_tokens: 1024,
+          reasoning_effort: "low"
+        })
 
       changeset = Agents.change_agent(user_scope_fixture(user), agent)
 
       assert Ecto.Changeset.get_field(changeset, :temperature) == 0.6
       assert Ecto.Changeset.get_field(changeset, :max_tokens) == 1024
+      assert Ecto.Changeset.get_field(changeset, :reasoning_effort) == "low"
     end
   end
 end

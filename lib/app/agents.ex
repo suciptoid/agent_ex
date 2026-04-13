@@ -150,7 +150,8 @@ defmodule App.Agents do
     %{
       agent
       | temperature: Map.get(extra_params, "temperature"),
-        max_tokens: Map.get(extra_params, "max_tokens")
+        max_tokens: Map.get(extra_params, "max_tokens"),
+        reasoning_effort: Map.get(extra_params, "reasoning_effort", "default")
     }
   end
 end

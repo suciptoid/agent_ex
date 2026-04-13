@@ -62,6 +62,7 @@ defmodule AppWeb.AgentLiveTest do
             "provider_id" => provider.id,
             "temperature" => "0.4",
             "max_tokens" => "256",
+            "reasoning_effort" => "low",
             "tools" => ["", "web_fetch", "create_tool", custom_tool.name]
           }
         })
@@ -74,10 +75,11 @@ defmodule AppWeb.AgentLiveTest do
       assert created_agent.name == "Planner"
       assert has_element?(redirected_view, "#agent-#{created_agent.id}")
       assert has_element?(redirected_view, "#edit-agent-#{created_agent.id}")
+      assert created_agent.extra_params["reasoning_effort"] == "low"
       assert Enum.sort(created_agent.tools) == ["brave_search", "create_tool", "web_fetch"]
     end
 
-    test "edits an agent from the modal without requiring explicit navigation assigns", %{
+    test "edits an agent from the dedicated edit page", %{
       conn: conn,
       user: user,
       scope: scope
@@ -93,6 +95,9 @@ defmodule AppWeb.AgentLiveTest do
 
       {:ok, live_view, _html} = live(conn, ~p"/agents/#{agent.id}/edit")
 
+      assert has_element?(live_view, "#agent-edit-page")
+      refute has_element?(live_view, "#agent-dialog")
+
       live_view
       |> element("#agent-form")
       |> render_submit(%{
@@ -100,12 +105,16 @@ defmodule AppWeb.AgentLiveTest do
           "name" => "Editor",
           "model" => "anthropic:claude-haiku-4-5",
           "provider_id" => provider.id,
+          "reasoning_effort" => "none",
           "tools" => [""]
         }
       })
 
-      assert_patch(live_view, ~p"/agents")
-      assert Agents.get_agent!(scope, agent.id).name == "Editor"
+      assert_redirect(live_view, ~p"/agents")
+
+      updated_agent = Agents.get_agent!(scope, agent.id)
+      assert updated_agent.name == "Editor"
+      assert updated_agent.extra_params["reasoning_effort"] == "none"
     end
 
     test "deletes an agent", %{conn: conn, user: user} do

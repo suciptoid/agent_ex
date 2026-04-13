@@ -88,7 +88,7 @@ defmodule AppWeb.Router do
       live "/tools/:id/edit", ToolLive.Create, :edit
       live "/agents", AgentLive.Index, :index
       live "/agents/new", AgentLive.New, :new
-      live "/agents/:id/edit", AgentLive.Index, :edit
+      live "/agents/:id/edit", AgentLive.New, :edit
       live "/chat", ChatLive.Index, :index
       live "/chat/:id", ChatLive.Show, :show
       live "/gateways", GatewayLive.Index, :index

@@ -28,35 +28,6 @@ defmodule AppWeb.AgentLive.Index do
   defp apply_action(socket, :index, _params) do
     socket
     |> assign(:page_title, "Agents")
-    |> assign(:agent, nil)
-  end
-
-  defp apply_action(socket, :edit, %{"id" => id}) do
-    cond do
-      not socket.assigns.can_manage_organization? ->
-        socket
-        |> put_flash(:error, "Only organization owners and admins can manage agents.")
-        |> push_patch(to: ~p"/agents")
-
-      agent = Agents.get_agent(socket.assigns.current_scope, id) ->
-        socket
-        |> assign(:page_title, "Edit Agent")
-        |> assign(:agent, agent)
-
-      agent = Agents.get_agent_for_user(socket.assigns.current_scope.user, id) ->
-        redirect(
-          socket,
-          to: switch_path(agent.organization_id, ~p"/agents/#{id}/edit")
-        )
-
-      true ->
-        raise Ecto.NoResultsError, query: Agent
-    end
-  end
-
-  @impl true
-  def handle_info({AppWeb.AgentLive.FormComponent, {:saved, agent}}, socket) do
-    {:noreply, stream_insert(socket, :agents, agent)}
   end
 
   @impl true
@@ -90,9 +61,5 @@ defmodule AppWeb.AgentLive.Index do
       1 -> "1 tool"
       count -> "#{count} tools"
     end
-  end
-
-  defp switch_path(organization_id, return_to) do
-    ~p"/organizations/switch/#{organization_id}?return_to=#{return_to}"
   end
 end

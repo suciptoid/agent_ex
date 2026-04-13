@@ -5,42 +5,34 @@
   sidebar_organizations={@sidebar_organizations}
 >
   <%= if @chat_room do %>
-    <div class="flex h-full min-h-0 flex-col">
-      <div class="border-b border-border px-4 pb-3 pt-4 sm:px-5 lg:px-6">
-        <% agents_in_room = room_agents(@chat_room) %>
-        <% unselected =
-          Enum.reject(@available_agents, fn available_agent ->
-            Enum.any?(@chat_room.chat_room_agents, &(&1.agent_id == available_agent.id))
-          end) %>
-        <div class="flex min-w-0 flex-wrap items-center gap-3">
-          <h1
-            id="chat-room-title"
-            class="min-w-0 flex-1 truncate text-base font-semibold text-foreground"
-          >
-            {@chat_room.title || ""}
-          </h1>
-
-          <div :if={@latest_message_id} class="w-full max-w-md flex-shrink-0">
-            <AppWeb.ChatComponents.chat_agent_selector
-              id="chat-agent-selector"
-              class="justify-end"
-              selected_agents={agents_in_room}
-              unselected_agents={unselected}
-              active_agent_id={active_agent_id(@chat_room)}
-              set_active_event="set-active-agent"
-              remove_event="remove-agent-from-room"
-              add_event="add-agent-to-room"
-              active_label="active"
-            />
-          </div>
-        </div>
-      </div>
-
+    <% agents_in_room = room_agents(@chat_room) %>
+    <% unselected =
+      Enum.reject(@available_agents, fn available_agent ->
+        Enum.any?(@chat_room.chat_room_agents, &(&1.agent_id == available_agent.id))
+      end) %>
+    <div
+      id="chat-room-shell"
+      class="relative flex h-full min-h-0 overflow-hidden"
+      phx-hook=".ChatAgentSidebar"
+      data-agent-sidebar-open="false"
+    >
       <div
         id="chat-room-layout"
-        class="flex min-h-0 flex-1 flex-col relative"
+        class="relative flex min-h-0 flex-1 flex-col"
         style="--chat-composer-offset: var(--chat-room-layout-composer-offset, 12rem);"
       >
+        <button
+          id="chat-agent-sidebar-toggle"
+          type="button"
+          data-agent-sidebar-toggle
+          aria-expanded="false"
+          aria-controls="chat-agent-sidebar"
+          class="absolute right-4 top-4 z-30 inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-background/90 px-3 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:right-5 lg:right-6"
+        >
+          <.icon name="hero-cpu-chip" class="size-3.5" />
+          <span class="hidden sm:inline">Agents</span>
+        </button>
+
         <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-card">
           <div class="flex-1 min-h-0">
             <div
@@ -131,12 +123,13 @@
                       <.accordion_item
                         variant="unstyled"
                         open={thinking_default_expanded?(message)}
-                        class="overflow-hidden rounded-lg border border-sky-500/20 bg-sky-500/5"
+                        class="overflow-hidden rounded-lg border border-secondary bg-secondary/70 text-secondary-foreground"
                       >
                         <.accordion_trigger
                           variant="unstyled"
-                          class="flex max-w-full items-center gap-1.5 px-3 py-2 text-[11px] font-medium text-sky-700 hover:text-sky-800 dark:text-sky-300 dark:hover:text-sky-200 [&>span]:flex [&>span]:min-w-0 [&>span]:items-center [&>span]:gap-1.5"
+                          class="flex max-w-full items-center gap-1.5 px-3 py-2 text-[11px] font-medium text-secondary-foreground/80 hover:text-secondary-foreground [&>span]:flex [&>span]:min-w-0 [&>span]:items-center [&>span]:gap-1.5"
                         >
+                          <.icon name="hero-light-bulb" class="size-3 shrink-0" />
                           <span>Thinking</span>
                         </.accordion_trigger>
                         <.accordion_content
@@ -161,7 +154,7 @@
                           "overflow-hidden rounded-lg border transition-colors " <>
                             if(tool_entry_error?(tool_entry),
                               do: "border-rose-500/20 bg-rose-500/5",
-                              else: "border-amber-500/20 bg-amber-500/5"
+                              else: "border-secondary bg-secondary/70 text-secondary-foreground"
                             )
                         }
                       >
@@ -173,7 +166,7 @@
                                 do:
                                   "text-rose-600 hover:text-rose-700 dark:text-rose-300 dark:hover:text-rose-200",
                                 else:
-                                  "text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+                                  "text-secondary-foreground/80 hover:text-secondary-foreground"
                               )
                           }
                         >
@@ -252,43 +245,116 @@
                 form={@message_form}
                 streaming={@streaming_active?}
                 layout_target_id="chat-room-layout"
-              >
-                <:controls>
-                  <%= if @reasoning_supported? do %>
-                    <.menu_button
-                      id="chat-reasoning-effort-menu"
-                      variant="outline"
-                      content_class="w-44"
-                      type="button"
-                      class="h-10 gap-1.5 rounded-full border-border/70 bg-background/80 px-3.5 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-muted/80 hover:text-foreground"
-                    >
-                      <.icon name="hero-sparkles" class="size-3.5" />
-                      {reasoning_button_label(@reasoning_effort)}
-                      <:items>
-                        <.menu_item
-                          :for={{value, label} <- reasoning_effort_options()}
-                          id={"chat-reasoning-effort-option-#{value}"}
-                          phx-click="set-reasoning-effort"
-                          phx-value-effort={value}
-                        >
-                          <span class="flex-1">{label}</span>
-                          <.icon
-                            :if={@reasoning_effort == value}
-                            name="hero-check"
-                            class="size-4"
-                          />
-                        </.menu_item>
-                      </:items>
-                    </.menu_button>
-                  <% end %>
-                </:controls>
-              </AppWeb.ChatComponents.chat_message_composer>
+              />
             </div>
           </div>
         </div>
       </div>
+
+      <div
+        data-agent-sidebar-toggle
+        class={[
+          "fixed inset-0 z-30 bg-black/35 backdrop-blur-sm transition-opacity lg:hidden",
+          "[[data-agent-sidebar-open=false]_&]:pointer-events-none",
+          "[[data-agent-sidebar-open=false]_&]:opacity-0"
+        ]}
+      />
+
+      <aside
+        id="chat-agent-sidebar"
+        class={[
+          "fixed inset-y-2 right-2 z-40 flex w-[min(22rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-lg border border-border bg-background shadow-xl transition-all duration-300",
+          "[[data-agent-sidebar-open=false]_&]:translate-x-[calc(100%+0.75rem)]",
+          "lg:relative lg:inset-y-0 lg:right-0 lg:z-10 lg:h-full lg:w-80 lg:rounded-none lg:border-y-0 lg:border-r-0 lg:shadow-none",
+          "lg:[[data-agent-sidebar-open=false]_&]:w-0 lg:[[data-agent-sidebar-open=false]_&]:translate-x-0 lg:[[data-agent-sidebar-open=false]_&]:border-l-0"
+        ]}
+      >
+        <div class="flex min-w-0 items-start justify-between gap-3 border-b border-border px-4 py-4">
+          <div class="min-w-0 space-y-1">
+            <p class="text-xs font-medium uppercase text-muted-foreground">Chat room</p>
+            <h1 id="chat-room-title" class="truncate text-sm font-semibold text-foreground">
+              {@chat_room.title || "Untitled"}
+            </h1>
+          </div>
+
+          <button
+            id="chat-agent-sidebar-close"
+            type="button"
+            data-agent-sidebar-toggle
+            aria-label="Close agents"
+            class="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          >
+            <.icon name="hero-x-mark" class="size-4" />
+          </button>
+        </div>
+
+        <div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+          <div class="space-y-1">
+            <p class="text-sm font-semibold text-foreground">Agents</p>
+            <p class="text-xs text-muted-foreground">
+              Pick who replies next or add another agent to this room.
+            </p>
+          </div>
+
+          <AppWeb.ChatComponents.chat_agent_selector
+            id="chat-agent-selector"
+            class="flex-col items-stretch gap-2"
+            selected_agents={agents_in_room}
+            unselected_agents={unselected}
+            active_agent_id={active_agent_id(@chat_room)}
+            set_active_event="set-active-agent"
+            remove_event="remove-agent-from-room"
+            add_event="add-agent-to-room"
+            active_label="active"
+          />
+        </div>
+      </aside>
     </div>
   <% end %>
+
+  <script :type={Phoenix.LiveView.ColocatedHook} name=".ChatAgentSidebar">
+    export default {
+      mounted() {
+        this.open = false
+
+        this.applyState = () => {
+          this.el.dataset.agentSidebarOpen = String(this.open)
+          this.toggles.forEach((toggle) => {
+            toggle.setAttribute("aria-expanded", String(this.open))
+          })
+        }
+
+        this.toggle = () => {
+          this.open = !this.open
+          this.applyState()
+        }
+
+        this.bindToggles = () => {
+          this.toggles = Array.from(this.el.querySelectorAll("[data-agent-sidebar-toggle]"))
+          this.toggles.forEach((toggle) => toggle.addEventListener("click", this.toggle))
+        }
+
+        this.unbindToggles = () => {
+          (this.toggles || []).forEach((toggle) => {
+            toggle.removeEventListener("click", this.toggle)
+          })
+        }
+
+        this.bindToggles()
+        this.applyState()
+      },
+
+      updated() {
+        this.unbindToggles()
+        this.bindToggles()
+        this.applyState()
+      },
+
+      destroyed() {
+        this.unbindToggles()
+      }
+    }
+  </script>
 
   <script :type={Phoenix.LiveView.ColocatedHook} name=".ChatMessages">
     export default {

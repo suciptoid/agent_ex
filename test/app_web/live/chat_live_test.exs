@@ -84,7 +84,7 @@ defmodule AppWeb.ChatLiveTest do
   end
 
   describe "chat room show" do
-    test "hides the header agent selector until the room has messages", %{
+    test "renders chat shell with a closed agent sidebar", %{
       conn: conn,
       user: user
     } do
@@ -100,7 +100,10 @@ defmodule AppWeb.ChatLiveTest do
 
       {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
 
-      refute has_element?(live_view, "#chat-agent-selector")
+      assert has_element?(live_view, "#chat-room-shell[data-agent-sidebar-open='false']")
+      assert has_element?(live_view, "#chat-agent-sidebar")
+      assert has_element?(live_view, "#chat-agent-sidebar-toggle")
+      assert has_element?(live_view, "#chat-agent-selector")
       refute has_element?(live_view, "a", "Back")
       assert has_element?(live_view, "#chat-messages")
       assert has_element?(live_view, "#chat-messages-empty-state.max-w-4xl")
@@ -224,7 +227,7 @@ defmodule AppWeb.ChatLiveTest do
       refute has_element?(live_view, "#message-#{checkpoint_message.id}")
     end
 
-    test "shows reasoning controls for Gemini models and forwards the selected effort", %{
+    test "uses the active agent reasoning setting for supported models", %{
       conn: conn,
       user: user,
       scope: scope
@@ -242,7 +245,8 @@ defmodule AppWeb.ChatLiveTest do
         agent_fixture(user, %{
           provider: provider,
           name: "Reasoner",
-          model: "google:gemini-2.5-flash"
+          model: "google:gemini-2.5-flash",
+          reasoning_effort: "none"
         })
 
       room =
@@ -254,13 +258,7 @@ defmodule AppWeb.ChatLiveTest do
 
       {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
 
-      assert has_element?(live_view, "#chat-reasoning-effort-menu")
-
-      live_view
-      |> element("#chat-reasoning-effort-option-none")
-      |> render_click()
-
-      refute render(live_view) =~ "Unsupported reasoning level"
+      refute has_element?(live_view, "#chat-reasoning-effort-menu")
 
       live_view
       |> form("#chat-message-form", %{
@@ -279,7 +277,7 @@ defmodule AppWeb.ChatLiveTest do
       assert assistant_message.content == "Reasoner: Keep it concise"
     end
 
-    test "omits the default reasoning effort for supported models", %{
+    test "omits the default agent reasoning effort for supported models", %{
       conn: conn,
       user: user,
       scope: scope
@@ -309,7 +307,7 @@ defmodule AppWeb.ChatLiveTest do
 
       {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
 
-      assert has_element?(live_view, "#chat-reasoning-effort-option-default")
+      refute has_element?(live_view, "#chat-reasoning-effort-menu")
 
       live_view
       |> form("#chat-message-form", %{
@@ -328,12 +326,20 @@ defmodule AppWeb.ChatLiveTest do
       assert assistant_message.content == "Reasoner: Use the default reasoning mode"
     end
 
-    test "hides reasoning controls for models without reasoning support", %{
+    test "does not forward agent reasoning for models without reasoning support", %{
       conn: conn,
       user: user
     } do
+      configure_agent_runner_stub(self())
+
       provider = provider_fixture(user)
-      agent = agent_fixture(user, %{provider: provider, model: "openai:gpt-4.1-mini"})
+
+      agent =
+        agent_fixture(user, %{
+          provider: provider,
+          model: "openai:gpt-4.1-mini",
+          reasoning_effort: "high"
+        })
 
       room =
         chat_room_fixture(user, %{
@@ -345,6 +351,15 @@ defmodule AppWeb.ChatLiveTest do
       {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
 
       refute has_element?(live_view, "#chat-reasoning-effort-menu")
+
+      live_view
+      |> form("#chat-message-form", %{
+        "message" => %{"content" => "Skip reasoning"}
+      })
+      |> render_submit()
+
+      assert_receive {:agent_runner_streaming_opts, opts}
+      refute Keyword.has_key?(opts, :reasoning_effort)
     end
 
     test "sends a message and streams the assistant reply", %{
@@ -382,6 +397,7 @@ defmodule AppWeb.ChatLiveTest do
       assert assistant_message.content == "Lead Agent: Plan next week"
       assert has_element?(live_view, "#message-#{user_message.id}")
       assert has_element?(live_view, "#message-#{assistant_message.id}")
+      assert has_element?(live_view, "#chat-agent-sidebar")
       assert has_element?(live_view, "#chat-agent-selector")
       assert has_element?(live_view, "#chat-message-submit[aria-label='Send message']")
     end

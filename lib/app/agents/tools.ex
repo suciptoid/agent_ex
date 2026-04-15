@@ -5,6 +5,7 @@ defmodule App.Agents.Tools do
 
   require Logger
 
+  alias App.LLM.Tool, as: LLMTool
   alias App.Tools, as: ToolsContext
   alias App.Tools.Tool
 
@@ -97,7 +98,7 @@ defmodule App.Agents.Tools do
               {"error", "Error: unknown tool '#{name}'"}
 
             tool ->
-              case ReqLLM.Tool.execute(tool, args) do
+              case LLMTool.execute(tool, args) do
                 {:ok, output} ->
                   text = result_to_text(output)
                   Logger.debug("[Tools] Tool #{name} result: #{String.slice(text, 0, 200)}")
@@ -111,7 +112,12 @@ defmodule App.Agents.Tools do
           end
 
         %{
-          message: ReqLLM.Context.tool_result(id, name, text),
+          message: %{
+            role: "tool",
+            tool_call_id: id,
+            name: name,
+            content: text
+          },
           result: %{
             "id" => id,
             "name" => name,
@@ -230,11 +236,11 @@ defmodule App.Agents.Tools do
   end
 
   defp web_fetch_tool do
-    ReqLLM.tool(
+    LLMTool.build(
       name: "web_fetch",
       description:
         "Fetch the content of a web page given a URL. Optional headers can be included for authenticated requests.",
-      parameter_schema: %{
+      input_schema: %{
         "type" => "object",
         "properties" => %{
           "url" => %{"type" => "string", "description" => "The URL to fetch"},
@@ -251,33 +257,40 @@ defmodule App.Agents.Tools do
   end
 
   defp shell_tool do
-    ReqLLM.tool(
+    LLMTool.build(
       name: "shell",
       description:
         "Execute a shell command on the local system and return the combined stdout and stderr. Use carefully.",
-      parameter_schema: [
-        command: [type: :string, required: true, doc: "The shell command to execute"]
-      ],
+      input_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "command" => %{
+            "type" => "string",
+            "description" => "The shell command to execute"
+          }
+        },
+        "required" => ["command"]
+      },
       callback: &__MODULE__.do_shell/1
     )
   end
 
   defp create_tool_tool(nil) do
-    ReqLLM.tool(
+    LLMTool.build(
       name: "create_tool",
       description:
         "Create and save a reusable HTTP tool for the current organization using the same fields as the tools UI.",
-      parameter_schema: create_tool_parameter_schema(),
+      input_schema: create_tool_parameter_schema(),
       callback: fn _args -> {:error, "Tool creation requires an active organization"} end
     )
   end
 
   defp create_tool_tool(organization_id) do
-    ReqLLM.tool(
+    LLMTool.build(
       name: "create_tool",
       description:
         "Create and save a reusable HTTP tool for the current organization using the same fields as the tools UI.",
-      parameter_schema: create_tool_parameter_schema(),
+      input_schema: create_tool_parameter_schema(),
       callback: fn args -> do_create_tool(args, organization_id) end
     )
   end
@@ -289,10 +302,10 @@ defmodule App.Agents.Tools do
   end
 
   defp build_http_tool(%Tool{} = tool) do
-    ReqLLM.tool(
+    LLMTool.build(
       name: tool.name,
       description: tool.description,
-      parameter_schema: runtime_parameter_schema(tool),
+      input_schema: runtime_parameter_schema(tool),
       callback: fn args -> execute_http_tool(tool, args) end
     )
   end

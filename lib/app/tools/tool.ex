@@ -123,7 +123,7 @@ defmodule App.Tools.Tool do
   end
 
   defp validate_tool_name(:name, value) do
-    if ReqLLM.Tool.valid_name?(value) do
+    if App.LLM.Tool.valid_name?(value) do
       []
     else
       [name: "must be a valid tool identifier"]

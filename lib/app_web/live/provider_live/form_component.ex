@@ -38,6 +38,29 @@ defmodule AppWeb.ProviderLive.FormComponent do
               placeholder="Select a provider"
             />
 
+            <.input
+              field={@form[:base_url]}
+              type="url"
+              label="Base URL"
+              placeholder="https://api.example.com"
+            />
+
+            <div class="grid gap-4 sm:grid-cols-2">
+              <.input
+                field={@form[:models_path]}
+                type="text"
+                label="Models Path"
+                placeholder="/v1/models"
+              />
+
+              <.input
+                field={@form[:chat_path]}
+                type="text"
+                label="Chat Path (optional)"
+                placeholder="/v1/chat/completions"
+              />
+            </div>
+
             <.input field={@form[:api_key]} type="password" label="API Key" />
           </.form>
         </div>

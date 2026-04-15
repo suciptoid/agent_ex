@@ -77,6 +77,26 @@ defmodule AppWeb.ProviderLive.Index do
     end
   end
 
+  def handle_event("refresh-models", %{"id" => id}, socket) do
+    if socket.assigns.can_manage_organization? do
+      provider = Providers.get_provider!(socket.assigns.current_scope, id)
+
+      case Providers.refresh_provider_models(socket.assigns.current_scope, provider) do
+        {:ok, refreshed_provider} ->
+          {:noreply,
+           socket
+           |> stream_insert(:providers, refreshed_provider)
+           |> put_flash(:info, "Provider models refreshed")}
+
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Failed to refresh models: #{inspect(reason)}")}
+      end
+    else
+      {:noreply,
+       put_flash(socket, :error, "Only organization owners and admins can manage providers.")}
+    end
+  end
+
   defp switch_path(organization_id, return_to) do
     ~p"/organizations/switch/#{organization_id}?return_to=#{return_to}"
   end

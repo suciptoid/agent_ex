@@ -3,6 +3,7 @@ defmodule AppWeb.ChatLive.Show do
 
   alias App.Chat
   alias App.Chat.Message
+  alias App.LLM.Capabilities
 
   @reasoning_effort_atoms %{
     "default" => :default,
@@ -623,12 +624,8 @@ defmodule AppWeb.ChatLive.Show do
 
   defp active_agent_for_room(_), do: nil
 
-  defp reasoning_supported_for_agent?(%{model: model}) when is_binary(model) do
-    case ReqLLM.model(model) do
-      {:ok, llm_model} -> ReqLLM.ModelHelpers.reasoning_enabled?(llm_model)
-      _ -> false
-    end
-  end
+  defp reasoning_supported_for_agent?(%{provider: provider, model: model}) when is_binary(model),
+    do: Capabilities.reasoning_supported?(provider, model)
 
   defp reasoning_supported_for_agent?(_agent), do: false
 

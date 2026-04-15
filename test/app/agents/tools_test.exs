@@ -27,7 +27,7 @@ defmodule App.Agents.ToolsTest do
     assert Tools.available_tools() == ["web_fetch", "shell", "create_tool"]
   end
 
-  test "resolve/1 returns configured ReqLLM tools" do
+  test "resolve/1 returns configured tools" do
     [tool] = Tools.resolve(["web_fetch"])
     assert tool.name == "web_fetch"
   end
@@ -64,7 +64,7 @@ defmodule App.Agents.ToolsTest do
     [tool] =
       Tools.resolve(["jina_reader"], organization_id: user_scope_fixture(user).organization.id)
 
-    assert {:ok, "templated"} = ReqLLM.Tool.execute(tool, %{"dynamic_path" => "docs/file.txt"})
+    assert {:ok, "templated"} = App.LLM.Tool.execute(tool, %{"dynamic_path" => "docs/file.txt"})
   end
 
   test "do_web_fetch/1 returns the response body on success" do

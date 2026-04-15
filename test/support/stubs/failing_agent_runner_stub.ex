@@ -8,7 +8,7 @@ defmodule App.TestSupport.FailingAgentRunnerStub do
   end
 
   defp request_error do
-    ReqLLM.Error.API.Request.exception(
+    %{
       reason:
         "Invalid value: 'default'. Supported values are: 'none', 'minimal', 'low', 'medium', 'high', and 'xhigh'.",
       status: 400,
@@ -16,6 +16,6 @@ defmodule App.TestSupport.FailingAgentRunnerStub do
         "code" => "invalid_value",
         "message" => "Verbose API payload that should stay hidden"
       }
-    )
+    }
   end
 end

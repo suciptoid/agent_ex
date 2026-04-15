@@ -1,6 +1,6 @@
 defmodule App.Agents.Runner do
   @moduledoc """
-  Executes an agent against a conversation context using ReqLLM.
+  Executes an agent against a conversation context via the app LLM client.
   """
 
   require Logger
@@ -9,6 +9,8 @@ defmodule App.Agents.Runner do
   alias App.Agents.Runner.DoomLoop
   alias App.Chat.ContextBuilder
   alias App.Chat.Message
+  alias App.LLM.Capabilities
+  alias App.LLM.Client
   alias App.Providers.Provider
 
   @default_system_prompt "You are a helpful assistant."
@@ -27,15 +29,16 @@ defmodule App.Agents.Runner do
 
   def run(agent, messages, opts \\ [])
 
-  def run(%Agent{provider: %Provider{api_key: api_key}} = agent, messages, opts) do
+  def run(%Agent{provider: %Provider{}} = agent, messages, opts) do
     context = build_context(agent, messages, opts)
 
     tools =
-      App.Agents.Tools.resolve(agent.tools, organization_id: agent.organization_id) ++
-        Keyword.get(opts, :extra_tools, [])
+      (App.Agents.Tools.resolve(agent.tools, organization_id: agent.organization_id) ++
+         Keyword.get(opts, :extra_tools, []))
+      |> maybe_disable_unsupported_tools(agent)
 
     llm_opts =
-      [api_key: api_key, tools: tools]
+      []
       |> merge_extra_params(agent)
       |> Keyword.merge(keyword_stream_opts(opts))
 
@@ -43,7 +46,7 @@ defmodule App.Agents.Runner do
       "[Runner] Running agent #{agent.name} with model #{agent.model}, #{length(messages)} messages"
     )
 
-    run_with_tool_loop(agent.model, context, tools, llm_opts, noop_callbacks())
+    run_with_tool_loop(agent, context, tools, llm_opts, noop_callbacks())
   end
 
   def run(%Agent{}, _messages, _opts), do: {:error, "agent provider must be preloaded"}
@@ -51,7 +54,7 @@ defmodule App.Agents.Runner do
   def run_streaming(agent, messages, lv_pid, opts \\ [])
 
   def run_streaming(
-        %Agent{provider: %Provider{api_key: api_key}} = agent,
+        %Agent{provider: %Provider{}} = agent,
         messages,
         recipient,
         opts
@@ -59,44 +62,45 @@ defmodule App.Agents.Runner do
     context = build_context(agent, messages, opts)
 
     tools =
-      App.Agents.Tools.resolve(agent.tools, organization_id: agent.organization_id) ++
-        Keyword.get(opts, :extra_tools, [])
+      (App.Agents.Tools.resolve(agent.tools, organization_id: agent.organization_id) ++
+         Keyword.get(opts, :extra_tools, []))
+      |> maybe_disable_unsupported_tools(agent)
 
     llm_opts =
-      [api_key: api_key, tools: tools]
+      []
       |> merge_extra_params(agent)
       |> Keyword.merge(keyword_stream_opts(opts))
 
     Logger.debug("[Runner] Streaming agent #{agent.name}, tools: #{inspect(agent.tools)}")
     callbacks = build_stream_callbacks(recipient, opts)
 
-    run_with_tool_loop(agent.model, context, tools, llm_opts, callbacks)
+    run_with_tool_loop(agent, context, tools, llm_opts, callbacks)
   end
 
   def run_streaming(%Agent{}, _messages, _lv_pid, _opts),
     do: {:error, "agent provider must be preloaded"}
 
   defp run_with_tool_loop(
-         model,
+         agent,
          context,
          tools,
          llm_opts,
          callbacks,
-         result_state \\ initial_result_state()
+         result_state \\ initial_result_state(),
+         provider_state \\ nil,
+         allow_tool_fallback \\ true
        ) do
-    case stream_response(model, context, llm_opts, callbacks) do
+    case stream_response(agent, context, tools, llm_opts, callbacks, provider_state) do
       {:ok, response} ->
         %{
           type: type,
           text: text,
           thinking: thinking,
           tool_calls: tool_calls,
-          finish_reason: finish_reason
-        } =
-          ReqLLM.Response.classify(response)
-
-        usage = normalize_metadata(ReqLLM.Response.usage(response))
-        provider_meta = normalize_metadata(response.provider_meta)
+          finish_reason: finish_reason,
+          usage: usage,
+          provider_meta: provider_meta
+        } = response
 
         base_result_state =
           result_state
@@ -131,20 +135,22 @@ defmodule App.Agents.Runner do
                        ) do
                   Enum.each(tool_results, callbacks.on_tool_result)
 
-                  new_context =
-                    response.context
-                    |> ReqLLM.Context.append(response.message)
-                    |> ReqLLM.Context.append(tool_messages)
+                  new_context = %{
+                    context
+                    | messages: context.messages ++ [response.assistant_message] ++ tool_messages
+                  }
 
                   run_with_tool_loop(
-                    model,
+                    agent,
                     new_context,
                     tools,
                     llm_opts,
                     callbacks,
                     base_result_state
                     |> append_tool_call_turn(tool_call_turn)
-                    |> append_tool_responses(tool_results)
+                    |> append_tool_responses(tool_results),
+                    response.provider_state,
+                    allow_tool_fallback
                   )
                 end
             end
@@ -168,8 +174,25 @@ defmodule App.Agents.Runner do
         end
 
       {:error, reason} ->
-        Logger.error("[Runner] LLM call failed: #{error_text(reason)}")
-        {:error, reason}
+        if should_retry_without_tools?(tools, reason, allow_tool_fallback) do
+          Logger.warning(
+            "[Runner] Provider rejected tool use for model #{agent.model}; retrying without tools"
+          )
+
+          run_with_tool_loop(
+            agent,
+            context,
+            [],
+            llm_opts,
+            callbacks,
+            result_state,
+            provider_state,
+            false
+          )
+        else
+          Logger.error("[Runner] LLM call failed: #{error_text(reason)}")
+          {:error, reason}
+        end
     end
   end
 
@@ -193,58 +216,44 @@ defmodule App.Agents.Runner do
         base_system_prompt <> "\n\n" <> extra_system_prompt
       end
 
-    messages =
-      [ReqLLM.Context.system(system_prompt)] ++
-        (messages
-         |> ContextBuilder.canonical_messages()
-         |> Enum.map(&to_req_llm_message/1))
+    context_messages =
+      messages
+      |> ContextBuilder.canonical_messages()
+      |> Enum.map(&normalize_context_message/1)
 
-    ReqLLM.Context.new(messages)
+    %{system_prompt: system_prompt, messages: context_messages}
   end
 
-  defp to_req_llm_message(%Message{role: role, content: content} = message) do
-    req_llm_message(role, content,
-      name: message.name,
-      tool_call_id: message.tool_call_id,
-      tool_calls: Message.tool_calls(message),
-      metadata: message.metadata || %{}
+  defp normalize_context_message(%Message{role: role, content: content} = message) do
+    %{}
+    |> maybe_put_map_value(:role, role)
+    |> maybe_put_map_value(:content, content)
+    |> maybe_put_map_value(:name, message.name)
+    |> maybe_put_map_value(:tool_call_id, message.tool_call_id)
+    |> maybe_put_map_value(:tool_calls, Message.tool_calls(message))
+    |> maybe_put_map_value(:metadata, message.metadata || %{})
+  end
+
+  defp normalize_context_message(%{role: role} = message) do
+    %{}
+    |> maybe_put_map_value(:role, to_string(role))
+    |> maybe_put_map_value(:content, message_content(message))
+    |> maybe_put_map_value(:name, Map.get(message, :name) || Map.get(message, "name"))
+    |> maybe_put_map_value(
+      :tool_call_id,
+      Map.get(message, :tool_call_id) || Map.get(message, "tool_call_id")
+    )
+    |> maybe_put_map_value(:tool_calls, message_tool_calls(message))
+    |> maybe_put_map_value(
+      :metadata,
+      Map.get(message, :metadata) || Map.get(message, "metadata") || %{}
     )
   end
 
-  defp to_req_llm_message(%{role: role} = message) do
-    req_llm_message(role, message_content(message),
-      name: Map.get(message, :name) || Map.get(message, "name"),
-      tool_call_id: Map.get(message, :tool_call_id) || Map.get(message, "tool_call_id"),
-      tool_calls: message_tool_calls(message),
-      metadata: Map.get(message, :metadata) || Map.get(message, "metadata") || %{}
-    )
-  end
-
-  defp req_llm_message("assistant", content, opts) do
-    case Keyword.get(opts, :tool_calls, []) do
-      [] -> ReqLLM.Context.assistant(content || "")
-      tool_calls -> ReqLLM.Context.assistant(content || "", tool_calls: tool_calls)
-    end
-  end
-
-  defp req_llm_message("system", content, _opts), do: ReqLLM.Context.system(content || "")
-  defp req_llm_message("checkpoint", content, _opts), do: ReqLLM.Context.system(content || "")
-
-  defp req_llm_message("tool", content, opts) do
-    tool_call_id = Keyword.get(opts, :tool_call_id) || ""
-
-    case Keyword.get(opts, :name) do
-      nil -> ReqLLM.Context.tool_result(tool_call_id, content || "")
-      name -> ReqLLM.Context.tool_result(tool_call_id, name, content || "")
-    end
-  end
-
-  defp req_llm_message(_role, content, _opts), do: ReqLLM.Context.user(content || "")
-
-  defp merge_extra_params(opts, %Agent{extra_params: extra_params, model: model}) do
+  defp merge_extra_params(opts, %Agent{extra_params: extra_params} = agent) do
     opts
     |> merge_standard_extra_params(extra_params || %{})
-    |> maybe_put_agent_reasoning_effort(model, extra_params || %{})
+    |> maybe_put_agent_reasoning_effort(agent, extra_params || %{})
   end
 
   defp merge_standard_extra_params(opts, extra_params) when extra_params == %{}, do: opts
@@ -258,40 +267,77 @@ defmodule App.Agents.Runner do
     end)
   end
 
-  defp maybe_put_agent_reasoning_effort(opts, model, extra_params) do
+  defp maybe_put_agent_reasoning_effort(opts, %Agent{} = agent, extra_params) do
     reasoning_effort =
       Map.get(extra_params, "reasoning_effort") || Map.get(extra_params, :reasoning_effort)
 
     with effort when effort not in [nil, "", "default"] <- reasoning_effort,
          {:ok, effort_atom} <- Map.fetch(@reasoning_effort_atoms, to_string(effort)),
-         true <- reasoning_supported_for_model?(model) do
+         true <- reasoning_supported_for_agent?(agent) do
       Keyword.put(opts, :reasoning_effort, effort_atom)
     else
       _ -> opts
     end
   end
 
-  defp reasoning_supported_for_model?(model) when is_binary(model) do
-    case ReqLLM.model(model) do
-      {:ok, llm_model} -> ReqLLM.ModelHelpers.reasoning_enabled?(llm_model)
-      _ -> false
+  defp reasoning_supported_for_agent?(%Agent{provider: %Provider{} = provider, model: model}) do
+    Capabilities.reasoning_supported?(provider, model)
+  end
+
+  defp reasoning_supported_for_agent?(_agent), do: false
+
+  defp maybe_disable_unsupported_tools(tools, %Agent{
+         provider: %Provider{} = provider,
+         model: model
+       })
+       when is_list(tools) do
+    if tools == [] or Capabilities.tool_use_supported?(provider, model) do
+      tools
+    else
+      Logger.warning(
+        "[Runner] Model #{model} on provider #{provider.provider} does not advertise tool support; running without tools"
+      )
+
+      []
     end
   end
 
-  defp reasoning_supported_for_model?(_model), do: false
+  defp maybe_disable_unsupported_tools(tools, _agent), do: tools
+
+  defp should_retry_without_tools?(tools, reason, allow_tool_fallback) do
+    allow_tool_fallback and tools != [] and no_tool_use_endpoint_error?(reason)
+  end
+
+  defp no_tool_use_endpoint_error?(reason) do
+    message =
+      reason
+      |> error_text()
+      |> to_string()
+      |> String.downcase()
+
+    String.contains?(message, "no endpoints found that support tool use")
+  end
 
   defp blank?(value), do: value in [nil, ""]
   defp blank_to_nil(value) when value in [nil, ""], do: nil
   defp blank_to_nil(value), do: value
 
-  defp stream_response(model, context, llm_opts, callbacks) do
-    case ReqLLM.stream_text(model, context, llm_opts) do
-      {:ok, stream_response} ->
-        ReqLLM.StreamResponse.process_stream(
-          stream_response,
-          on_result: callbacks.on_result,
-          on_thinking: callbacks.on_thinking
-        )
+  defp stream_response(
+         %Agent{provider: %Provider{} = provider, model: model},
+         context,
+         tools,
+         llm_opts,
+         callbacks,
+         provider_state
+       ) do
+    llm_opts =
+      llm_opts
+      |> Keyword.put(:system_prompt, context.system_prompt)
+      |> maybe_put_keyword(:provider_state, provider_state)
+
+    case Client.stream(provider, model, context.messages, tools, llm_opts, callbacks) do
+      {:ok, response} ->
+        {:ok, response}
 
       {:error, reason} ->
         Logger.error("[Runner] Stream failed: #{error_text(reason)}")
@@ -482,4 +528,7 @@ defmodule App.Agents.Runner do
 
   defp maybe_put_map_value(map, _key, nil), do: map
   defp maybe_put_map_value(map, key, value), do: Map.put(map, key, value)
+
+  defp maybe_put_keyword(opts, _key, nil), do: opts
+  defp maybe_put_keyword(opts, key, value), do: Keyword.put(opts, key, value)
 end

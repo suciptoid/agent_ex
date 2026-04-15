@@ -15,7 +15,7 @@ defmodule App.TestSupport.DelegatingAgentRunnerStub do
       delegated_agent_id = delegated_agent_id(opts[:extra_system_prompt] || "")
 
       {:ok, _result} =
-        ReqLLM.Tool.execute(ask_agent_tool, %{
+        App.LLM.Tool.execute(ask_agent_tool, %{
           "agent_id" => delegated_agent_id,
           "instructions" => "Fetch the delegated payload."
         })

@@ -36,7 +36,7 @@ defmodule App.TestSupport.AskAgentStreamingRunnerStub do
       }
 
       {:ok, _result} =
-        ReqLLM.Tool.execute(ask_agent_tool, %{
+        App.LLM.Tool.execute(ask_agent_tool, %{
           "agent_id" => delegated_agent_id,
           "instructions" => "Fetch the facts."
         })

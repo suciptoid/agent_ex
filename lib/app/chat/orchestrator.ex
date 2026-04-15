@@ -7,6 +7,7 @@ defmodule App.Chat.Orchestrator do
 
   alias App.Chat
   alias App.Chat.{ChatRoom, ChatRoomAgent, ContextBuilder, Message}
+  alias App.LLM.Tool, as: LLMTool
 
   def send_message(_scope, %ChatRoom{} = chat_room, content) when is_binary(content) do
     content = String.trim(content)
@@ -157,22 +158,24 @@ defmodule App.Chat.Orchestrator do
 
     agent_map = Map.new(agents, fn a -> {to_string(a.id), a} end)
 
-    ReqLLM.tool(
+    LLMTool.build(
       name: "handover",
       description:
         "Transfer the active agent role to another agent in this room. They will handle future messages. Available agents: #{agent_descriptions}",
-      parameter_schema: [
-        agent_id: [
-          type: :string,
-          required: true,
-          doc: "The id of the agent to make active"
-        ],
-        reason: [
-          type: :string,
-          required: false,
-          doc: "Optional reason for the handover"
-        ]
-      ],
+      input_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "agent_id" => %{
+            "type" => "string",
+            "description" => "The id of the agent to make active"
+          },
+          "reason" => %{
+            "type" => "string",
+            "description" => "Optional reason for the handover"
+          }
+        },
+        "required" => ["agent_id"]
+      },
       callback: fn args ->
         agent_id = Map.get(args, :agent_id) || Map.get(args, "agent_id")
         reason = Map.get(args, :reason) || Map.get(args, "reason")
@@ -219,18 +222,24 @@ defmodule App.Chat.Orchestrator do
     agent_map = Map.new(agents, fn a -> {to_string(a.id), a} end)
     messages_snapshot = current_messages
 
-    ReqLLM.tool(
+    LLMTool.build(
       name: "ask_agent",
       description:
         "Ask another agent to handle a specific task. The agent will respond and their message will appear in the chat. Available agents: #{agent_descriptions}",
-      parameter_schema: [
-        agent_id: [type: :string, required: true, doc: "The id of the agent to ask"],
-        instructions: [
-          type: :string,
-          required: true,
-          doc: "Clear instructions for the target agent"
-        ]
-      ],
+      input_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "agent_id" => %{
+            "type" => "string",
+            "description" => "The id of the agent to ask"
+          },
+          "instructions" => %{
+            "type" => "string",
+            "description" => "Clear instructions for the target agent"
+          }
+        },
+        "required" => ["agent_id", "instructions"]
+      },
       callback: fn args ->
         agent_id = Map.get(args, :agent_id) || Map.get(args, "agent_id")
 
@@ -1019,17 +1028,20 @@ defmodule App.Chat.Orchestrator do
   defp maybe_inject_title_tool(opts, _chat_room, _callbacks), do: opts
 
   defp build_update_title_tool(chat_room, callbacks) do
-    ReqLLM.tool(
+    LLMTool.build(
       name: "update_chatroom_title",
       description:
         "Set the title of the current conversation. Call once at the start with a concise, descriptive title based on the user's first message.",
-      parameter_schema: [
-        title: [
-          type: :string,
-          required: true,
-          doc: "A concise title (max 60 chars) summarizing the conversation topic"
-        ]
-      ],
+      input_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "title" => %{
+            "type" => "string",
+            "description" => "A concise title (max 60 chars) summarizing the conversation topic"
+          }
+        },
+        "required" => ["title"]
+      },
       callback: fn args ->
         title = Map.get(args, :title) || Map.get(args, "title") || ""
 

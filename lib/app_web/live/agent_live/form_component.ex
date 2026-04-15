@@ -2,6 +2,7 @@ defmodule AppWeb.AgentLive.FormComponent do
   use AppWeb, :live_component
 
   alias App.Agents
+  alias App.Providers
 
   @reasoning_effort_options [
     {"default", "Auto"},
@@ -374,9 +375,61 @@ defmodule AppWeb.AgentLive.FormComponent do
         []
 
       provider ->
-        provider_atom = String.to_existing_atom(provider.provider)
+        options =
+          provider
+          |> Providers.list_provider_models()
+          |> Enum.map(fn provider_model ->
+            {
+              provider_model_value(provider, provider_model.model_id),
+              provider_model.name || provider_model.model_id
+            }
+          end)
 
-        ReqLLM.available_models(scope: provider_atom, api_key: provider.api_key)
+        if options == [] do
+          fallback_model_options(provider.provider)
+        else
+          options
+        end
     end
   end
+
+  defp provider_model_value(provider, model_id) do
+    model_id = to_string(model_id || "")
+
+    if String.contains?(model_id, ":") do
+      model_id
+    else
+      "#{provider.provider}:#{model_id}"
+    end
+  end
+
+  defp fallback_model_options("openai") do
+    [
+      {"openai:gpt-5.4", "gpt-5.4"},
+      {"openai:gpt-4.1-mini", "gpt-4.1-mini"}
+    ]
+  end
+
+  defp fallback_model_options("anthropic") do
+    [
+      {"anthropic:claude-sonnet-4-6", "claude-sonnet-4-6"},
+      {"anthropic:claude-haiku-4-5", "claude-haiku-4-5"}
+    ]
+  end
+
+  defp fallback_model_options("google"),
+    do: [{"google:gemini-2.5-flash", "gemini-2.5-flash"}]
+
+  defp fallback_model_options("gemini"),
+    do: [{"gemini:gemini-2.5-flash", "gemini-2.5-flash"}]
+
+  defp fallback_model_options("xai"),
+    do: [{"xai:grok-4", "grok-4"}]
+
+  defp fallback_model_options("github_copilot"),
+    do: [{"github_copilot:gpt-4.1", "gpt-4.1"}]
+
+  defp fallback_model_options("openai_compat"), do: []
+  defp fallback_model_options("custom_openai_compat"), do: []
+  defp fallback_model_options(_provider), do: []
 end

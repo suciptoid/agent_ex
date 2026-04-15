@@ -53,8 +53,23 @@
           <div>
             <p class="font-medium text-foreground">{provider.name || provider.provider}</p>
             <p class="text-sm text-muted-foreground">{provider.provider}</p>
+            <p class="mt-1 text-xs text-muted-foreground">{provider.base_url}</p>
+            <p
+              :if={provider.models_last_refresh_error not in [nil, ""]}
+              class="mt-1 text-xs text-rose-500"
+            >
+              Last refresh error: {provider.models_last_refresh_error}
+            </p>
           </div>
           <div :if={@can_manage_organization?} class="flex gap-2">
+            <.button
+              id={"refresh-provider-models-#{provider.id}"}
+              variant="outline"
+              phx-click="refresh-models"
+              phx-value-id={provider.id}
+            >
+              Refresh Models
+            </.button>
             <.link id={"edit-provider-#{provider.id}"} patch={~p"/providers/#{provider.id}/edit"}>
               <.button variant="outline">Edit</.button>
             </.link>

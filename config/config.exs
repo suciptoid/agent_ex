@@ -24,12 +24,6 @@ config :app,
   ecto_repos: [App.Repo],
   generators: [timestamp_type: :utc_datetime, binary_id: true]
 
-config :req_llm,
-  load_dotenv: false,
-  stream_receive_timeout: 60_000
-
-config :tesla, disable_deprecated_builder_warning: true
-
 config :ueberauth, Ueberauth,
   providers: [
     google:

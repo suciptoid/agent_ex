@@ -4,6 +4,7 @@ defmodule App.Chat.Compaction do
   require Logger
 
   alias App.Agents.Agent
+  alias App.LLM.Client
   alias App.Providers.Provider
 
   def generate_summary(agent, latest_checkpoint, messages, opts \\ [])
@@ -26,37 +27,23 @@ defmodule App.Chat.Compaction do
   end
 
   defp llm_summary(
-         %Agent{provider: %Provider{api_key: api_key}} = agent,
+         %Agent{provider: %Provider{}} = agent,
          latest_checkpoint,
          messages,
          policy
        ) do
     max_tokens = Map.get(policy, :checkpoint_summary_max_tokens, 1_200)
 
-    context =
-      ReqLLM.Context.new(
-        [
-          ReqLLM.Context.system(compaction_system_prompt())
-        ] ++
-          maybe_existing_checkpoint(latest_checkpoint) ++
-          Enum.map(messages, &to_compaction_message(&1, policy)) ++
-          [ReqLLM.Context.user(compaction_user_prompt())]
-      )
+    messages =
+      maybe_existing_checkpoint(latest_checkpoint) ++
+        Enum.map(messages, &to_compaction_message(&1, policy)) ++
+        [%{role: "user", content: compaction_user_prompt()}]
 
-    case ReqLLM.generate_text(agent.model, context,
-           api_key: api_key,
-           temperature: 0,
-           max_tokens: max_tokens
-         ) do
-      {:ok, response} ->
-        case response |> ReqLLM.Response.text() |> to_string() |> String.trim() do
-          "" -> {:error, :empty_checkpoint_summary}
-          summary -> {:ok, summary}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+    Client.generate_text(agent.provider, agent.model, messages,
+      system_prompt: compaction_system_prompt(),
+      temperature: 0,
+      max_tokens: max_tokens
+    )
   end
 
   defp llm_summary(%Agent{}, _latest_checkpoint, _messages, _policy),
@@ -75,9 +62,10 @@ defmodule App.Chat.Compaction do
       []
     else
       [
-        ReqLLM.Context.system(
-          "Existing checkpoint summary of earlier conversation:\n\n" <> summary
-        )
+        %{
+          role: "system",
+          content: "Existing checkpoint summary of earlier conversation:\n\n" <> summary
+        }
       ]
     end
   end
@@ -92,14 +80,19 @@ defmodule App.Chat.Compaction do
     tool_call_id = Map.get(message, :tool_call_id) || Map.get(message, "tool_call_id")
     tool_calls = Map.get(message, :tool_calls, Map.get(message, "tool_calls", [])) |> List.wrap()
 
-    case role do
-      "assistant" -> ReqLLM.Context.assistant(content || "", tool_calls: tool_calls)
-      "system" -> ReqLLM.Context.system(content || "")
-      "tool" -> ReqLLM.Context.tool_result(tool_call_id || "", name || "tool", content || "")
-      "checkpoint" -> ReqLLM.Context.system(content || "")
-      _other -> ReqLLM.Context.user(content || "")
-    end
+    %{}
+    |> Map.put(:role, normalize_role(role))
+    |> Map.put(:content, content || "")
+    |> maybe_put(:name, name)
+    |> maybe_put(:tool_call_id, tool_call_id)
+    |> maybe_put(:tool_calls, tool_calls)
   end
+
+  defp normalize_role("assistant"), do: "assistant"
+  defp normalize_role("system"), do: "system"
+  defp normalize_role("tool"), do: "tool"
+  defp normalize_role("checkpoint"), do: "checkpoint"
+  defp normalize_role(_role), do: "user"
 
   defp truncate_content(nil, _role, _policy), do: ""
 
@@ -205,6 +198,9 @@ defmodule App.Chat.Compaction do
 
   defp blank_to_placeholder(""), do: "[no content]"
   defp blank_to_placeholder(value), do: value
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   defp compaction_system_prompt do
     """

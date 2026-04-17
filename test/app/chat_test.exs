@@ -597,6 +597,85 @@ defmodule App.ChatTest do
       assert final_assistant_message.position == 5
     end
 
+    test "marks a streaming tool message completed before the final assistant turn", %{
+      user: user,
+      provider: provider
+    } do
+      previous_runner = Application.get_env(:app, :agent_runner)
+      previous_stub_config = Application.get_env(:app, App.TestSupport.ToolTurnPauseRunnerStub)
+
+      Application.put_env(:app, :agent_runner, App.TestSupport.ToolTurnPauseRunnerStub)
+
+      Application.put_env(:app, App.TestSupport.ToolTurnPauseRunnerStub,
+        notify_pid: self(),
+        tool_response: %{
+          "id" => "tool_without_event_content",
+          "name" => "web_fetch",
+          "arguments" => %{"url" => "https://example.com"},
+          "content" => nil,
+          "status" => "ok"
+        }
+      )
+
+      on_exit(fn ->
+        restore_app_env(:agent_runner, previous_runner)
+        restore_app_env(App.TestSupport.ToolTurnPauseRunnerStub, previous_stub_config)
+      end)
+
+      agent = agent_fixture(user, %{provider: provider, name: "Tool Agent"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Tool Status",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      assert {:ok, _user_message} =
+               Chat.create_message(room, %{role: "user", content: "Fetch it"})
+
+      messages = Chat.list_messages(room)
+
+      assert {:ok, placeholder_message} =
+               Chat.create_message(room, %{
+                 role: "assistant",
+                 content: nil,
+                 status: :pending,
+                 agent_id: agent.id,
+                 metadata: %{}
+               })
+
+      assert {:ok, worker_pid} = Chat.start_stream(room, messages, placeholder_message)
+      assert_receive {:tool_turn_runner_started, runner_pid}
+
+      pending_tool_message =
+        wait_for_persisted_message(worker_pid, room, fn message ->
+          if message.role == "tool" and message.tool_call_id == "tool_without_event_content" do
+            message
+          end
+        end)
+
+      assert pending_tool_message.status == :pending
+
+      send(runner_pid, :emit_tool_result)
+      assert_receive {:tool_turn_runner_tool_result_emitted, ^runner_pid}
+
+      completed_tool_message =
+        wait_for_persisted_message(worker_pid, room, fn message ->
+          if message.id == pending_tool_message.id and message.status == :completed do
+            message
+          end
+        end)
+
+      assert completed_tool_message.content == nil
+
+      ref = Process.monitor(runner_pid)
+      worker_ref = Process.monitor(worker_pid)
+      send(runner_pid, :continue)
+      assert_receive {:DOWN, ^ref, :process, ^runner_pid, _reason}
+      assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, :normal}
+    end
+
     test "keeps positions unique when next tool turn arrives before prior tool result is handled",
          %{
            user: user,
@@ -735,4 +814,18 @@ defmodule App.ChatTest do
 
   defp restore_app_env(key, nil), do: Application.delete_env(:app, key)
   defp restore_app_env(key, value), do: Application.put_env(:app, key, value)
+
+  defp wait_for_persisted_message(worker_pid, room, callback) do
+    Enum.reduce_while(1..100, nil, fn _, _acc ->
+      _ = :sys.get_state(worker_pid)
+
+      room
+      |> Chat.list_messages()
+      |> Enum.find_value(callback)
+      |> case do
+        nil -> {:cont, nil}
+        message -> {:halt, message}
+      end
+    end) || flunk("expected persisted message to reach the desired state")
+  end
 end

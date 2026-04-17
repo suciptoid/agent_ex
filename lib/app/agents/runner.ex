@@ -464,6 +464,7 @@ defmodule App.Agents.Runner do
   end
 
   defp handle_alloy_event(%{event: :tool_calls, payload: payload}, callbacks) do
+
     tool_calls =
       payload
       |> Map.get(:tool_calls, [])

@@ -21,6 +21,19 @@ defmodule App.Agents.StreamMiddleware do
     state
   end
 
+  def call(:after_tool_execution, %State{} = state) do
+    callbacks = Map.get(state.config.context, :stream_callbacks)
+
+    with %{on_tool_result: on_tool_result} when is_function(on_tool_result, 1) <- callbacks,
+         %Message{} = message <- latest_tool_result_message(state) do
+      state
+      |> tool_results(message)
+      |> Enum.each(on_tool_result)
+    end
+
+    state
+  end
+
   def call(_hook, %State{} = state), do: state
 
   defp latest_tool_request_message(%State{} = state) do
@@ -35,6 +48,19 @@ defmodule App.Agents.StreamMiddleware do
   end
 
   defp tool_request_message?(_message), do: false
+
+  defp latest_tool_result_message(%State{} = state) do
+    state
+    |> State.messages()
+    |> Enum.reverse()
+    |> Enum.find(&tool_result_message?/1)
+  end
+
+  defp tool_result_message?(%Message{role: :user, content: blocks}) when is_list(blocks) do
+    Enum.any?(blocks, &tool_result_block?/1)
+  end
+
+  defp tool_result_message?(_message), do: false
 
   defp tool_call_turn(%Message{content: blocks}) when is_list(blocks) do
     tool_calls =
@@ -60,9 +86,59 @@ defmodule App.Agents.StreamMiddleware do
 
   defp tool_call_turn(_message), do: nil
 
+  defp tool_results(%State{} = state, %Message{content: blocks}) when is_list(blocks) do
+    tool_call_meta_by_id =
+      state.tool_calls
+      |> List.wrap()
+      |> Enum.reduce(%{}, fn meta, acc ->
+        case Map.get(meta, :id) || Map.get(meta, "id") do
+          id when is_binary(id) and id != "" -> Map.put(acc, id, meta)
+          _other -> acc
+        end
+      end)
+
+    blocks
+    |> Enum.filter(&tool_result_block?/1)
+    |> Enum.map(fn block ->
+      tool_call_id = Map.get(block, :tool_use_id) || Map.get(block, "tool_use_id") || ""
+      tool_call_meta = Map.get(tool_call_meta_by_id, tool_call_id, %{})
+
+      %{
+        "id" => tool_call_id,
+        "name" => Map.get(tool_call_meta, :name) || Map.get(tool_call_meta, "name") || "",
+        "arguments" => Map.get(tool_call_meta, :input) || Map.get(tool_call_meta, "input") || %{},
+        "content" => Map.get(block, :content) || Map.get(block, "content") || "",
+        "status" => tool_result_status(block, tool_call_meta)
+      }
+    end)
+  end
+
+  defp tool_results(_state, _message), do: []
+
   defp tool_use_block?(%{type: type}) when type in ["tool_use", "server_tool_use"], do: true
   defp tool_use_block?(%{"type" => type}) when type in ["tool_use", "server_tool_use"], do: true
   defp tool_use_block?(_block), do: false
+
+  defp tool_result_block?(%{type: type}) when type in ["tool_result", "server_tool_result"],
+    do: true
+
+  defp tool_result_block?(%{"type" => type}) when type in ["tool_result", "server_tool_result"],
+    do: true
+
+  defp tool_result_block?(_block), do: false
+
+  defp tool_result_status(block, tool_call_meta) do
+    cond do
+      Map.get(block, :is_error) == true or Map.get(block, "is_error") == true ->
+        "error"
+
+      not is_nil(Map.get(tool_call_meta, :error) || Map.get(tool_call_meta, "error")) ->
+        "error"
+
+      true ->
+        "ok"
+    end
+  end
 
   defp first_block_text(blocks) do
     Enum.find_value(blocks, fn

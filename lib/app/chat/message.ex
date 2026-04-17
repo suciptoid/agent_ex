@@ -97,7 +97,8 @@ defmodule App.Chat.Message do
     role = get_field(changeset, :role)
     metadata = get_field(changeset, :metadata, %{})
 
-    if status in @incomplete_statuses or assistant_tool_call_turn?(role, metadata) do
+    if role == "tool" or status in @incomplete_statuses or
+         assistant_tool_call_turn?(role, metadata) do
       changeset
     else
       validate_required(changeset, [:content])

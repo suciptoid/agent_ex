@@ -724,7 +724,11 @@ defmodule AppWeb.ChatLive.Show do
   end
 
   defp current_stream_metadata(socket) do
-    build_message_metadata(%{}, socket.assigns.streaming_thinking, [])
+    build_message_metadata(
+      %{},
+      socket.assigns.streaming_thinking,
+      socket.assigns.streaming_tool_responses
+    )
   end
 
   defp delegated_stream_started?(message, agent_message_streams) do
@@ -939,8 +943,9 @@ defmodule AppWeb.ChatLive.Show do
   defp maybe_put_agent_id(attrs, agent_id), do: Map.put(attrs, :agent_id, agent_id)
 
   defp put_main_stream_tool_response(socket, tool_result) do
-    _ = tool_result
     socket
+    |> update(:streaming_tool_responses, &merge_tool_response(&1 || [], tool_result))
+    |> maybe_stream_main_placeholder()
   end
 
   defp maybe_switch_subscription(socket, chat_room_id) do
@@ -978,7 +983,7 @@ defmodule AppWeb.ChatLive.Show do
       |> assign(:streaming_message_inserted_at, message.inserted_at)
       |> assign(:streaming_content, message.content || "")
       |> assign(:streaming_thinking, message_thinking(message) || "")
-      |> assign(:streaming_tool_responses, [])
+      |> assign(:streaming_tool_responses, tool_responses(message))
       |> assign(:streaming_active?, true)
     else
       reset_main_stream(socket)

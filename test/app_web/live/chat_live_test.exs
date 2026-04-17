@@ -1067,6 +1067,12 @@ defmodule AppWeb.ChatLiveTest do
 
       assert has_element?(live_view, "#message-#{tool_call_message.id}")
 
+      assert has_element?(
+               live_view,
+               "#message-tool-#{tool_call_message.id}-0",
+               "Waiting for tool output"
+             )
+
       refute Enum.any?(Chat.list_messages(Chat.get_chat_room!(scope, room.id)), fn message ->
                message.role == "assistant" and message.status == :pending and
                  message.id != tool_call_message.id
@@ -1074,6 +1080,15 @@ defmodule AppWeb.ChatLiveTest do
 
       send(runner_pid, :emit_tool_result)
       assert_receive {:tool_turn_runner_tool_result_emitted, ^runner_pid}
+
+      assert_eventually(live_view, fn ->
+        has_element?(live_view, "#message-tool-#{tool_call_message.id}-0", "sample payload") and
+          not has_element?(
+            live_view,
+            "#message-tool-#{tool_call_message.id}-0",
+            "Waiting for tool output"
+          )
+      end)
 
       followup_message =
         wait_for_messages(live_view, scope, room.id, fn messages ->

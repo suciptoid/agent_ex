@@ -2,8 +2,7 @@ defmodule App.Agents.Tools do
   @moduledoc """
   Registry and runtime for builtin and user-defined agent tools.
 
-  With the Alloy migration, tools are either Alloy.Tool behaviour modules
-  (for builtins) or HttpTool structs (for user-defined HTTP tools).
+  With the Alloy migration, tools are Alloy.Tool behaviour modules.
   """
 
   require Logger
@@ -41,11 +40,11 @@ defmodule App.Agents.Tools do
   end
 
   @doc """
-  Resolves tool names to Alloy tool modules/structs.
+  Resolves tool names to Alloy tool modules.
 
   Returns a list of items that can be placed in Alloy.run's `:tools` option.
   For builtin tools: Alloy.Tool behaviour modules.
-  For custom HTTP tools: AlloyTools.HttpTool structs.
+  For custom HTTP tools: runtime-generated Alloy.Tool modules.
   """
   def resolve(tool_names, opts \\ []) when is_list(tool_names) and is_list(opts) do
     organization_id = Keyword.get(opts, :organization_id)

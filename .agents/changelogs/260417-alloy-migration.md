@@ -62,3 +62,26 @@ Complete migration of LLM infrastructure from `req_llm` + `LLMDB` to `alloy` lib
 - All 211 tests pass, `mix precommit` green
 
 By: claude-opus-4.6 on Github Copilot
+
+## Follow-up fixes
+
+- Converted custom HTTP tools into runtime Alloy.Tool modules so Alloy can register them safely.
+- Persisted OpenAI `provider_state.response_id` in assistant metadata and reuse it on later runs.
+- Updated the custom tool tests to assert the resolved runtime module behaves like an Alloy tool.
+- Re-ran focused tests and `mix precommit` successfully after the fix.
+
+By: gpt-5.4-mini on GitHub Copilot
+
+## Tool persistence follow-up
+
+- Tool execution metadata from Alloy does not carry the rendered tool output text, so DB writes now read tool result blocks back from `Alloy.Result.messages`.
+- Streaming tool messages are synced again on completion so the persisted chat history gets the real tool content, not the empty interim event payload.
+
+By: gpt-5.4-mini on GitHub Copilot
+
+## Title tool replay fix
+
+- Kept `update_chatroom_title` available on later turns so replayed tool outputs still match the active tool list.
+- The auto-title prompt still only appears when a room starts without a title.
+
+By: gpt-5.4-mini on GitHub Copilot

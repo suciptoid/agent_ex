@@ -239,7 +239,8 @@ defmodule App.Chat.StreamWorker do
 
     completion_event =
       case result do
-        {:ok, %{content: content, agent_id: agent_id, metadata: metadata}} ->
+        {:ok, %{content: content, agent_id: agent_id, metadata: metadata} = result_map} ->
+          sync_tool_messages(state, Map.get(result_map, :tool_responses, []))
           persist_success(state.chat_room, state.message_id, content, agent_id, metadata, state)
           {:stream_complete, tool_parent_message_id(state), content}
 
@@ -281,6 +282,22 @@ defmodule App.Chat.StreamWorker do
       |> maybe_put_position(final_message_position(state))
 
     persist_message(chat_room, message_id, attrs)
+  end
+
+  defp sync_tool_messages(_state, []), do: :ok
+
+  defp sync_tool_messages(state, tool_responses) do
+    Enum.each(tool_responses, fn tool_response ->
+      case persist_tool_message(state, tool_response) do
+        {:ok, _state, tool_message} ->
+          broadcast_message_update(state.chat_room.id, tool_message.id)
+
+        {:error, reason} ->
+          Logger.error(
+            "[StreamWorker] Failed to sync tool message #{Map.get(tool_response, "id")}: #{inspect(reason)}"
+          )
+      end
+    end)
   end
 
   defp persist_error(chat_room, message_id, error_text, state) do

@@ -41,8 +41,9 @@ defmodule App.Agents.ToolsTest do
     tool = tool_fixture(user, %{name: "brave_search"})
 
     [resolved_tool] = Tools.resolve([tool.name], organization_id: tool.organization_id)
-    assert is_struct(resolved_tool, App.Agents.AlloyTools.HttpTool)
-    assert resolved_tool.name == "brave_search"
+    assert is_atom(resolved_tool)
+    assert Code.ensure_loaded?(resolved_tool)
+    assert apply(resolved_tool, :name, []) == "brave_search"
   end
 
   test "custom tool templates can interpolate runtime path params", %{user: user} do
@@ -65,10 +66,10 @@ defmodule App.Agents.ToolsTest do
     [tool] =
       Tools.resolve(["jina_reader"], organization_id: user_scope_fixture(user).organization.id)
 
-    assert is_struct(tool, App.Agents.AlloyTools.HttpTool)
+    assert is_atom(tool)
 
     assert {:ok, "templated"} =
-             Tools.execute_http_tool(tool, %{"dynamic_path" => "docs/file.txt"})
+             apply(tool, :execute, [%{"dynamic_path" => "docs/file.txt"}, %{}])
   end
 
   test "do_web_fetch/1 returns the response body on success" do

@@ -32,7 +32,7 @@ defmodule App.Providers.AlloyConfig do
             url -> Keyword.put(base_opts, :api_url, url)
           end
 
-        {Alloy.Provider.OpenAICompat, compat_opts}
+        {App.Providers.OpenAICompat, compat_opts}
     end
   end
 

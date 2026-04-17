@@ -9,6 +9,7 @@ defmodule App.Chat.ContextBuilder do
 
   @checkpoint_version 1
   @old_tool_placeholder "[Older tool result omitted from prompt; stored in transcript]"
+  @internal_tool_names MapSet.new(["update_chatroom_title"])
   @default_policy %{
     context_window_tokens: 131_072,
     reserve_tokens: 16_384,
@@ -32,6 +33,7 @@ defmodule App.Chat.ContextBuilder do
           optional(:tool_calls) => list(),
           optional(:metadata) => map(),
           optional(:position) => integer() | nil,
+          optional(:agent_id) => term(),
           required(:role) => String.t(),
           required(:content) => String.t() | nil
         }
@@ -77,7 +79,9 @@ defmodule App.Chat.ContextBuilder do
       |> Enum.reject(&is_nil/1)
       |> MapSet.new()
 
-    Enum.flat_map(messages, &canonical_message(&1, explicit_tool_call_ids))
+    messages
+    |> Enum.flat_map(&canonical_message(&1, explicit_tool_call_ids))
+    |> strip_internal_tool_transcript()
   end
 
   def estimate_messages_tokens(messages, opts \\ []) when is_list(messages) and is_list(opts) do
@@ -639,6 +643,7 @@ defmodule App.Chat.ContextBuilder do
       name: message.name,
       tool_call_id: message.tool_call_id,
       tool_calls: Message.tool_calls(message),
+      agent_id: message.agent_id,
       metadata: message.metadata || %{}
     }
   end
@@ -654,12 +659,21 @@ defmodule App.Chat.ContextBuilder do
       tool_calls:
         Map.get(message, :tool_calls, Map.get(message, "tool_calls", []))
         |> List.wrap(),
+      agent_id: Map.get(message, :agent_id) || Map.get(message, "agent_id"),
       metadata: Map.get(message, :metadata) || Map.get(message, "metadata") || %{}
     }
   end
 
   defp normalize_prompt_message(other) when is_binary(other) do
-    %{role: "user", content: other, name: nil, tool_call_id: nil, tool_calls: [], metadata: %{}}
+    %{
+      role: "user",
+      content: other,
+      name: nil,
+      tool_call_id: nil,
+      tool_calls: [],
+      agent_id: nil,
+      metadata: %{}
+    }
   end
 
   defp normalize_prompt_message(other) do
@@ -669,6 +683,7 @@ defmodule App.Chat.ContextBuilder do
       name: nil,
       tool_call_id: nil,
       tool_calls: [],
+      agent_id: nil,
       metadata: %{}
     }
   end
@@ -679,6 +694,7 @@ defmodule App.Chat.ContextBuilder do
       content: turn_content(tool_call_turn),
       tool_calls: turn_tool_calls(tool_call_turn),
       position: message.position,
+      agent_id: message.agent_id,
       metadata: %{
         "synthetic" => true,
         "source_message_id" => message.id
@@ -693,6 +709,7 @@ defmodule App.Chat.ContextBuilder do
       name: Map.get(tool_response, "name"),
       tool_call_id: Map.get(tool_response, "id"),
       position: message.position,
+      agent_id: message.agent_id,
       metadata: %{
         "arguments" => Map.get(tool_response, "arguments"),
         "tool_status" => Map.get(tool_response, "status"),
@@ -794,6 +811,73 @@ defmodule App.Chat.ContextBuilder do
   end
 
   defp message_tool_calls(_message), do: []
+
+  defp blank?(value), do: value in [nil, ""]
+
+  defp strip_internal_tool_transcript(messages) do
+    internal_tool_call_ids =
+      messages
+      |> Enum.flat_map(&internal_tool_call_ids/1)
+      |> MapSet.new()
+
+    Enum.flat_map(messages, fn message ->
+      cond do
+        message_role(message) == "assistant" ->
+          strip_internal_assistant_tool_calls(message)
+
+        message_role(message) == "tool" and
+            internal_tool_message?(message, internal_tool_call_ids) ->
+          []
+
+        true ->
+          [message]
+      end
+    end)
+  end
+
+  defp internal_tool_call_ids(message) do
+    if message_role(message) == "assistant" do
+      message
+      |> message_tool_calls()
+      |> Enum.filter(&internal_tool_call?/1)
+      |> Enum.map(&tool_call_id/1)
+      |> Enum.reject(&is_nil/1)
+    else
+      []
+    end
+  end
+
+  defp strip_internal_assistant_tool_calls(message) do
+    visible_tool_calls =
+      message
+      |> message_tool_calls()
+      |> Enum.reject(&internal_tool_call?/1)
+
+    stripped_message = put_message_tool_calls(message, visible_tool_calls)
+
+    if visible_tool_calls == [] and blank?(message_content(stripped_message)) do
+      []
+    else
+      [stripped_message]
+    end
+  end
+
+  defp put_message_tool_calls(%{} = message, tool_calls),
+    do: Map.put(message, :tool_calls, tool_calls)
+
+  defp internal_tool_message?(message, internal_tool_call_ids) do
+    MapSet.member?(@internal_tool_names, message_name(message) || "") or
+      MapSet.member?(internal_tool_call_ids, message_tool_call_id(message))
+  end
+
+  defp internal_tool_call?(%{} = tool_call) do
+    MapSet.member?(
+      @internal_tool_names,
+      Map.get(tool_call, "name") || Map.get(tool_call, :name) || ""
+    )
+  end
+
+  defp internal_tool_call?(_tool_call), do: false
 
   defp turn_content(%{} = tool_call_turn) do
     Map.get(tool_call_turn, "content") || Map.get(tool_call_turn, :content)

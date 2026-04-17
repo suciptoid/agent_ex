@@ -18,9 +18,10 @@ defmodule App.Agents.Runner do
 
   def run(%Agent{provider: %Provider{}} = agent, messages, opts) do
     system_prompt = build_system_prompt(agent, opts)
-    alloy_messages = build_alloy_messages(messages, opts)
+    {messages_for_provider, provider_opts} = prepare_provider_messages(agent, messages, opts)
+    alloy_messages = build_alloy_messages(messages_for_provider, opts)
     alloy_tools = resolve_tools(agent, opts)
-    provider = build_provider(agent)
+    provider = build_provider(agent, provider_opts)
 
     alloy_opts =
       [
@@ -58,10 +59,12 @@ defmodule App.Agents.Runner do
         opts
       ) do
     system_prompt = build_system_prompt(agent, opts)
-    alloy_messages = build_alloy_messages(messages, opts)
-    alloy_tools = resolve_tools(agent, opts)
-    provider = build_provider(agent)
     callbacks = build_stream_callbacks(recipient, opts)
+    opts = Keyword.put(opts, :stream_callbacks, callbacks)
+    {messages_for_provider, provider_opts} = prepare_provider_messages(agent, messages, opts)
+    alloy_messages = build_alloy_messages(messages_for_provider, opts)
+    alloy_tools = resolve_tools(agent, opts)
+    provider = build_provider(agent, provider_opts)
 
     on_chunk = fn chunk ->
       callbacks.on_result.(chunk)
@@ -79,6 +82,7 @@ defmodule App.Agents.Runner do
         messages: alloy_messages,
         max_turns: @default_max_turns,
         context: build_alloy_context(agent, opts),
+        middleware: stream_middleware(opts),
         on_event: on_event
       ]
       |> merge_extra_params(agent)
@@ -100,8 +104,15 @@ defmodule App.Agents.Runner do
 
   # ── Private ──
 
-  defp build_provider(%Agent{provider: provider, model: model}) do
-    AlloyConfig.to_alloy_provider(provider, model)
+  defp prepare_provider_messages(%Agent{provider: %Provider{} = provider} = agent, messages, opts) do
+    {messages, continuation_opts} = maybe_trim_to_openai_continuation(agent, provider, messages)
+    provider_opts = provider_runtime_opts(agent, opts) |> Keyword.merge(continuation_opts)
+
+    {messages, provider_opts}
+  end
+
+  defp build_provider(%Agent{provider: provider, model: model}, provider_opts) do
+    AlloyConfig.to_alloy_provider(provider, model, provider_opts)
   end
 
   defp build_system_prompt(agent, opts) do
@@ -114,7 +125,30 @@ defmodule App.Agents.Runner do
   defp build_alloy_messages(messages, _opts) do
     messages
     |> ContextBuilder.canonical_messages()
-    |> Enum.flat_map(&to_alloy_message/1)
+    |> Enum.reduce({[], MapSet.new()}, fn message, {alloy_messages, tool_call_ids} ->
+      case message_role(message) do
+        "assistant" ->
+          next_tool_call_ids =
+            message
+            |> message_tool_calls()
+            |> Enum.map(&tool_call_id/1)
+            |> Enum.reject(&blank?/1)
+            |> Enum.reduce(tool_call_ids, &MapSet.put(&2, &1))
+
+          {alloy_messages ++ to_alloy_message(message), next_tool_call_ids}
+
+        "tool" ->
+          if MapSet.member?(tool_call_ids, message_tool_call_id(message)) do
+            {alloy_messages ++ to_alloy_message(message), tool_call_ids}
+          else
+            {alloy_messages ++ orphan_tool_message_to_context(message), tool_call_ids}
+          end
+
+        _other ->
+          {alloy_messages ++ to_alloy_message(message), tool_call_ids}
+      end
+    end)
+    |> elem(0)
   end
 
   defp resolve_tools(agent, opts) do
@@ -122,15 +156,194 @@ defmodule App.Agents.Runner do
       Keyword.get(opts, :extra_tools, [])
   end
 
+  defp maybe_trim_to_openai_continuation(%Agent{} = agent, %Provider{} = provider, messages) do
+    provider_type = provider.provider_type || provider.provider
+
+    case {latest_provider_response(messages, agent.id), provider_type} do
+      {{response_id, index}, "openai"} when is_binary(response_id) ->
+        messages_after_response = Enum.drop(messages, index + 1)
+
+        if messages_after_response == [] do
+          {messages, []}
+        else
+          {messages_after_response, [previous_response_id: response_id]}
+        end
+
+      _other ->
+        {messages, []}
+    end
+  end
+
+  defp latest_provider_response(messages, agent_id) when is_list(messages) do
+    messages
+    |> Enum.with_index()
+    |> Enum.reverse()
+    |> Enum.find_value(fn {message, index} ->
+      with true <- same_agent_message?(message, agent_id),
+           response_id when is_binary(response_id) <- provider_response_id(message) do
+        {response_id, index}
+      else
+        _other -> nil
+      end
+    end)
+  end
+
+  defp latest_provider_response(_messages, _agent_id), do: nil
+
+  defp same_agent_message?(_message, nil), do: false
+
+  defp same_agent_message?(message, agent_id) do
+    case message_agent_id(message) do
+      nil -> false
+      message_agent_id -> to_string(message_agent_id) == to_string(agent_id)
+    end
+  end
+
+  defp message_agent_id(%Message{} = message), do: message.agent_id
+
+  defp message_agent_id(%{} = message) do
+    Map.get(message, :agent_id) || Map.get(message, "agent_id")
+  end
+
+  defp message_agent_id(_message), do: nil
+
+  defp provider_response_id(%Message{} = message),
+    do: provider_response_id(message.metadata)
+
+  defp provider_response_id(%{} = metadata) do
+    metadata
+    |> Map.get(:provider_state, Map.get(metadata, "provider_state"))
+    |> case do
+      %{"response_id" => response_id} when is_binary(response_id) and response_id != "" ->
+        response_id
+
+      %{response_id: response_id} when is_binary(response_id) and response_id != "" ->
+        response_id
+
+      _other ->
+        nil
+    end
+  end
+
+  defp provider_response_id(_other), do: nil
+
+  defp provider_runtime_opts(%Agent{} = agent, opts) do
+    extra = agent.extra_params || %{}
+    provider_type = normalized_provider_type(agent.provider)
+
+    []
+    |> maybe_put_provider_opt(
+      :max_tokens,
+      Map.get(extra, "max_tokens") || Map.get(extra, :max_tokens)
+    )
+    |> maybe_put_openai_compat_extra(provider_type, "temperature", Map.get(extra, "temperature"))
+    |> maybe_put_openai_compat_extra(
+      provider_type,
+      "reasoning_effort",
+      reasoning_effort(extra, opts)
+    )
+  end
+
+  defp maybe_put_provider_opt(opts, _key, nil), do: opts
+  defp maybe_put_provider_opt(opts, key, value), do: Keyword.put(opts, key, value)
+
+  defp normalized_provider_type(%Provider{provider_type: type})
+       when type in ["anthropic", "openai"],
+       do: type
+
+  defp normalized_provider_type(%Provider{provider_type: "openai_compat"}), do: "openai_compat"
+  defp normalized_provider_type(%Provider{provider: "anthropic"}), do: "anthropic"
+  defp normalized_provider_type(%Provider{provider: "openai"}), do: "openai"
+  defp normalized_provider_type(%Provider{}), do: "openai_compat"
+
+  defp maybe_put_openai_compat_extra(opts, provider_type, _key, value)
+       when provider_type not in ["openai_compat"] or value in [nil, "", "default", :default] do
+    opts
+  end
+
+  defp maybe_put_openai_compat_extra(opts, _provider_type, key, value) do
+    extra_body =
+      opts
+      |> Keyword.get(:extra_body, %{})
+      |> Map.put(key, normalize_provider_param(value))
+
+    Keyword.put(opts, :extra_body, extra_body)
+  end
+
+  defp reasoning_effort(extra, opts) do
+    Keyword.get(opts, :reasoning_effort) ||
+      Map.get(extra, "reasoning_effort") ||
+      Map.get(extra, :reasoning_effort)
+  end
+
+  defp normalize_provider_param(value) when is_atom(value), do: Atom.to_string(value)
+  defp normalize_provider_param(value), do: value
+
+  defp message_role(%Message{} = message), do: message.role
+  defp message_role(%{} = message), do: Map.get(message, :role) || Map.get(message, "role")
+  defp message_role(_message), do: nil
+
+  defp message_tool_calls(%Message{} = message), do: Message.tool_calls(message)
+
+  defp message_tool_calls(%{} = message) do
+    message
+    |> Map.get(:tool_calls, Map.get(message, "tool_calls", []))
+    |> List.wrap()
+  end
+
+  defp message_tool_calls(_message), do: []
+
+  defp message_tool_call_id(%Message{} = message), do: message.tool_call_id
+
+  defp message_tool_call_id(%{} = message) do
+    Map.get(message, :tool_call_id) || Map.get(message, "tool_call_id")
+  end
+
+  defp message_tool_call_id(_message), do: nil
+
+  defp tool_call_id(%{} = tool_call), do: Map.get(tool_call, "id") || Map.get(tool_call, :id)
+  defp tool_call_id(_tool_call), do: nil
+
+  defp orphan_tool_message_to_context(message) do
+    content =
+      [
+        "[Tool result from earlier context]",
+        "tool: #{message_name(message) || "unknown"}",
+        "call_id: #{message_tool_call_id(message) || "unknown"}",
+        message_content(message)
+      ]
+      |> Enum.reject(&blank?/1)
+      |> Enum.join("\n")
+
+    [Alloy.Message.user(content)]
+  end
+
+  defp message_name(%Message{} = message), do: message.name
+  defp message_name(%{} = message), do: Map.get(message, :name) || Map.get(message, "name")
+  defp message_name(_message), do: nil
+
+  defp message_content(%Message{} = message), do: message.content
+
+  defp message_content(%{} = message) do
+    Map.get(message, :content) || Map.get(message, "content")
+  end
+
+  defp message_content(_message), do: nil
+
   defp build_alloy_context(agent, opts) do
-    base = %{
-      organization_id: agent.organization_id
-    }
+    base =
+      %{organization_id: agent.organization_id}
+      |> maybe_put(:stream_callbacks, Keyword.get(opts, :stream_callbacks))
 
     case Keyword.get(opts, :alloy_context) do
       nil -> base
       extra when is_map(extra) -> Map.merge(base, extra)
     end
+  end
+
+  defp stream_middleware(opts) do
+    [App.Agents.StreamMiddleware | Keyword.get(opts, :middleware, [])]
+    |> Enum.uniq()
   end
 
   defp to_alloy_message(%Message{role: "assistant", content: content} = msg) do
@@ -223,8 +436,7 @@ defmodule App.Agents.Runner do
   end
 
   defp handle_alloy_event(%{event: :thinking_delta, payload: payload}, callbacks) do
-    text = Map.get(payload, :text) || Map.get(payload, "text") || ""
-    callbacks.on_thinking.(text)
+    callbacks.on_thinking.(thinking_payload_text(payload))
   end
 
   defp handle_alloy_event(%{event: :tool_start, payload: payload}, callbacks) do
@@ -274,10 +486,24 @@ defmodule App.Agents.Runner do
 
   defp handle_alloy_event(_event, _callbacks), do: :ok
 
+  defp thinking_payload_text(payload) when is_binary(payload), do: payload
+
+  defp thinking_payload_text(payload) when is_map(payload) do
+    Map.get(payload, :text) ||
+      Map.get(payload, "text") ||
+      Map.get(payload, :thinking) ||
+      Map.get(payload, "thinking") ||
+      ""
+  end
+
+  defp thinking_payload_text(_payload), do: ""
+
   defp tool_end_status(%{error: error}) when not is_nil(error), do: "error"
   defp tool_end_status(_payload), do: "ok"
 
   defp alloy_result_to_runner_result(%Alloy.Result{} = result) do
+    provider_metadata = result.metadata || %{}
+
     thinking = extract_thinking(result)
 
     usage =
@@ -304,9 +530,17 @@ defmodule App.Agents.Runner do
       tool_call_turns: tool_call_turns,
       usage: usage,
       finish_reason: to_string(result.status),
-      provider_meta: result.metadata || %{}
+      provider_meta: provider_metadata,
+      provider_state: provider_state(provider_metadata)
     }
   end
+
+  defp provider_state(%{} = provider_metadata) do
+    Map.get(provider_metadata, :provider_state) || Map.get(provider_metadata, "provider_state") ||
+      %{}
+  end
+
+  defp provider_state(_provider_metadata), do: %{}
 
   defp extract_thinking(%Alloy.Result{messages: messages}) do
     messages
@@ -314,7 +548,10 @@ defmodule App.Agents.Runner do
       case msg.content do
         blocks when is_list(blocks) ->
           Enum.flat_map(blocks, fn
+            %{type: "thinking", thinking: thinking} -> [thinking]
             %{type: "thinking", text: text} -> [text]
+            %{"type" => "thinking", "thinking" => thinking} -> [thinking]
+            %{"type" => "thinking", "text" => text} -> [text]
             _ -> []
           end)
 
@@ -325,19 +562,55 @@ defmodule App.Agents.Runner do
     |> Enum.join("")
   end
 
-  defp extract_tool_responses(%Alloy.Result{tool_calls: tool_calls}) when is_list(tool_calls) do
+  defp extract_tool_responses(%Alloy.Result{messages: messages, tool_calls: tool_calls})
+       when is_list(tool_calls) do
+    tool_result_content = tool_result_content_by_id(messages)
+
     Enum.map(tool_calls, fn tc ->
+      id = Map.get(tc, :id) || Map.get(tc, "id") || ""
+
       %{
-        "id" => Map.get(tc, :id) || Map.get(tc, "id") || "",
+        "id" => id,
         "name" => Map.get(tc, :name) || Map.get(tc, "name") || "",
         "arguments" => normalize_metadata(Map.get(tc, :input) || Map.get(tc, "input") || %{}),
-        "content" => Map.get(tc, :result) || Map.get(tc, "result") || "",
-        "status" => "ok"
+        "content" =>
+          Map.get(tool_result_content, id, Map.get(tc, :result) || Map.get(tc, "result") || ""),
+        "status" => if(Map.get(tc, :error) || Map.get(tc, "error"), do: "error", else: "ok")
       }
     end)
   end
 
   defp extract_tool_responses(_result), do: []
+
+  defp tool_result_content_by_id(messages) when is_list(messages) do
+    messages
+    |> Enum.flat_map(&tool_result_blocks/1)
+    |> Map.new()
+  end
+
+  defp tool_result_content_by_id(_messages), do: %{}
+
+  defp tool_result_blocks(%{role: :user, content: blocks}) when is_list(blocks) do
+    Enum.flat_map(blocks, &tool_result_block/1)
+  end
+
+  defp tool_result_blocks(%{role: "user", content: blocks}) when is_list(blocks) do
+    Enum.flat_map(blocks, &tool_result_block/1)
+  end
+
+  defp tool_result_blocks(_message), do: []
+
+  defp tool_result_block(%{type: "tool_result", tool_use_id: id, content: content})
+       when is_binary(id) and id != "" do
+    [{id, content || ""}]
+  end
+
+  defp tool_result_block(%{"type" => "tool_result", "tool_use_id" => id, "content" => content})
+       when is_binary(id) and id != "" do
+    [{id, content || ""}]
+  end
+
+  defp tool_result_block(_block), do: []
 
   defp extract_tool_call_turns(%Alloy.Result{messages: messages}) do
     messages
@@ -348,12 +621,16 @@ defmodule App.Agents.Runner do
       text =
         Enum.find_value(blocks, fn
           %{type: "text", text: t} -> t
+          %{"type" => "text", "text" => t} -> t
           _ -> nil
         end)
 
       thinking =
         Enum.find_value(blocks, fn
+          %{type: "thinking", thinking: t} -> t
           %{type: "thinking", text: t} -> t
+          %{"type" => "thinking", "thinking" => t} -> t
+          %{"type" => "thinking", "text" => t} -> t
           _ -> nil
         end)
 
@@ -365,6 +642,15 @@ defmodule App.Agents.Runner do
                 "id" => tc.id,
                 "name" => tc.name,
                 "arguments" => normalize_metadata(tc.input)
+              }
+            ]
+
+          %{"type" => "tool_use"} = tc ->
+            [
+              %{
+                "id" => Map.get(tc, "id"),
+                "name" => Map.get(tc, "name"),
+                "arguments" => normalize_metadata(Map.get(tc, "input") || %{})
               }
             ]
 
@@ -382,47 +668,14 @@ defmodule App.Agents.Runner do
   defp has_tool_use?(%{content: blocks}) when is_list(blocks) do
     Enum.any?(blocks, fn
       %{type: "tool_use"} -> true
+      %{"type" => "tool_use"} -> true
       _ -> false
     end)
   end
 
   defp has_tool_use?(_msg), do: false
 
-  defp merge_extra_params(opts, %Agent{extra_params: extra_params, model: model}) do
-    extra = extra_params || %{}
-
-    opts
-    |> maybe_put_alloy_opt(:temperature, Map.get(extra, "temperature"))
-    |> maybe_put_alloy_opt(:max_tokens, Map.get(extra, "max_tokens"))
-    |> maybe_put_reasoning_effort(model, extra)
-  end
-
-  defp maybe_put_alloy_opt(opts, _key, nil), do: opts
-  defp maybe_put_alloy_opt(opts, key, value), do: Keyword.put(opts, key, value)
-
-  @reasoning_effort_atoms %{
-    "none" => :none,
-    "minimal" => :minimal,
-    "low" => :low,
-    "medium" => :medium,
-    "high" => :high,
-    "xhigh" => :xhigh
-  }
-
-  defp maybe_put_reasoning_effort(opts, _model, extra) do
-    effort = Map.get(extra, "reasoning_effort") || Map.get(extra, :reasoning_effort)
-
-    case effort do
-      effort when effort not in [nil, "", "default"] ->
-        case Map.get(@reasoning_effort_atoms, to_string(effort)) do
-          nil -> opts
-          _effort_atom -> opts
-        end
-
-      _ ->
-        opts
-    end
-  end
+  defp merge_extra_params(opts, %Agent{}), do: opts
 
   defp build_stream_callbacks(recipient, opts) do
     %{

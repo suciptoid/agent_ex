@@ -82,7 +82,9 @@ defmodule App.Chat.Orchestrator do
            %{
              content: result.content,
              agent_id: agent.id,
-             metadata: response_metadata(result)
+             metadata: response_metadata(result),
+             tool_responses: Map.get(result, :tool_responses, []),
+             tool_call_turns: Map.get(result, :tool_call_turns, [])
            }}
 
         {:error, reason} ->
@@ -318,6 +320,7 @@ defmodule App.Chat.Orchestrator do
     |> maybe_put_metadata("thinking", blank_to_nil(Map.get(result, :thinking)))
     |> maybe_put_metadata("finish_reason", Map.get(result, :finish_reason))
     |> maybe_put_metadata("provider_meta", normalize_metadata(Map.get(result, :provider_meta)))
+    |> maybe_put_metadata("provider_state", normalize_metadata(Map.get(result, :provider_state)))
   end
 
   defp normalize_metadata(nil), do: nil
@@ -850,10 +853,11 @@ defmodule App.Chat.Orchestrator do
 
   defp apply_callback(_callback, _args), do: :ok
 
-  # Injects the update_chatroom_title tool when the chatroom has no title
   defp maybe_inject_title_tool(opts, %ChatRoom{title: title} = chat_room, callbacks)
        when title in [nil, ""] do
-    extra_tools = Keyword.get(opts, :extra_tools, []) ++ [App.Agents.AlloyTools.UpdateTitle]
+    extra_tools =
+      (Keyword.get(opts, :extra_tools, []) ++ [App.Agents.AlloyTools.UpdateTitle])
+      |> Enum.uniq()
 
     title_context = %{
       chat_room: chat_room,

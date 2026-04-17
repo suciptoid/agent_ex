@@ -109,6 +109,101 @@ defmodule App.Chat.ContextBuilderTest do
       assert Enum.at(canonical_messages, 2).content == "legacy payload"
       assert Enum.at(canonical_messages, 3).content == "Legacy final answer"
     end
+
+    test "removes internal title tool calls from prompt history while preserving visible tools",
+         %{
+           agent: agent,
+           room: room
+         } do
+      _user_message = message_fixture(room, %{role: "user", content: "Fetch the data"})
+
+      tool_call_message =
+        message_fixture(room, %{
+          role: "assistant",
+          content: "Let me check.",
+          agent_id: agent.id,
+          metadata: %{
+            "tool_calls" => [
+              %{
+                "id" => "tool_title",
+                "name" => "update_chatroom_title",
+                "arguments" => %{"title" => "Data request"}
+              },
+              %{
+                "id" => "tool_fetch",
+                "name" => "web_fetch",
+                "arguments" => %{"url" => "https://example.com/data.txt"}
+              }
+            ]
+          }
+        })
+
+      _title_tool_message =
+        message_fixture(room, %{
+          role: "tool",
+          content: "Title set to: Data request",
+          name: "update_chatroom_title",
+          tool_call_id: "tool_title",
+          parent_message_id: tool_call_message.id
+        })
+
+      _fetch_tool_message =
+        message_fixture(room, %{
+          role: "tool",
+          content: "sample payload",
+          name: "web_fetch",
+          tool_call_id: "tool_fetch",
+          parent_message_id: tool_call_message.id
+        })
+
+      canonical_messages = room |> Chat.list_messages() |> ContextBuilder.canonical_messages()
+
+      assert Enum.map(canonical_messages, & &1.role) == ["user", "assistant", "tool"]
+      assistant_message = Enum.at(canonical_messages, 1)
+      assert [%{"name" => "web_fetch", "id" => "tool_fetch"}] = assistant_message.tool_calls
+      assert Enum.at(canonical_messages, 2).tool_call_id == "tool_fetch"
+    end
+
+    test "removes title-only tool turns from prompt history", %{agent: agent, room: room} do
+      _user_message = message_fixture(room, %{role: "user", content: "Plan a launch"})
+
+      title_call_message =
+        message_fixture(room, %{
+          role: "assistant",
+          content: nil,
+          agent_id: agent.id,
+          metadata: %{
+            "tool_calls" => [
+              %{
+                "id" => "tool_title_only",
+                "name" => "update_chatroom_title",
+                "arguments" => %{"title" => "Launch plan"}
+              }
+            ]
+          }
+        })
+
+      _title_tool_message =
+        message_fixture(room, %{
+          role: "tool",
+          content: "Title set to: Launch plan",
+          name: "update_chatroom_title",
+          tool_call_id: "tool_title_only",
+          parent_message_id: title_call_message.id
+        })
+
+      _final_assistant =
+        message_fixture(room, %{
+          role: "assistant",
+          content: "Here is the plan.",
+          agent_id: agent.id
+        })
+
+      canonical_messages = room |> Chat.list_messages() |> ContextBuilder.canonical_messages()
+
+      assert Enum.map(canonical_messages, & &1.role) == ["user", "assistant"]
+      assert Enum.at(canonical_messages, 1).content == "Here is the plan."
+    end
   end
 
   describe "budget_policy/2" do

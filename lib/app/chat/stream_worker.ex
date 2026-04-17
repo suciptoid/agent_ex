@@ -47,6 +47,7 @@ defmodule App.Chat.StreamWorker do
       followup_message_position: nil,
       pending_tool_call_ids: [],
       tool_parent_message_id: nil,
+      tool_parent_by_call_id: %{},
       tool_responses: Keyword.get(opts, :tool_responses, []),
       metadata: Keyword.get(opts, :metadata, %{}) || %{},
       run_opts: Keyword.get(opts, :run_opts, []),
@@ -170,6 +171,8 @@ defmodule App.Chat.StreamWorker do
   end
 
   def handle_info({:stream_tool_calls, tool_call_turn}, state) do
+    state = ensure_followup_before_next_tool_turn(state)
+
     case split_assistant_turn(state, tool_call_turn) do
       {:ok, state} ->
         {:noreply, state}
@@ -181,6 +184,7 @@ defmodule App.Chat.StreamWorker do
   end
 
   def handle_info({:stream_tool_started, tool_result}, state) do
+    state = prepare_for_tool_event(state, tool_result)
     tool_responses = merge_tool_response(state.tool_responses, tool_result)
     state = %{state | tool_responses: tool_responses}
 
@@ -197,6 +201,7 @@ defmodule App.Chat.StreamWorker do
   end
 
   def handle_info({:stream_tool_result, tool_result}, state) do
+    state = prepare_for_tool_event(state, tool_result)
     tool_responses = merge_tool_response(state.tool_responses, tool_result)
     state = %{state | tool_responses: tool_responses}
 
@@ -240,7 +245,7 @@ defmodule App.Chat.StreamWorker do
     completion_event =
       case result do
         {:ok, %{content: content, agent_id: agent_id, metadata: metadata} = result_map} ->
-          sync_tool_messages(state, Map.get(result_map, :tool_responses, []))
+          state = sync_tool_messages(state, Map.get(result_map, :tool_responses, []))
           persist_success(state.chat_room, state.message_id, content, agent_id, metadata, state)
           {:stream_complete, tool_parent_message_id(state), content}
 
@@ -284,18 +289,21 @@ defmodule App.Chat.StreamWorker do
     persist_message(chat_room, message_id, attrs)
   end
 
-  defp sync_tool_messages(_state, []), do: :ok
+  defp sync_tool_messages(state, []), do: state
 
   defp sync_tool_messages(state, tool_responses) do
-    Enum.each(tool_responses, fn tool_response ->
+    Enum.reduce(tool_responses, state, fn tool_response, state ->
       case persist_tool_message(state, tool_response) do
-        {:ok, _state, tool_message} ->
+        {:ok, state, tool_message} ->
           broadcast_message_update(state.chat_room.id, tool_message.id)
+          state
 
         {:error, reason} ->
           Logger.error(
             "[StreamWorker] Failed to sync tool message #{Map.get(tool_response, "id")}: #{inspect(reason)}"
           )
+
+          state
       end
     end)
   end
@@ -392,12 +400,18 @@ defmodule App.Chat.StreamWorker do
   defp split_assistant_turn(state, tool_call_turn) do
     tool_parent_message_id = state.message_id
 
+    tool_call_ids =
+      tool_call_turn
+      |> turn_tool_calls()
+      |> Enum.map(&tool_call_id/1)
+      |> Enum.reject(&is_nil/1)
+
     case Chat.get_message_by_id(tool_parent_message_id) do
       nil ->
         {:error, :missing_assistant_message}
 
       message ->
-        completed_position = completed_turn_position(state, message.position)
+        completed_position = completed_turn_position(state, message.position, message.id)
         next_tool_position = completed_position + 1
 
         with {:ok, _message} <-
@@ -416,12 +430,14 @@ defmodule App.Chat.StreamWorker do
                token_count: 0,
                next_tool_position: next_tool_position,
                followup_message_position: reserved_message_position(completed_position),
-               pending_tool_call_ids:
-                 tool_call_turn
-                 |> turn_tool_calls()
-                 |> Enum.map(&tool_call_id/1)
-                 |> Enum.reject(&is_nil/1),
+               pending_tool_call_ids: tool_call_ids,
                tool_parent_message_id: tool_parent_message_id,
+               tool_parent_by_call_id:
+                 map_tool_call_parents(
+                   state.tool_parent_by_call_id,
+                   tool_call_ids,
+                   tool_parent_message_id
+                 ),
                tool_responses: [],
                agent_id: message.agent_id || state.agent_id
            }}
@@ -550,8 +566,32 @@ defmodule App.Chat.StreamWorker do
     end
   end
 
+  defp ensure_followup_before_next_tool_turn(%{followup_message_position: nil} = state), do: state
+  defp ensure_followup_before_next_tool_turn(state), do: ensure_followup_message(state, true)
+
+  defp prepare_for_tool_event(state, tool_result) do
+    tool_call_id = Map.get(tool_result, "id")
+
+    cond do
+      blank_to_nil(tool_call_id) == nil ->
+        state
+
+      Map.has_key?(state.tool_parent_by_call_id, tool_call_id) ->
+        state
+
+      tool_call_id in state.pending_tool_call_ids ->
+        state
+
+      state.followup_message_position != nil ->
+        ensure_followup_message(state, true)
+
+      true ->
+        state
+    end
+  end
+
   defp persist_tool_message(state, tool_result) do
-    parent_message_id = tool_parent_message_id(state)
+    parent_message_id = tool_parent_message_id(state, tool_result)
 
     case {Map.get(tool_result, "id"), Map.get(tool_result, "name")} do
       {tool_call_id, tool_name}
@@ -613,6 +653,12 @@ defmodule App.Chat.StreamWorker do
   defp tool_parent_message_id(%{tool_parent_message_id: tool_parent_message_id}),
     do: tool_parent_message_id
 
+  defp tool_parent_message_id(%{tool_parent_by_call_id: parents} = state, tool_result) do
+    tool_call_id = Map.get(tool_result, "id")
+
+    Map.get(parents, tool_call_id) || tool_parent_message_id(state)
+  end
+
   defp tool_call_message_metadata(existing_metadata, thinking, tool_call_turn) do
     existing_metadata
     |> carry_forward_metadata()
@@ -649,6 +695,12 @@ defmodule App.Chat.StreamWorker do
   defp tool_call_id(%{} = tool_call), do: Map.get(tool_call, "id") || Map.get(tool_call, :id)
   defp tool_call_id(_tool_call), do: nil
 
+  defp map_tool_call_parents(parent_map, tool_call_ids, parent_message_id) do
+    Enum.reduce(tool_call_ids, parent_map, fn tool_call_id, acc ->
+      Map.put(acc, tool_call_id, parent_message_id)
+    end)
+  end
+
   defp tool_turn_complete?(%{pending_tool_call_ids: []} = state) do
     Enum.any?(state.tool_responses, fn tool_response ->
       Map.get(tool_response, "status") != "running"
@@ -664,15 +716,36 @@ defmodule App.Chat.StreamWorker do
     end)
   end
 
-  defp completed_turn_position(%{next_tool_position: nil}, current_position), do: current_position
+  defp completed_turn_position(%{next_tool_position: nil}, current_position, _message_id),
+    do: current_position
 
-  defp completed_turn_position(%{next_tool_position: next_tool_position}, _current_position),
-    do: next_tool_position
+  defp completed_turn_position(
+         %{next_tool_position: next_tool_position} = state,
+         _current_position,
+         message_id
+       ),
+       do: next_available_position(state, next_tool_position, message_id)
 
   defp reserved_message_position(completed_position), do: completed_position + 1000
 
   defp final_message_position(%{next_tool_position: nil}), do: nil
-  defp final_message_position(%{next_tool_position: next_tool_position}), do: next_tool_position
+
+  defp final_message_position(
+         %{next_tool_position: next_tool_position, message_id: message_id} = state
+       ),
+       do: next_available_position(state, next_tool_position, message_id)
+
+  defp next_available_position(state, minimum_position, exclude_message_id) do
+    occupied_positions =
+      state.chat_room
+      |> Chat.list_messages()
+      |> Enum.reject(&(&1.id == exclude_message_id))
+      |> Enum.map(& &1.position)
+      |> MapSet.new()
+
+    Stream.iterate(minimum_position, &(&1 + 1))
+    |> Enum.find(&(not MapSet.member?(occupied_positions, &1)))
+  end
 
   defp maybe_put_position(attrs, nil), do: attrs
   defp maybe_put_position(attrs, position), do: Map.put(attrs, :position, position)

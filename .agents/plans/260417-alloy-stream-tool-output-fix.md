@@ -22,3 +22,6 @@ The Alloy migration also appears to have regressed live thinking/reasoning delta
 
 Completed. The prompt reconstruction now filters internal title tools, streaming emits assistant tool-call turns before tool execution, OpenAI Responses continuation no longer replays older tool outputs, and OpenAI-compatible reasoning deltas are streamed into the existing thinking callback path.
 
+## Follow-up
+
+Fixed a stream worker ordering race where tool events from Alloy worker tasks could arrive after the next assistant tool turn. Tool results are now routed by `tool_call_id` to the correct parent assistant turn, follow-up assistant rows are created before splitting a subsequent tool turn, sync-time tool persistence threads the updated stream state forward, and final assistant positioning chooses the next free transcript position.

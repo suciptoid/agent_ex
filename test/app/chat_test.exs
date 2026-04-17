@@ -597,6 +597,71 @@ defmodule App.ChatTest do
       assert final_assistant_message.position == 5
     end
 
+    test "keeps positions unique when next tool turn arrives before prior tool result is handled",
+         %{
+           user: user,
+           provider: provider
+         } do
+      previous_runner = Application.get_env(:app, :agent_runner)
+      Application.put_env(:app, :agent_runner, App.TestSupport.OutOfOrderToolStreamRunnerStub)
+
+      on_exit(fn ->
+        restore_app_env(:agent_runner, previous_runner)
+      end)
+
+      agent = agent_fixture(user, %{provider: provider, name: "HN Agent"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Tool Race",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      assert {:ok, _user_message} =
+               Chat.create_message(room, %{role: "user", content: "Read top HN stories"})
+
+      messages = Chat.list_messages(room)
+
+      assert {:ok, placeholder_message} =
+               Chat.create_message(room, %{
+                 role: "assistant",
+                 content: nil,
+                 status: :pending,
+                 agent_id: agent.id,
+                 metadata: %{}
+               })
+
+      assert {:ok, worker_pid} = Chat.start_stream(room, messages, placeholder_message)
+      worker_ref = Process.monitor(worker_pid)
+
+      assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, :normal}
+
+      persisted_messages = Chat.list_messages(room)
+      positions = Enum.map(persisted_messages, & &1.position)
+
+      assert positions == Enum.uniq(positions)
+      assert positions == [1, 2, 3, 4, 5, 6]
+
+      [_, first_tool_call, first_tool, second_tool_call, second_tool, final_assistant] =
+        persisted_messages
+
+      assert first_tool_call.metadata["tool_calls"] |> List.first() |> Map.get("id") ==
+               "tool_topstories"
+
+      assert first_tool.parent_message_id == first_tool_call.id
+      assert first_tool.tool_call_id == "tool_topstories"
+
+      assert second_tool_call.metadata["tool_calls"] |> List.first() |> Map.get("id") ==
+               "tool_story"
+
+      assert second_tool.parent_message_id == second_tool_call.id
+      assert second_tool.tool_call_id == "tool_story"
+      assert final_assistant.role == "assistant"
+      assert final_assistant.status == :completed
+      assert final_assistant.position == 6
+    end
+
     test "retries streaming after context overflow by inserting a checkpoint", %{
       user: user,
       provider: provider

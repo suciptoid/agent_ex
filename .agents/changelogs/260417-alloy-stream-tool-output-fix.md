@@ -10,3 +10,13 @@
 
 By: gpt-5.4 on Codex
 
+## Stream worker position race follow-up
+
+- Routed streaming tool start/result events by `tool_call_id` so late events from a previous Alloy tool turn update the original parent assistant message instead of the current turn.
+- Forced creation of the follow-up assistant row before splitting a subsequent tool-call turn, preventing a new tool turn from rewriting the prior assistant tool-call row.
+- Threaded updated stream state through completion-time tool sync, avoiding duplicate tool-message inserts at the same position.
+- Made final assistant positioning choose the next free transcript position when a reserved target is already occupied.
+- Added a regression stub/test that simulates the next tool turn arriving before the previous tool result is handled.
+- Re-ran `mix precommit` successfully.
+
+By: gpt-5.4 on Codex

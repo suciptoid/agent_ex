@@ -404,7 +404,7 @@ defmodule AppWeb.Layouts do
                 <.link
                   navigate={~p"/chat/#{chat.id}"}
                   data-sidebar-chat-link
-                  class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-xs text-foreground/65 transition-colors aria-[current=page]:bg-background/85 aria-[current=page]:font-semibold aria-[current=page]:text-foreground aria-[current=page]:shadow-sm"
+                  class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-xs text-foreground/65 transition-colors aria-[current=page]:font-semibold aria-[current=page]:text-foreground"
                 >
                   <span
                     :if={chat.gateway_linked}
@@ -451,12 +451,12 @@ defmodule AppWeb.Layouts do
         </div>
 
         <%!-- Collapsed chat icon --%>
-        <div class="hidden [[data-sidebar-collapsed=true]_&]:flex flex-1 justify-center pt-2 border-t border-border">
+        <div class="hidden [[data-sidebar-collapsed=true]_&]:flex flex-1 justify-center items-start pt-2 border-t border-border">
           <.link
             navigate={~p"/chat"}
             data-sidebar-nav-link
             data-sidebar-match="prefix"
-            class="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground aria-[current=page]:bg-background/80 aria-[current=page]:text-foreground"
+            class="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground aria-[current=page]:text-foreground"
             title="Chat"
           >
             <.icon name="hero-chat-bubble-left-right" class="size-4.5" />

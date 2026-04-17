@@ -623,15 +623,6 @@ defmodule AppWeb.ChatLive.Show do
 
   defp active_agent_for_room(_), do: nil
 
-  defp reasoning_supported_for_agent?(%{model: model}) when is_binary(model) do
-    case ReqLLM.model(model) do
-      {:ok, llm_model} -> ReqLLM.ModelHelpers.reasoning_enabled?(llm_model)
-      _ -> false
-    end
-  end
-
-  defp reasoning_supported_for_agent?(_agent), do: false
-
   def room_agents(%{chat_room_agents: chat_room_agents}) do
     Enum.map(chat_room_agents, & &1.agent)
   end
@@ -687,11 +678,10 @@ defmodule AppWeb.ChatLive.Show do
     active_agent = active_agent_for_room(socket.assigns.chat_room)
     reasoning_effort = agent_reasoning_effort(active_agent)
 
-    case {reasoning_supported_for_agent?(active_agent),
-          Map.fetch(@reasoning_effort_atoms, reasoning_effort)} do
-      {true, {:ok, :default}} -> []
-      {true, {:ok, effort}} -> [reasoning_effort: effort]
-      _ -> []
+    case Map.fetch(@reasoning_effort_atoms, reasoning_effort) do
+      {:ok, :default} -> []
+      {:ok, effort} -> [reasoning_effort: effort]
+      :error -> []
     end
   end
 

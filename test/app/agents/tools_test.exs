@@ -27,20 +27,21 @@ defmodule App.Agents.ToolsTest do
     assert Tools.available_tools() == ["web_fetch", "shell", "create_tool"]
   end
 
-  test "resolve/1 returns configured ReqLLM tools" do
+  test "resolve/1 returns configured Alloy tool modules" do
     [tool] = Tools.resolve(["web_fetch"])
-    assert tool.name == "web_fetch"
+    assert tool == App.Agents.AlloyTools.WebFetch
   end
 
   test "resolve/2 returns the create_tool builtin" do
     [tool] = Tools.resolve(["create_tool"], organization_id: Ecto.UUID.generate())
-    assert tool.name == "create_tool"
+    assert tool == App.Agents.AlloyTools.CreateTool
   end
 
   test "resolve/2 includes custom tools for the current user", %{user: user} do
     tool = tool_fixture(user, %{name: "brave_search"})
 
     [resolved_tool] = Tools.resolve([tool.name], organization_id: tool.organization_id)
+    assert is_struct(resolved_tool, App.Agents.AlloyTools.HttpTool)
     assert resolved_tool.name == "brave_search"
   end
 
@@ -64,7 +65,10 @@ defmodule App.Agents.ToolsTest do
     [tool] =
       Tools.resolve(["jina_reader"], organization_id: user_scope_fixture(user).organization.id)
 
-    assert {:ok, "templated"} = ReqLLM.Tool.execute(tool, %{"dynamic_path" => "docs/file.txt"})
+    assert is_struct(tool, App.Agents.AlloyTools.HttpTool)
+
+    assert {:ok, "templated"} =
+             Tools.execute_http_tool(tool, %{"dynamic_path" => "docs/file.txt"})
   end
 
   test "do_web_fetch/1 returns the response body on success" do
@@ -128,32 +132,6 @@ defmodule App.Agents.ToolsTest do
     assert result.runtime_parameters == ["path"]
     assert result.fixed_parameters == ["page_size"]
     assert result.header_names == ["authorization"]
-  end
-
-  test "execute_all/3 emits a running placeholder before returning the final tool result" do
-    Req.Test.stub(__MODULE__, fn conn ->
-      Plug.Conn.send_resp(conn, 200, "hello from the stub")
-    end)
-
-    [tool] = Tools.resolve(["web_fetch"])
-
-    assert {:ok, %{results: [result]}} =
-             Tools.execute_all(
-               [%{id: "tool_1", name: "web_fetch", arguments: %{url: "https://example.test"}}],
-               [tool],
-               on_tool_start: fn tool_result -> send(self(), {:tool_started, tool_result}) end
-             )
-
-    assert_receive {:tool_started,
-                    %{
-                      "id" => "tool_1",
-                      "name" => "web_fetch",
-                      "content" => nil,
-                      "status" => "running"
-                    }}
-
-    assert result["content"] == "hello from the stub"
-    assert result["status"] == "ok"
   end
 
   test "do_shell/1 executes commands" do

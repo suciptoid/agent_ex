@@ -64,7 +64,7 @@ defmodule App.MixProject do
       {:pui, "~> 1.0.0-alpha"},
       {:swoosh, "~> 1.16"},
       {:req, "~> 0.5"},
-      {:req_llm, "~> 1.6"},
+      {:alloy, "~> 0.9"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 1.0"},

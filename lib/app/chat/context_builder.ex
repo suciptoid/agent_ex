@@ -574,7 +574,7 @@ defmodule App.Chat.ContextBuilder do
 
   defp built_in_model_overrides(model) when is_binary(model) do
     cond do
-      String.starts_with?(model, "google:gemini-2.5") ->
+      String.starts_with?(model, "gemini-2.5") ->
         %{
           context_window_tokens: 1_048_576,
           reserve_tokens: 32_768,
@@ -584,7 +584,7 @@ defmodule App.Chat.ContextBuilder do
           force_checkpoint_source_tokens: 64_000
         }
 
-      String.starts_with?(model, "openai:gpt-4.1") ->
+      String.starts_with?(model, "gpt-4.1") ->
         %{
           context_window_tokens: 1_048_576,
           reserve_tokens: 32_768,
@@ -594,7 +594,7 @@ defmodule App.Chat.ContextBuilder do
           force_checkpoint_source_tokens: 64_000
         }
 
-      String.starts_with?(model, "anthropic:") ->
+      String.starts_with?(model, "claude-") ->
         %{
           context_window_tokens: 200_000,
           reserve_tokens: 16_384,

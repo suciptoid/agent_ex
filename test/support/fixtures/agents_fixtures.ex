@@ -5,7 +5,7 @@ defmodule App.AgentsFixtures do
     Enum.into(attrs, %{
       name: "Helpful Agent",
       system_prompt: "You are a helpful assistant.",
-      model: "anthropic:claude-haiku-4-5",
+      model: "claude-haiku-4-5",
       temperature: 0.3,
       max_tokens: 256,
       tools: []

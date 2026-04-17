@@ -132,152 +132,25 @@ defmodule App.Chat.Orchestrator do
       - `ask_agent`: Delegate a task to another agent and receive their response in this conversation. The delegated agent will post their reply as a message in the chat.
       """
 
+      agent_map = Map.new(agents, fn a -> {to_string(a.id), a} end)
+
+      alloy_context = %{
+        chat_room: chat_room,
+        agent_map: agent_map,
+        callbacks: callbacks,
+        messages_snapshot: messages,
+        run_delegated_agent: &run_delegated_agent/6
+      }
+
       [
         extra_system_prompt: extra_prompt,
         extra_tools: [
-          build_handover_tool(chat_room, agents, callbacks),
-          build_ask_agent_tool(chat_room, agents, messages, callbacks)
-        ]
+          App.Agents.AlloyTools.Handover,
+          App.Agents.AlloyTools.AskAgent
+        ],
+        alloy_context: alloy_context
       ]
     end
-  end
-
-  defp build_handover_tool(chat_room, agents, callbacks) do
-    agent_descriptions =
-      agents
-      |> Enum.map(fn a ->
-        desc =
-          if blank?(a.system_prompt),
-            do: "general assistant",
-            else: String.slice(a.system_prompt, 0, 80)
-
-        "#{a.name} (id: #{a.id}) - #{desc}"
-      end)
-      |> Enum.join("; ")
-
-    agent_map = Map.new(agents, fn a -> {to_string(a.id), a} end)
-
-    ReqLLM.tool(
-      name: "handover",
-      description:
-        "Transfer the active agent role to another agent in this room. They will handle future messages. Available agents: #{agent_descriptions}",
-      parameter_schema: [
-        agent_id: [
-          type: :string,
-          required: true,
-          doc: "The id of the agent to make active"
-        ],
-        reason: [
-          type: :string,
-          required: false,
-          doc: "Optional reason for the handover"
-        ]
-      ],
-      callback: fn args ->
-        agent_id = Map.get(args, :agent_id) || Map.get(args, "agent_id")
-        reason = Map.get(args, :reason) || Map.get(args, "reason")
-
-        case Map.get(agent_map, to_string(agent_id)) do
-          nil ->
-            {:error, "Unknown agent_id: #{agent_id}"}
-
-          target_agent ->
-            Logger.info("[Orchestrator] Handover to agent #{target_agent.name} (#{agent_id})")
-
-            case Chat.set_active_agent(chat_room, target_agent.id) do
-              :ok ->
-                notify_active_agent_changed(callbacks, target_agent.id)
-
-                msg =
-                  if blank?(reason),
-                    do: "Handed over to #{target_agent.name}.",
-                    else: "Handed over to #{target_agent.name}: #{reason}"
-
-                {:ok, msg}
-
-              {:error, err} ->
-                {:error, "Failed to set active agent: #{inspect(err)}"}
-            end
-        end
-      end
-    )
-  end
-
-  defp build_ask_agent_tool(chat_room, agents, current_messages, callbacks) do
-    agent_descriptions =
-      agents
-      |> Enum.map(fn a ->
-        desc =
-          if blank?(a.system_prompt),
-            do: "general assistant",
-            else: String.slice(a.system_prompt, 0, 80)
-
-        "#{a.name} (id: #{a.id}) - #{desc}"
-      end)
-      |> Enum.join("; ")
-
-    agent_map = Map.new(agents, fn a -> {to_string(a.id), a} end)
-    messages_snapshot = current_messages
-
-    ReqLLM.tool(
-      name: "ask_agent",
-      description:
-        "Ask another agent to handle a specific task. The agent will respond and their message will appear in the chat. Available agents: #{agent_descriptions}",
-      parameter_schema: [
-        agent_id: [type: :string, required: true, doc: "The id of the agent to ask"],
-        instructions: [
-          type: :string,
-          required: true,
-          doc: "Clear instructions for the target agent"
-        ]
-      ],
-      callback: fn args ->
-        agent_id = Map.get(args, :agent_id) || Map.get(args, "agent_id")
-
-        instructions =
-          normalize_instruction_text(
-            Map.get(args, :instructions) || Map.get(args, "instructions")
-          )
-
-        case Map.get(agent_map, to_string(agent_id)) do
-          nil ->
-            {:error, "Unknown agent_id: #{agent_id}"}
-
-          target_agent ->
-            Logger.info("[Orchestrator] ask_agent to #{target_agent.name} (#{agent_id})")
-
-            placeholder_attrs = %{
-              role: "assistant",
-              content: nil,
-              agent_id: target_agent.id,
-              status: :pending,
-              metadata: %{"delegated" => true, "tool_name" => "ask_agent"}
-            }
-
-            case Chat.create_message(chat_room, placeholder_attrs) do
-              {:ok, placeholder_message} ->
-                notify_agent_message_created(callbacks, placeholder_message)
-
-                {:ok, _pid} =
-                  Task.start(fn ->
-                    run_delegated_agent(
-                      chat_room,
-                      target_agent,
-                      messages_snapshot,
-                      instructions,
-                      placeholder_message,
-                      callbacks
-                    )
-                  end)
-
-                {:ok, "Asked #{target_agent.name} to handle that. They will reply in the chat."}
-
-              {:error, reason} ->
-                {:error, "Failed to start delegated agent: #{delegated_error_text(reason)}"}
-            end
-        end
-      end
-    )
   end
 
   defp run_delegated_agent(
@@ -438,9 +311,6 @@ defmodule App.Chat.Orchestrator do
     do: Phoenix.Naming.humanize(to_string(reason))
 
   defp delegated_error_text(_reason), do: "Unexpected error"
-
-  defp normalize_instruction_text(value) when is_binary(value), do: String.trim(value)
-  defp normalize_instruction_text(value), do: value
 
   defp response_metadata(result) do
     %{}
@@ -897,17 +767,6 @@ defmodule App.Chat.Orchestrator do
     end
   end
 
-  defp notify_active_agent_changed(callbacks, agent_id) do
-    call_callback(
-      callbacks[:on_active_agent_changed],
-      [agent_id],
-      fn recipient ->
-        send(recipient, {:active_agent_changed, agent_id})
-      end,
-      callbacks[:recipient]
-    )
-  end
-
   defp notify_agent_message_created(callbacks, message) do
     call_callback(
       callbacks[:on_agent_message_created],
@@ -994,8 +853,14 @@ defmodule App.Chat.Orchestrator do
   # Injects the update_chatroom_title tool when the chatroom has no title
   defp maybe_inject_title_tool(opts, %ChatRoom{title: title} = chat_room, callbacks)
        when title in [nil, ""] do
-    title_tool = build_update_title_tool(chat_room, callbacks)
-    extra_tools = Keyword.get(opts, :extra_tools, []) ++ [title_tool]
+    extra_tools = Keyword.get(opts, :extra_tools, []) ++ [App.Agents.AlloyTools.UpdateTitle]
+
+    title_context = %{
+      chat_room: chat_room,
+      callbacks: callbacks
+    }
+
+    existing_context = Keyword.get(opts, :alloy_context, %{})
 
     extra_prompt =
       (Keyword.get(opts, :extra_system_prompt, "") <>
@@ -1014,30 +879,10 @@ defmodule App.Chat.Orchestrator do
     opts
     |> Keyword.put(:extra_tools, extra_tools)
     |> Keyword.put(:extra_system_prompt, extra_prompt)
+    |> Keyword.put(:alloy_context, Map.merge(existing_context, title_context))
   end
 
   defp maybe_inject_title_tool(opts, _chat_room, _callbacks), do: opts
-
-  defp build_update_title_tool(chat_room, callbacks) do
-    ReqLLM.tool(
-      name: "update_chatroom_title",
-      description:
-        "Set the title of the current conversation. Call once at the start with a concise, descriptive title based on the user's first message.",
-      parameter_schema: [
-        title: [
-          type: :string,
-          required: true,
-          doc: "A concise title (max 60 chars) summarizing the conversation topic"
-        ]
-      ],
-      callback: fn args ->
-        title = Map.get(args, :title) || Map.get(args, "title") || ""
-
-        persist_title_update(chat_room, callbacks, title)
-        {:ok, "Title set to: #{title}"}
-      end
-    )
-  end
 
   defp maybe_seed_initial_title(%ChatRoom{title: title} = chat_room, messages, callbacks)
        when title in [nil, ""] do

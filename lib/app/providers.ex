@@ -9,8 +9,8 @@ defmodule App.Providers do
   alias App.Providers.Provider
   alias App.Users.Scope
   alias App.Users.User
-  alias LLMDB
-  alias ReqLLM.Provider.Generated.ValidProviders
+
+  @known_provider_types Provider.provider_types()
 
   def list_providers(%Scope{} = scope) do
     Repo.all(
@@ -77,24 +77,11 @@ defmodule App.Providers do
   end
 
   def provider_options do
-    provider_name_map = provider_name_map()
-
-    valid_provider_ids()
-    |> Enum.sort_by(&provider_label(&1, provider_name_map))
-    |> Enum.map(fn provider_id ->
-      {Atom.to_string(provider_id), provider_label(provider_id, provider_name_map)}
-    end)
-  end
-
-  def valid_provider_ids do
-    (ValidProviders.list() ++ Enum.map(LLMDB.providers(), & &1.id))
-    |> Enum.uniq()
+    @known_provider_types
     |> Enum.sort()
-  end
-
-  def valid_provider_values do
-    valid_provider_ids()
-    |> Enum.map(&Atom.to_string/1)
+    |> Enum.map(fn type ->
+      {type, humanize_provider_type(type)}
+    end)
   end
 
   defp authorize_manager(%Scope{} = scope) do
@@ -109,18 +96,8 @@ defmodule App.Providers do
     end
   end
 
-  defp provider_name_map do
-    LLMDB.providers()
-    |> Map.new(fn provider -> {provider.id, provider.name} end)
-  end
-
-  defp provider_label(provider_id, provider_name_map) do
-    Map.get(provider_name_map, provider_id) || humanize_provider_id(provider_id)
-  end
-
-  defp humanize_provider_id(provider_id) do
-    provider_id
-    |> Atom.to_string()
+  defp humanize_provider_type(type) do
+    type
     |> String.replace("_", " ")
     |> String.split()
     |> Enum.map_join(" ", &String.capitalize/1)

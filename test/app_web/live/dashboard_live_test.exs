@@ -35,7 +35,7 @@ defmodule AppWeb.DashboardLiveTest do
       agent_fixture(user, %{
         provider: provider,
         name: "Planner",
-        model: "anthropic:claude-haiku-4-5",
+        model: "claude-haiku-4-5",
         tools: ["web_fetch", custom_tool.name]
       })
 

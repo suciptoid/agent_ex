@@ -374,9 +374,7 @@ defmodule AppWeb.AgentLive.FormComponent do
         []
 
       provider ->
-        provider_atom = String.to_existing_atom(provider.provider)
-
-        ReqLLM.available_models(scope: provider_atom, api_key: provider.api_key)
+        App.Providers.Models.list_models(provider)
     end
   end
 end

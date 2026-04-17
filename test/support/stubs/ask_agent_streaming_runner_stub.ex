@@ -24,8 +24,20 @@ defmodule App.TestSupport.AskAgentStreamingRunnerStub do
 
     if delegated_tool_run?(opts) do
       content = "I'll ask the delegated agent to handle that."
-      ask_agent_tool = Enum.find(opts[:extra_tools] || [], &(&1.name == "ask_agent"))
       delegated_agent_id = delegated_agent_id(opts[:extra_system_prompt] || "")
+
+      # Simulate the ask_agent tool execution via the alloy context
+      alloy_context = Keyword.get(opts, :alloy_context, %{})
+
+      if alloy_context[:run_delegated_agent] do
+        App.Agents.AlloyTools.AskAgent.execute(
+          %{
+            "agent_id" => delegated_agent_id,
+            "instructions" => "Fetch the facts."
+          },
+          alloy_context
+        )
+      end
 
       tool_result = %{
         "id" => "tool_ask_agent",
@@ -34,12 +46,6 @@ defmodule App.TestSupport.AskAgentStreamingRunnerStub do
         "content" => "Asked the delegated agent to continue.",
         "status" => "ok"
       }
-
-      {:ok, _result} =
-        ReqLLM.Tool.execute(ask_agent_tool, %{
-          "agent_id" => delegated_agent_id,
-          "instructions" => "Fetch the facts."
-        })
 
       emit_tool_calls.(%{
         "content" => content,
@@ -72,7 +78,10 @@ defmodule App.TestSupport.AskAgentStreamingRunnerStub do
   end
 
   defp delegated_tool_run?(opts) do
-    Enum.any?(opts[:extra_tools] || [], &(&1.name == "ask_agent"))
+    Enum.any?(opts[:extra_tools] || [], fn
+      tool when is_atom(tool) -> tool == App.Agents.AlloyTools.AskAgent
+      _ -> false
+    end)
   end
 
   defp delegated_agent_id(extra_system_prompt) do

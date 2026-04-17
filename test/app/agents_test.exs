@@ -39,7 +39,7 @@ defmodule App.AgentsTest do
       attrs = %{
         "name" => "Planner",
         "system_prompt" => "Plan carefully.",
-        "model" => "anthropic:claude-haiku-4-5",
+        "model" => "claude-haiku-4-5",
         "provider_id" => provider.id,
         "temperature" => "0.4",
         "max_tokens" => "512",
@@ -70,7 +70,7 @@ defmodule App.AgentsTest do
       assert {:ok, agent} =
                Agents.create_agent(scope, %{
                  "name" => "Searcher",
-                 "model" => "anthropic:claude-haiku-4-5",
+                 "model" => "claude-haiku-4-5",
                  "provider_id" => provider.id,
                  "tools" => [tool.name, "web_fetch"]
                })
@@ -84,7 +84,7 @@ defmodule App.AgentsTest do
       assert {:error, changeset} =
                Agents.create_agent(scope, %{
                  "name" => "Blocked",
-                 "model" => "anthropic:claude-haiku-4-5",
+                 "model" => "claude-haiku-4-5",
                  "provider_id" => other_provider.id
                })
 

@@ -1,21 +1,405 @@
 defmodule App.Agents.Runner do
   @moduledoc """
-  Executes an agent against a conversation context using ReqLLM.
+  Executes an agent against a conversation context using Alloy.
   """
 
   require Logger
 
   alias App.Agents.Agent
-  alias App.Agents.Runner.DoomLoop
   alias App.Chat.ContextBuilder
   alias App.Chat.Message
+  alias App.Providers.AlloyConfig
   alias App.Providers.Provider
 
   @default_system_prompt "You are a helpful assistant."
-  @supported_extra_params %{
-    "temperature" => :temperature,
-    "max_tokens" => :max_tokens
-  }
+  @default_max_turns 25
+
+  def run(agent, messages, opts \\ [])
+
+  def run(%Agent{provider: %Provider{}} = agent, messages, opts) do
+    system_prompt = build_system_prompt(agent, opts)
+    alloy_messages = build_alloy_messages(messages, opts)
+    alloy_tools = resolve_tools(agent, opts)
+    provider = build_provider(agent)
+
+    alloy_opts =
+      [
+        provider: provider,
+        tools: alloy_tools,
+        system_prompt: system_prompt,
+        messages: alloy_messages,
+        max_turns: @default_max_turns,
+        context: build_alloy_context(agent, opts)
+      ]
+      |> merge_extra_params(agent)
+
+    Logger.debug(
+      "[Runner] Running agent #{agent.name} with model #{agent.model}, #{length(messages)} messages"
+    )
+
+    case Alloy.run(alloy_opts) do
+      {:ok, %Alloy.Result{} = result} ->
+        {:ok, alloy_result_to_runner_result(result)}
+
+      {:error, %Alloy.Result{error: error}} ->
+        Logger.error("[Runner] Alloy run failed: #{inspect(error)}")
+        {:error, error}
+    end
+  end
+
+  def run(%Agent{}, _messages, _opts), do: {:error, "agent provider must be preloaded"}
+
+  def run_streaming(agent, messages, recipient, opts \\ [])
+
+  def run_streaming(
+        %Agent{provider: %Provider{}} = agent,
+        messages,
+        recipient,
+        opts
+      ) do
+    system_prompt = build_system_prompt(agent, opts)
+    alloy_messages = build_alloy_messages(messages, opts)
+    alloy_tools = resolve_tools(agent, opts)
+    provider = build_provider(agent)
+    callbacks = build_stream_callbacks(recipient, opts)
+
+    on_chunk = fn chunk ->
+      callbacks.on_result.(chunk)
+    end
+
+    on_event = fn event ->
+      handle_alloy_event(event, callbacks)
+    end
+
+    alloy_opts =
+      [
+        provider: provider,
+        tools: alloy_tools,
+        system_prompt: system_prompt,
+        messages: alloy_messages,
+        max_turns: @default_max_turns,
+        context: build_alloy_context(agent, opts),
+        on_event: on_event
+      ]
+      |> merge_extra_params(agent)
+
+    Logger.debug("[Runner] Streaming agent #{agent.name}, tools: #{inspect(agent.tools)}")
+
+    case Alloy.stream(nil, on_chunk, alloy_opts) do
+      {:ok, %Alloy.Result{} = result} ->
+        {:ok, alloy_result_to_runner_result(result)}
+
+      {:error, %Alloy.Result{error: error}} ->
+        Logger.error("[Runner] Alloy stream failed: #{inspect(error)}")
+        {:error, error}
+    end
+  end
+
+  def run_streaming(%Agent{}, _messages, _recipient, _opts),
+    do: {:error, "agent provider must be preloaded"}
+
+  # ── Private ──
+
+  defp build_provider(%Agent{provider: provider, model: model}) do
+    AlloyConfig.to_alloy_provider(provider, model)
+  end
+
+  defp build_system_prompt(agent, opts) do
+    base = if blank?(agent.system_prompt), do: @default_system_prompt, else: agent.system_prompt
+    extra = Keyword.get(opts, :extra_system_prompt, "")
+
+    if blank?(extra), do: base, else: base <> "\n\n" <> extra
+  end
+
+  defp build_alloy_messages(messages, _opts) do
+    messages
+    |> ContextBuilder.canonical_messages()
+    |> Enum.flat_map(&to_alloy_message/1)
+  end
+
+  defp resolve_tools(agent, opts) do
+    App.Agents.Tools.resolve(agent.tools, organization_id: agent.organization_id) ++
+      Keyword.get(opts, :extra_tools, [])
+  end
+
+  defp build_alloy_context(agent, opts) do
+    base = %{
+      organization_id: agent.organization_id
+    }
+
+    case Keyword.get(opts, :alloy_context) do
+      nil -> base
+      extra when is_map(extra) -> Map.merge(base, extra)
+    end
+  end
+
+  defp to_alloy_message(%Message{role: "assistant", content: content} = msg) do
+    tool_calls = Message.tool_calls(msg) || []
+
+    if tool_calls == [] do
+      [Alloy.Message.assistant(content || "")]
+    else
+      blocks =
+        if(blank?(content), do: [], else: [%{type: "text", text: content}]) ++
+          Enum.map(tool_calls, fn tc ->
+            %{
+              type: "tool_use",
+              id: tc["id"] || tc[:id] || "",
+              name: tc["name"] || tc[:name] || "",
+              input: tc["arguments"] || tc[:arguments] || %{}
+            }
+          end)
+
+      [Alloy.Message.assistant_blocks(blocks)]
+    end
+  end
+
+  defp to_alloy_message(%Message{role: "tool", content: content} = msg) do
+    tool_call_id = msg.tool_call_id || ""
+
+    [Alloy.Message.tool_result_block(tool_call_id, content || "", false)]
+    |> then(fn blocks -> [Alloy.Message.tool_results(blocks)] end)
+  end
+
+  defp to_alloy_message(%Message{role: "system", content: content}) do
+    # System messages are handled via system_prompt in Alloy; skip them in message list
+    # But if there's meaningful content, wrap as user context
+    if blank?(content), do: [], else: [Alloy.Message.user("[System context] " <> content)]
+  end
+
+  defp to_alloy_message(%Message{role: "checkpoint", content: content}) do
+    if blank?(content),
+      do: [],
+      else: [Alloy.Message.user("[Conversation checkpoint] " <> content)]
+  end
+
+  defp to_alloy_message(%Message{content: content}) do
+    [Alloy.Message.user(content || "")]
+  end
+
+  defp to_alloy_message(%{role: role} = msg) do
+    content = Map.get(msg, :content) || Map.get(msg, "content") || ""
+    tool_calls = Map.get(msg, :tool_calls, Map.get(msg, "tool_calls", []))
+
+    case role do
+      "assistant" ->
+        if tool_calls == [] do
+          [Alloy.Message.assistant(content)]
+        else
+          blocks =
+            if(blank?(content), do: [], else: [%{type: "text", text: content}]) ++
+              Enum.map(List.wrap(tool_calls), fn tc ->
+                %{
+                  type: "tool_use",
+                  id: Map.get(tc, "id") || Map.get(tc, :id) || "",
+                  name: Map.get(tc, "name") || Map.get(tc, :name) || "",
+                  input: Map.get(tc, "arguments") || Map.get(tc, :arguments) || %{}
+                }
+              end)
+
+          [Alloy.Message.assistant_blocks(blocks)]
+        end
+
+      "tool" ->
+        tool_call_id = Map.get(msg, :tool_call_id) || Map.get(msg, "tool_call_id") || ""
+
+        [
+          Alloy.Message.tool_results([
+            Alloy.Message.tool_result_block(tool_call_id, content, false)
+          ])
+        ]
+
+      "system" ->
+        if blank?(content), do: [], else: [Alloy.Message.user("[System context] " <> content)]
+
+      "checkpoint" ->
+        if blank?(content),
+          do: [],
+          else: [Alloy.Message.user("[Conversation checkpoint] " <> content)]
+
+      _ ->
+        [Alloy.Message.user(content)]
+    end
+  end
+
+  defp handle_alloy_event(%{event: :thinking_delta, payload: payload}, callbacks) do
+    text = Map.get(payload, :text) || Map.get(payload, "text") || ""
+    callbacks.on_thinking.(text)
+  end
+
+  defp handle_alloy_event(%{event: :tool_start, payload: payload}, callbacks) do
+    tool_result = %{
+      "id" => Map.get(payload, :tool_use_id) || Map.get(payload, :id) || "",
+      "name" => Map.get(payload, :name) || "",
+      "arguments" => Map.get(payload, :input) || %{},
+      "content" => nil,
+      "status" => "running"
+    }
+
+    callbacks.on_tool_start.(tool_result)
+  end
+
+  defp handle_alloy_event(%{event: :tool_end, payload: payload}, callbacks) do
+    tool_result = %{
+      "id" => Map.get(payload, :tool_use_id) || Map.get(payload, :id) || "",
+      "name" => Map.get(payload, :name) || "",
+      "arguments" => Map.get(payload, :input) || %{},
+      "content" => Map.get(payload, :result) || "",
+      "status" => tool_end_status(payload)
+    }
+
+    callbacks.on_tool_result.(tool_result)
+  end
+
+  defp handle_alloy_event(%{event: :tool_calls, payload: payload}, callbacks) do
+    tool_calls =
+      payload
+      |> Map.get(:tool_calls, [])
+      |> Enum.map(fn tc ->
+        %{
+          "id" => Map.get(tc, :id) || "",
+          "name" => Map.get(tc, :name) || "",
+          "arguments" => Map.get(tc, :input) || %{}
+        }
+      end)
+
+    tool_call_turn = %{
+      "content" => Map.get(payload, :text),
+      "thinking" => Map.get(payload, :thinking),
+      "tool_calls" => tool_calls
+    }
+
+    callbacks.on_tool_calls.(tool_call_turn)
+  end
+
+  defp handle_alloy_event(_event, _callbacks), do: :ok
+
+  defp tool_end_status(%{error: error}) when not is_nil(error), do: "error"
+  defp tool_end_status(_payload), do: "ok"
+
+  defp alloy_result_to_runner_result(%Alloy.Result{} = result) do
+    thinking = extract_thinking(result)
+
+    usage =
+      case result.usage do
+        %Alloy.Usage{} = u ->
+          %{
+            "input_tokens" => u.input_tokens,
+            "output_tokens" => u.output_tokens,
+            "cache_creation_input_tokens" => u.cache_creation_input_tokens,
+            "cache_read_input_tokens" => u.cache_read_input_tokens
+          }
+
+        _ ->
+          nil
+      end
+
+    tool_responses = extract_tool_responses(result)
+    tool_call_turns = extract_tool_call_turns(result)
+
+    %{
+      content: result.text || "",
+      thinking: thinking || "",
+      tool_responses: tool_responses,
+      tool_call_turns: tool_call_turns,
+      usage: usage,
+      finish_reason: to_string(result.status),
+      provider_meta: result.metadata || %{}
+    }
+  end
+
+  defp extract_thinking(%Alloy.Result{messages: messages}) do
+    messages
+    |> Enum.flat_map(fn msg ->
+      case msg.content do
+        blocks when is_list(blocks) ->
+          Enum.flat_map(blocks, fn
+            %{type: "thinking", text: text} -> [text]
+            _ -> []
+          end)
+
+        _ ->
+          []
+      end
+    end)
+    |> Enum.join("")
+  end
+
+  defp extract_tool_responses(%Alloy.Result{tool_calls: tool_calls}) when is_list(tool_calls) do
+    Enum.map(tool_calls, fn tc ->
+      %{
+        "id" => Map.get(tc, :id) || Map.get(tc, "id") || "",
+        "name" => Map.get(tc, :name) || Map.get(tc, "name") || "",
+        "arguments" => normalize_metadata(Map.get(tc, :input) || Map.get(tc, "input") || %{}),
+        "content" => Map.get(tc, :result) || Map.get(tc, "result") || "",
+        "status" => "ok"
+      }
+    end)
+  end
+
+  defp extract_tool_responses(_result), do: []
+
+  defp extract_tool_call_turns(%Alloy.Result{messages: messages}) do
+    messages
+    |> Enum.filter(fn msg -> msg.role == :assistant and has_tool_use?(msg) end)
+    |> Enum.map(fn msg ->
+      blocks = List.wrap(msg.content)
+
+      text =
+        Enum.find_value(blocks, fn
+          %{type: "text", text: t} -> t
+          _ -> nil
+        end)
+
+      thinking =
+        Enum.find_value(blocks, fn
+          %{type: "thinking", text: t} -> t
+          _ -> nil
+        end)
+
+      tool_calls =
+        Enum.flat_map(blocks, fn
+          %{type: "tool_use"} = tc ->
+            [
+              %{
+                "id" => tc.id,
+                "name" => tc.name,
+                "arguments" => normalize_metadata(tc.input)
+              }
+            ]
+
+          _ ->
+            []
+        end)
+
+      %{}
+      |> maybe_put("content", text)
+      |> maybe_put("thinking", thinking)
+      |> Map.put("tool_calls", tool_calls)
+    end)
+  end
+
+  defp has_tool_use?(%{content: blocks}) when is_list(blocks) do
+    Enum.any?(blocks, fn
+      %{type: "tool_use"} -> true
+      _ -> false
+    end)
+  end
+
+  defp has_tool_use?(_msg), do: false
+
+  defp merge_extra_params(opts, %Agent{extra_params: extra_params, model: model}) do
+    extra = extra_params || %{}
+
+    opts
+    |> maybe_put_alloy_opt(:temperature, Map.get(extra, "temperature"))
+    |> maybe_put_alloy_opt(:max_tokens, Map.get(extra, "max_tokens"))
+    |> maybe_put_reasoning_effort(model, extra)
+  end
+
+  defp maybe_put_alloy_opt(opts, _key, nil), do: opts
+  defp maybe_put_alloy_opt(opts, key, value), do: Keyword.put(opts, key, value)
+
   @reasoning_effort_atoms %{
     "none" => :none,
     "minimal" => :minimal,
@@ -25,295 +409,20 @@ defmodule App.Agents.Runner do
     "xhigh" => :xhigh
   }
 
-  def run(agent, messages, opts \\ [])
+  defp maybe_put_reasoning_effort(opts, _model, extra) do
+    effort = Map.get(extra, "reasoning_effort") || Map.get(extra, :reasoning_effort)
 
-  def run(%Agent{provider: %Provider{api_key: api_key}} = agent, messages, opts) do
-    context = build_context(agent, messages, opts)
-
-    tools =
-      App.Agents.Tools.resolve(agent.tools, organization_id: agent.organization_id) ++
-        Keyword.get(opts, :extra_tools, [])
-
-    llm_opts =
-      [api_key: api_key, tools: tools]
-      |> merge_extra_params(agent)
-      |> Keyword.merge(keyword_stream_opts(opts))
-
-    Logger.debug(
-      "[Runner] Running agent #{agent.name} with model #{agent.model}, #{length(messages)} messages"
-    )
-
-    run_with_tool_loop(agent.model, context, tools, llm_opts, noop_callbacks())
-  end
-
-  def run(%Agent{}, _messages, _opts), do: {:error, "agent provider must be preloaded"}
-
-  def run_streaming(agent, messages, lv_pid, opts \\ [])
-
-  def run_streaming(
-        %Agent{provider: %Provider{api_key: api_key}} = agent,
-        messages,
-        recipient,
-        opts
-      ) do
-    context = build_context(agent, messages, opts)
-
-    tools =
-      App.Agents.Tools.resolve(agent.tools, organization_id: agent.organization_id) ++
-        Keyword.get(opts, :extra_tools, [])
-
-    llm_opts =
-      [api_key: api_key, tools: tools]
-      |> merge_extra_params(agent)
-      |> Keyword.merge(keyword_stream_opts(opts))
-
-    Logger.debug("[Runner] Streaming agent #{agent.name}, tools: #{inspect(agent.tools)}")
-    callbacks = build_stream_callbacks(recipient, opts)
-
-    run_with_tool_loop(agent.model, context, tools, llm_opts, callbacks)
-  end
-
-  def run_streaming(%Agent{}, _messages, _lv_pid, _opts),
-    do: {:error, "agent provider must be preloaded"}
-
-  defp run_with_tool_loop(
-         model,
-         context,
-         tools,
-         llm_opts,
-         callbacks,
-         result_state \\ initial_result_state()
-       ) do
-    case stream_response(model, context, llm_opts, callbacks) do
-      {:ok, response} ->
-        %{
-          type: type,
-          text: text,
-          thinking: thinking,
-          tool_calls: tool_calls,
-          finish_reason: finish_reason
-        } =
-          ReqLLM.Response.classify(response)
-
-        usage = normalize_metadata(ReqLLM.Response.usage(response))
-        provider_meta = normalize_metadata(response.provider_meta)
-
-        base_result_state =
-          result_state
-          |> merge_usage(usage)
-          |> put_provider_meta(provider_meta)
-          |> put_finish_reason(finish_reason)
-
-        case {type, tool_calls} do
-          {:tool_calls, []} ->
-            Logger.error("[Runner] Stream finished with tool_calls but no tool payload")
-            {:error, "The model requested a tool call without any tool data"}
-
-          {:tool_calls, tool_calls} ->
-            names = Enum.map(tool_calls, & &1.name)
-            tool_call_turn = build_tool_call_turn(text, thinking, tool_calls)
-
-            Logger.info("[Runner] LLM requested tools: #{inspect(names)}")
-            callbacks.on_tool_calls.(tool_call_turn)
-
-            case DoomLoop.detect(result_state.tool_call_turns, tool_calls) do
-              {:doom_loop, %{name: tool_name, arguments: arguments}} ->
-                Logger.warning(
-                  "[Runner] Tool doom loop detected for #{inspect(tool_name)} with arguments #{inspect(arguments)}"
-                )
-
-                {:error, doom_loop_error(tool_name)}
-
-              :ok ->
-                with {:ok, %{messages: tool_messages, results: tool_results}} <-
-                       App.Agents.Tools.execute_all(tool_calls, tools,
-                         on_tool_start: callbacks.on_tool_start
-                       ) do
-                  Enum.each(tool_results, callbacks.on_tool_result)
-
-                  new_context =
-                    response.context
-                    |> ReqLLM.Context.append(response.message)
-                    |> ReqLLM.Context.append(tool_messages)
-
-                  run_with_tool_loop(
-                    model,
-                    new_context,
-                    tools,
-                    llm_opts,
-                    callbacks,
-                    base_result_state
-                    |> append_tool_call_turn(tool_call_turn)
-                    |> append_tool_responses(tool_results)
-                  )
-                end
-            end
-
-          {:final_answer, _tool_calls} ->
-            final_result_state =
-              base_result_state
-              |> append_text(text)
-              |> append_thinking(thinking)
-
-            final_content =
-              if blank?(final_result_state.content),
-                do: "The agent returned an empty response.",
-                else: final_result_state.content
-
-            Logger.debug(
-              "[Runner] Final answer received, length: #{String.length(final_content)}"
-            )
-
-            {:ok, %{final_result_state | content: final_content}}
+    case effort do
+      effort when effort not in [nil, "", "default"] ->
+        case Map.get(@reasoning_effort_atoms, to_string(effort)) do
+          nil -> opts
+          _effort_atom -> opts
         end
 
-      {:error, reason} ->
-        Logger.error("[Runner] LLM call failed: #{error_text(reason)}")
-        {:error, reason}
+      _ ->
+        opts
     end
   end
-
-  defp doom_loop_error(nil),
-    do: "Detected repeated identical tool calls. Stopping to avoid a doom loop."
-
-  defp doom_loop_error(tool_name) do
-    "Detected repeated #{inspect(tool_name)} tool calls with identical arguments. Stopping to avoid a doom loop."
-  end
-
-  defp build_context(agent, messages, opts) do
-    base_system_prompt =
-      if blank?(agent.system_prompt), do: @default_system_prompt, else: agent.system_prompt
-
-    extra_system_prompt = Keyword.get(opts, :extra_system_prompt, "")
-
-    system_prompt =
-      if blank?(extra_system_prompt) do
-        base_system_prompt
-      else
-        base_system_prompt <> "\n\n" <> extra_system_prompt
-      end
-
-    messages =
-      [ReqLLM.Context.system(system_prompt)] ++
-        (messages
-         |> ContextBuilder.canonical_messages()
-         |> Enum.map(&to_req_llm_message/1))
-
-    ReqLLM.Context.new(messages)
-  end
-
-  defp to_req_llm_message(%Message{role: role, content: content} = message) do
-    req_llm_message(role, content,
-      name: message.name,
-      tool_call_id: message.tool_call_id,
-      tool_calls: Message.tool_calls(message),
-      metadata: message.metadata || %{}
-    )
-  end
-
-  defp to_req_llm_message(%{role: role} = message) do
-    req_llm_message(role, message_content(message),
-      name: Map.get(message, :name) || Map.get(message, "name"),
-      tool_call_id: Map.get(message, :tool_call_id) || Map.get(message, "tool_call_id"),
-      tool_calls: message_tool_calls(message),
-      metadata: Map.get(message, :metadata) || Map.get(message, "metadata") || %{}
-    )
-  end
-
-  defp req_llm_message("assistant", content, opts) do
-    case Keyword.get(opts, :tool_calls, []) do
-      [] -> ReqLLM.Context.assistant(content || "")
-      tool_calls -> ReqLLM.Context.assistant(content || "", tool_calls: tool_calls)
-    end
-  end
-
-  defp req_llm_message("system", content, _opts), do: ReqLLM.Context.system(content || "")
-  defp req_llm_message("checkpoint", content, _opts), do: ReqLLM.Context.system(content || "")
-
-  defp req_llm_message("tool", content, opts) do
-    tool_call_id = Keyword.get(opts, :tool_call_id) || ""
-
-    case Keyword.get(opts, :name) do
-      nil -> ReqLLM.Context.tool_result(tool_call_id, content || "")
-      name -> ReqLLM.Context.tool_result(tool_call_id, name, content || "")
-    end
-  end
-
-  defp req_llm_message(_role, content, _opts), do: ReqLLM.Context.user(content || "")
-
-  defp merge_extra_params(opts, %Agent{extra_params: extra_params, model: model}) do
-    opts
-    |> merge_standard_extra_params(extra_params || %{})
-    |> maybe_put_agent_reasoning_effort(model, extra_params || %{})
-  end
-
-  defp merge_standard_extra_params(opts, extra_params) when extra_params == %{}, do: opts
-
-  defp merge_standard_extra_params(opts, extra_params) do
-    Enum.reduce(extra_params, opts, fn {key, value}, acc ->
-      case Map.get(@supported_extra_params, to_string(key)) do
-        nil -> acc
-        option_key -> Keyword.put(acc, option_key, value)
-      end
-    end)
-  end
-
-  defp maybe_put_agent_reasoning_effort(opts, model, extra_params) do
-    reasoning_effort =
-      Map.get(extra_params, "reasoning_effort") || Map.get(extra_params, :reasoning_effort)
-
-    with effort when effort not in [nil, "", "default"] <- reasoning_effort,
-         {:ok, effort_atom} <- Map.fetch(@reasoning_effort_atoms, to_string(effort)),
-         true <- reasoning_supported_for_model?(model) do
-      Keyword.put(opts, :reasoning_effort, effort_atom)
-    else
-      _ -> opts
-    end
-  end
-
-  defp reasoning_supported_for_model?(model) when is_binary(model) do
-    case ReqLLM.model(model) do
-      {:ok, llm_model} -> ReqLLM.ModelHelpers.reasoning_enabled?(llm_model)
-      _ -> false
-    end
-  end
-
-  defp reasoning_supported_for_model?(_model), do: false
-
-  defp blank?(value), do: value in [nil, ""]
-  defp blank_to_nil(value) when value in [nil, ""], do: nil
-  defp blank_to_nil(value), do: value
-
-  defp stream_response(model, context, llm_opts, callbacks) do
-    case ReqLLM.stream_text(model, context, llm_opts) do
-      {:ok, stream_response} ->
-        ReqLLM.StreamResponse.process_stream(
-          stream_response,
-          on_result: callbacks.on_result,
-          on_thinking: callbacks.on_thinking
-        )
-
-      {:error, reason} ->
-        Logger.error("[Runner] Stream failed: #{error_text(reason)}")
-        {:error, reason}
-    end
-  end
-
-  defp error_text({:error, reason}), do: error_text(reason)
-  defp error_text({reason, _stacktrace}), do: error_text(reason)
-  defp error_text(%{reason: reason}) when not is_nil(reason), do: error_text(reason)
-  defp error_text(%{"reason" => reason}) when not is_nil(reason), do: error_text(reason)
-  defp error_text(%{response_body: %{"message" => message}}) when is_binary(message), do: message
-
-  defp error_text(%{"response_body" => %{"message" => message}}) when is_binary(message),
-    do: message
-
-  defp error_text(%{message: message}) when is_binary(message), do: message
-  defp error_text(%{"message" => message}) when is_binary(message), do: message
-  defp error_text(%{__exception__: true} = exception), do: Exception.message(exception)
-  defp error_text(reason) when is_binary(reason), do: reason
-  defp error_text(reason) when is_atom(reason), do: Phoenix.Naming.humanize(to_string(reason))
-  defp error_text(reason), do: inspect(reason)
 
   defp build_stream_callbacks(recipient, opts) do
     %{
@@ -350,16 +459,6 @@ defmodule App.Agents.Runner do
     }
   end
 
-  defp noop_callbacks do
-    %{
-      on_result: fn _token -> :ok end,
-      on_thinking: fn _token -> :ok end,
-      on_tool_calls: fn _tool_call_turn -> :ok end,
-      on_tool_start: fn _tool_result -> :ok end,
-      on_tool_result: fn _tool_result -> :ok end
-    }
-  end
-
   defp resolve_callback(callback, _recipient, _message_builder) when is_function(callback, 1),
     do: callback
 
@@ -369,117 +468,12 @@ defmodule App.Agents.Runner do
 
   defp resolve_callback(_callback, _recipient, _message_builder), do: fn _payload -> :ok end
 
-  defp keyword_stream_opts(opts) do
-    opts
-    |> Keyword.drop([
-      :extra_tools,
-      :extra_system_prompt,
-      :on_result,
-      :on_thinking,
-      :on_tool_calls,
-      :on_tool_start,
-      :on_tool_result
-    ])
-    |> normalize_reasoning_effort_option()
-  end
-
-  defp normalize_reasoning_effort_option(opts) do
-    case Keyword.fetch(opts, :reasoning_effort) do
-      {:ok, effort} when effort in [nil, "", "default", :default] ->
-        Keyword.delete(opts, :reasoning_effort)
-
-      {:ok, effort} ->
-        case Map.fetch(@reasoning_effort_atoms, to_string(effort)) do
-          {:ok, effort_atom} -> Keyword.put(opts, :reasoning_effort, effort_atom)
-          :error -> Keyword.delete(opts, :reasoning_effort)
-        end
-
-      :error ->
-        opts
-    end
-  end
-
-  defp initial_result_state do
-    %{
-      content: "",
-      thinking: "",
-      tool_call_turns: [],
-      tool_responses: [],
-      usage: nil,
-      finish_reason: nil,
-      provider_meta: %{}
-    }
-  end
-
-  defp append_text(result_state, text) when text in [nil, ""], do: result_state
-
-  defp append_text(result_state, text),
-    do: %{result_state | content: result_state.content <> text}
-
-  defp append_thinking(result_state, thinking) when thinking in [nil, ""], do: result_state
-
-  defp append_thinking(result_state, thinking) do
-    %{result_state | thinking: result_state.thinking <> thinking}
-  end
-
-  defp append_tool_responses(result_state, []), do: result_state
-
-  defp append_tool_responses(result_state, tool_responses) do
-    %{result_state | tool_responses: result_state.tool_responses ++ tool_responses}
-  end
-
-  defp append_tool_call_turn(result_state, tool_call_turn) do
-    %{result_state | tool_call_turns: result_state.tool_call_turns ++ [tool_call_turn]}
-  end
-
-  defp merge_usage(result_state, usage) do
-    %{result_state | usage: merge_usage_maps(result_state.usage, usage)}
-  end
-
-  defp put_provider_meta(result_state, nil), do: result_state
-
-  defp put_provider_meta(result_state, provider_meta),
-    do: %{result_state | provider_meta: provider_meta}
-
-  defp put_finish_reason(result_state, nil), do: result_state
-
-  defp put_finish_reason(result_state, finish_reason) do
-    %{result_state | finish_reason: to_string(finish_reason)}
-  end
-
-  defp merge_usage_maps(nil, nil), do: nil
-  defp merge_usage_maps(nil, usage), do: usage
-  defp merge_usage_maps(usage, nil), do: usage
-
-  defp merge_usage_maps(left, right) do
-    Map.merge(left, right, fn _key, left_value, right_value ->
-      if is_number(left_value) and is_number(right_value) do
-        left_value + right_value
-      else
-        right_value
-      end
-    end)
-  end
+  defp blank?(value), do: value in [nil, ""]
 
   defp normalize_metadata(nil), do: nil
   defp normalize_metadata(value), do: value |> Jason.encode!() |> Jason.decode!()
 
-  defp build_tool_call_turn(text, thinking, tool_calls) do
-    %{}
-    |> maybe_put_map_value("content", blank_to_nil(text))
-    |> maybe_put_map_value("thinking", blank_to_nil(thinking))
-    |> Map.put("tool_calls", normalize_metadata(tool_calls) || [])
-  end
-
-  defp message_tool_calls(%{} = message) do
-    message
-    |> Map.get(:tool_calls, Map.get(message, "tool_calls", []))
-    |> List.wrap()
-  end
-
-  defp message_content(%{} = message),
-    do: Map.get(message, :content) || Map.get(message, "content")
-
-  defp maybe_put_map_value(map, _key, nil), do: map
-  defp maybe_put_map_value(map, key, value), do: Map.put(map, key, value)
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, _key, ""), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 end

@@ -44,7 +44,6 @@ defmodule App.Agents.Agent do
     |> update_change(:tools, &normalize_tools/1)
     |> validate_required([:name, :model, :provider_id])
     |> validate_length(:name, max: 120)
-    |> validate_format(:model, ~r/^[^:\s]+:.+$/, message: "must use provider:model format")
     |> validate_number(:temperature, greater_than_or_equal_to: 0, less_than_or_equal_to: 2)
     |> validate_number(:max_tokens, greater_than: 0)
     |> validate_inclusion(:reasoning_effort, @reasoning_efforts)

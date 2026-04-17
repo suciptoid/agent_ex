@@ -123,12 +123,18 @@ defmodule App.Tools.Tool do
   end
 
   defp validate_tool_name(:name, value) do
-    if ReqLLM.Tool.valid_name?(value) do
+    if valid_tool_name?(value) do
       []
     else
       [name: "must be a valid tool identifier"]
     end
   end
+
+  defp valid_tool_name?(value) when is_binary(value) do
+    Regex.match?(~r/^[a-zA-Z][a-zA-Z0-9_-]*$/, value) and String.length(value) <= 64
+  end
+
+  defp valid_tool_name?(_value), do: false
 
   defp validate_param_rows(changeset) do
     rows = get_field(changeset, :param_rows, [])

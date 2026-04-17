@@ -5,17 +5,11 @@ defmodule AppWeb.ProviderLiveTest do
 
   setup :register_and_log_in_user
 
-  test "new provider form lists library-backed providers", %{conn: conn} do
+  test "new provider form lists provider type options", %{conn: conn} do
     {:ok, live_view, _html} = live(conn, ~p"/providers/new")
 
     assert has_element?(live_view, "#provider-form")
     assert has_element?(live_view, "#provider-form [role=\"option\"][data-value=\"openai\"]")
-
-    assert has_element?(
-             live_view,
-             "#provider-form [role=\"option\"][data-value=\"github_copilot\"]"
-           )
-
-    assert has_element?(live_view, "#provider-form [role=\"searchbox\"]")
+    assert has_element?(live_view, "#provider-form [role=\"option\"][data-value=\"anthropic\"]")
   end
 end

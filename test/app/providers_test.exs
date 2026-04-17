@@ -35,22 +35,25 @@ defmodule App.ProvidersTest do
       assert provider.api_key == "sk-test"
     end
 
-    test "returns error with invalid provider", %{scope: scope} do
+    test "accepts any provider name and infers type", %{scope: scope} do
       attrs = %{
         "name" => "Test",
-        "provider" => "invalid",
+        "provider" => "custom_llm",
         "api_key" => "key"
       }
 
-      assert {:error, changeset} = Providers.create_provider(scope, attrs)
-      assert "is invalid" in errors_on(changeset).provider
+      assert {:ok, provider} = Providers.create_provider(scope, attrs)
+      assert provider.provider == "custom_llm"
+      assert provider.provider_type == "openai_compat"
     end
   end
 
   describe "provider_options/0" do
-    test "returns library-backed provider options" do
-      assert {"openai", "OpenAI"} in Providers.provider_options()
-      assert {"github_copilot", "GitHub Copilot"} in Providers.provider_options()
+    test "returns provider type options" do
+      options = Providers.provider_options()
+      assert {"anthropic", "Anthropic"} in options
+      assert {"openai", "Openai"} in options
+      assert {"openai_compat", "Openai Compat"} in options
     end
   end
 

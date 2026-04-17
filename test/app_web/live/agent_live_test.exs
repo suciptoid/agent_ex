@@ -18,7 +18,7 @@ defmodule AppWeb.AgentLiveTest do
         agent_fixture(user, %{
           provider: provider,
           name: "Explorer",
-          model: "anthropic:claude-haiku-4-5",
+          model: "claude-haiku-4-5",
           tools: ["web_fetch"]
         })
 
@@ -58,7 +58,7 @@ defmodule AppWeb.AgentLiveTest do
         |> render_submit(%{
           "agent" => %{
             "name" => "Planner",
-            "model" => "anthropic:claude-haiku-4-5",
+            "model" => "claude-haiku-4-5",
             "provider_id" => provider.id,
             "temperature" => "0.4",
             "max_tokens" => "256",
@@ -90,7 +90,7 @@ defmodule AppWeb.AgentLiveTest do
         agent_fixture(user, %{
           provider: provider,
           name: "Writer",
-          model: "anthropic:claude-haiku-4-5"
+          model: "claude-haiku-4-5"
         })
 
       {:ok, live_view, _html} = live(conn, ~p"/agents/#{agent.id}/edit")
@@ -103,7 +103,7 @@ defmodule AppWeb.AgentLiveTest do
       |> render_submit(%{
         "agent" => %{
           "name" => "Editor",
-          "model" => "anthropic:claude-haiku-4-5",
+          "model" => "claude-haiku-4-5",
           "provider_id" => provider.id,
           "reasoning_effort" => "none",
           "tools" => [""]

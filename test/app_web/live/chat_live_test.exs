@@ -245,7 +245,7 @@ defmodule AppWeb.ChatLiveTest do
         agent_fixture(user, %{
           provider: provider,
           name: "Reasoner",
-          model: "google:gemini-2.5-flash",
+          model: "gemini-2.5-flash",
           reasoning_effort: "none"
         })
 
@@ -295,7 +295,7 @@ defmodule AppWeb.ChatLiveTest do
         agent_fixture(user, %{
           provider: provider,
           name: "Reasoner",
-          model: "google:gemini-2.5-flash"
+          model: "gemini-2.5-flash"
         })
 
       room =
@@ -326,7 +326,7 @@ defmodule AppWeb.ChatLiveTest do
       assert assistant_message.content == "Reasoner: Use the default reasoning mode"
     end
 
-    test "does not forward agent reasoning for models without reasoning support", %{
+    test "always forwards non-default agent reasoning effort", %{
       conn: conn,
       user: user
     } do
@@ -337,7 +337,7 @@ defmodule AppWeb.ChatLiveTest do
       agent =
         agent_fixture(user, %{
           provider: provider,
-          model: "openai:gpt-4.1-mini",
+          model: "gpt-4.1-mini",
           reasoning_effort: "high"
         })
 
@@ -359,7 +359,7 @@ defmodule AppWeb.ChatLiveTest do
       |> render_submit()
 
       assert_receive {:agent_runner_streaming_opts, opts}
-      refute Keyword.has_key?(opts, :reasoning_effort)
+      assert opts[:reasoning_effort] == :high
     end
 
     test "sends a message and streams the assistant reply", %{

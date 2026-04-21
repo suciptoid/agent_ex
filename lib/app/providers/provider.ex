@@ -2,8 +2,6 @@ defmodule App.Providers.Provider do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @provider_types ~w(openai anthropic openai_compat)
-
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
   schema "providers" do
@@ -11,43 +9,22 @@ defmodule App.Providers.Provider do
     field :provider, :string
     field :api_key, App.Encrypted.Binary
     field :base_url, :string
-    field :provider_type, :string
 
     belongs_to :organization, App.Organizations.Organization
 
     timestamps(type: :utc_datetime)
   end
 
-  def provider_types, do: @provider_types
+  def alloy_provider_type(%__MODULE__{provider: "anthropic"}), do: "anthropic"
+  def alloy_provider_type(%__MODULE__{provider: "openai"}), do: "openai"
+  def alloy_provider_type(%__MODULE__{}), do: "openai_compat"
 
   def changeset(provider, attrs) do
     provider
-    |> cast(attrs, [:name, :provider, :api_key, :base_url, :provider_type])
+    |> cast(attrs, [:name, :provider, :api_key, :base_url])
     |> validate_required([:provider, :api_key])
-    |> validate_inclusion(:provider_type, @provider_types)
-    |> maybe_infer_provider_type()
     |> validate_base_url()
     |> foreign_key_constraint(:organization_id)
-  end
-
-  defp maybe_infer_provider_type(changeset) do
-    case get_field(changeset, :provider_type) do
-      nil ->
-        provider = get_field(changeset, :provider)
-
-        type =
-          case to_string(provider || "") do
-            "anthropic" -> "anthropic"
-            "openai" -> "openai"
-            "" -> nil
-            _other -> "openai_compat"
-          end
-
-        put_change(changeset, :provider_type, type)
-
-      _existing ->
-        changeset
-    end
   end
 
   defp validate_base_url(changeset) do

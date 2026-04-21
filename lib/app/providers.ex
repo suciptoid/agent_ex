@@ -10,7 +10,7 @@ defmodule App.Providers do
   alias App.Users.Scope
   alias App.Users.User
 
-  @known_provider_types Provider.provider_types()
+  @known_provider_options ~w(anthropic openai openai_compat)
 
   def list_providers(%Scope{} = scope) do
     Repo.all(
@@ -77,7 +77,7 @@ defmodule App.Providers do
   end
 
   def provider_options do
-    @known_provider_types
+    @known_provider_options
     |> Enum.sort()
     |> Enum.map(fn type ->
       {type, humanize_provider_type(type)}

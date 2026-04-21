@@ -46,13 +46,6 @@ defmodule AppWeb.ProviderLive.FormComponent do
               label="Custom Base URL (optional)"
               placeholder="https://api.example.com/v1"
             />
-
-            <.select
-              field={@form[:provider_type]}
-              label="Provider Type"
-              options={@provider_type_options}
-              placeholder="Auto-detected from provider"
-            />
           </.form>
         </div>
         <:footer>
@@ -80,7 +73,6 @@ defmodule AppWeb.ProviderLive.FormComponent do
      socket
      |> assign(assigns)
      |> assign(:provider_options, Providers.provider_options())
-     |> assign(:provider_type_options, provider_type_options())
      |> assign_form(changeset)}
   end
 
@@ -149,17 +141,4 @@ defmodule AppWeb.ProviderLive.FormComponent do
   end
 
   defp notify_parent(msg), do: send(self(), {__MODULE__, msg})
-
-  defp provider_type_options do
-    App.Providers.Provider.provider_types()
-    |> Enum.map(fn type ->
-      label =
-        type
-        |> String.replace("_", " ")
-        |> String.split()
-        |> Enum.map_join(" ", &String.capitalize/1)
-
-      {type, label}
-    end)
-  end
 end

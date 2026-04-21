@@ -159,7 +159,7 @@ defmodule App.Agents.Runner do
   end
 
   defp maybe_trim_to_openai_continuation(%Agent{} = agent, %Provider{} = provider, messages) do
-    provider_type = provider.provider_type || provider.provider
+    provider_type = Provider.alloy_provider_type(provider)
 
     case {latest_provider_response(messages, agent.id), provider_type} do
       {{response_id, index}, "openai"} when is_binary(response_id) ->
@@ -231,7 +231,7 @@ defmodule App.Agents.Runner do
 
   defp provider_runtime_opts(%Agent{} = agent, opts) do
     extra = agent.extra_params || %{}
-    provider_type = normalized_provider_type(agent.provider)
+    provider_type = Provider.alloy_provider_type(agent.provider)
 
     []
     |> maybe_put_provider_opt(
@@ -244,15 +244,6 @@ defmodule App.Agents.Runner do
 
   defp maybe_put_provider_opt(opts, _key, nil), do: opts
   defp maybe_put_provider_opt(opts, key, value), do: Keyword.put(opts, key, value)
-
-  defp normalized_provider_type(%Provider{provider_type: type})
-       when type in ["anthropic", "openai"],
-       do: type
-
-  defp normalized_provider_type(%Provider{provider_type: "openai_compat"}), do: "openai_compat"
-  defp normalized_provider_type(%Provider{provider: "anthropic"}), do: "anthropic"
-  defp normalized_provider_type(%Provider{provider: "openai"}), do: "openai"
-  defp normalized_provider_type(%Provider{}), do: "openai_compat"
 
   defp maybe_put_openai_compat_extra(opts, provider_type, _key, value)
        when provider_type not in ["openai_compat"] or value in [nil, "", "default", :default] do

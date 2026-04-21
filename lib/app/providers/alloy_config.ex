@@ -18,7 +18,7 @@ defmodule App.Providers.AlloyConfig do
       [api_key: provider.api_key, model: model_name]
       |> Keyword.merge(extra_opts)
 
-    case provider_type(provider) do
+    case Provider.alloy_provider_type(provider) do
       "anthropic" ->
         {Alloy.Provider.Anthropic, base_opts ++ maybe_api_url(provider)}
 
@@ -35,13 +35,6 @@ defmodule App.Providers.AlloyConfig do
         {App.Providers.OpenAICompat, compat_opts}
     end
   end
-
-  defp provider_type(%Provider{provider_type: type}) when type in ["anthropic", "openai"],
-    do: type
-
-  defp provider_type(%Provider{provider: "anthropic"}), do: "anthropic"
-  defp provider_type(%Provider{provider: "openai"}), do: "openai"
-  defp provider_type(_provider), do: "openai_compat"
 
   defp maybe_api_url(%Provider{base_url: nil}), do: []
   defp maybe_api_url(%Provider{base_url: url}), do: [api_url: url]

@@ -54,7 +54,7 @@ defmodule App.Providers.Models do
   Returns the static list of known models for a provider type.
   """
   def known_models(%Provider{} = provider) do
-    case provider_type(provider) do
+    case Provider.alloy_provider_type(provider) do
       "openai" -> @known_openai_models
       "anthropic" -> @known_anthropic_models
       _other -> []
@@ -62,7 +62,7 @@ defmodule App.Providers.Models do
   end
 
   defp fetch_models_from_api(%Provider{} = provider) do
-    case provider_type(provider) do
+    case Provider.alloy_provider_type(provider) do
       "openai" -> fetch_openai_models(provider)
       "openai_compat" -> fetch_openai_compat_models(provider)
       _other -> {:ok, []}
@@ -115,9 +115,4 @@ defmodule App.Providers.Models do
   end
 
   defp is_chat_model?(_), do: false
-
-  defp provider_type(%Provider{provider_type: type}) when is_binary(type), do: type
-  defp provider_type(%Provider{provider: "anthropic"}), do: "anthropic"
-  defp provider_type(%Provider{provider: "openai"}), do: "openai"
-  defp provider_type(_provider), do: "openai_compat"
 end

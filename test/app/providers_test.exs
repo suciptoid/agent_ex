@@ -35,7 +35,7 @@ defmodule App.ProvidersTest do
       assert provider.api_key == "sk-test"
     end
 
-    test "accepts any provider name and infers type", %{scope: scope} do
+    test "accepts any provider name", %{scope: scope} do
       attrs = %{
         "name" => "Test",
         "provider" => "custom_llm",
@@ -44,7 +44,6 @@ defmodule App.ProvidersTest do
 
       assert {:ok, provider} = Providers.create_provider(scope, attrs)
       assert provider.provider == "custom_llm"
-      assert provider.provider_type == "openai_compat"
     end
   end
 

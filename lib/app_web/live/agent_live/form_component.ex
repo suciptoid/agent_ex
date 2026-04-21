@@ -3,14 +3,9 @@ defmodule AppWeb.AgentLive.FormComponent do
 
   alias App.Agents
 
-  @reasoning_effort_options [
-    {"default", "Auto"},
-    {"none", "Disabled"},
-    {"minimal", "Minimal"},
-    {"low", "Low"},
-    {"medium", "Medium"},
-    {"high", "High"},
-    {"xhigh", "X-High"}
+  @thinking_mode_options [
+    {"disabled", "Disabled"},
+    {"enabled", "Enabled"}
   ]
 
   @impl true
@@ -29,7 +24,7 @@ defmodule AppWeb.AgentLive.FormComponent do
       assigns
       |> assign(:selected_tools, selected_tools)
       |> assign(:provider_options, provider_options)
-      |> assign(:reasoning_effort_options, @reasoning_effort_options)
+      |> assign(:thinking_mode_options, @thinking_mode_options)
       |> assign_new(:model_options, fn -> [] end)
       |> assign_new(:display_mode, fn -> :dialog end)
       |> assign_new(:navigation, fn -> :patch end)
@@ -45,7 +40,7 @@ defmodule AppWeb.AgentLive.FormComponent do
               providers={@providers}
               provider_options={@provider_options}
               model_options={@model_options}
-              reasoning_effort_options={@reasoning_effort_options}
+              thinking_mode_options={@thinking_mode_options}
               available_tools={@available_tools}
               selected_tools={@selected_tools}
               display_mode={@display_mode}
@@ -86,7 +81,7 @@ defmodule AppWeb.AgentLive.FormComponent do
                 providers={@providers}
                 provider_options={@provider_options}
                 model_options={@model_options}
-                reasoning_effort_options={@reasoning_effort_options}
+                thinking_mode_options={@thinking_mode_options}
                 available_tools={@available_tools}
                 selected_tools={@selected_tools}
                 display_mode={@display_mode}
@@ -201,7 +196,7 @@ defmodule AppWeb.AgentLive.FormComponent do
   attr :providers, :list, required: true
   attr :provider_options, :list, required: true
   attr :model_options, :list, required: true
-  attr :reasoning_effort_options, :list, required: true
+  attr :thinking_mode_options, :list, required: true
   attr :available_tools, :list, required: true
   attr :selected_tools, :list, required: true
   attr :display_mode, :atom, required: true
@@ -265,9 +260,9 @@ defmodule AppWeb.AgentLive.FormComponent do
           />
 
           <.select
-            field={@form[:reasoning_effort]}
-            label="Reasoning"
-            options={@reasoning_effort_options}
+            field={@form[:thinking_mode]}
+            label="Thinking"
+            options={@thinking_mode_options}
           />
         </div>
 

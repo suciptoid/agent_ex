@@ -501,6 +501,7 @@ defmodule App.Chat.StreamWorker do
                    content: next_message.content || "",
                    thinking: Message.thinking(next_message) || "",
                    metadata: next_message.metadata || %{},
+                   tool_responses: [],
                    token_count: 0,
                    followup_message_position: nil,
                    pending_tool_call_ids: []

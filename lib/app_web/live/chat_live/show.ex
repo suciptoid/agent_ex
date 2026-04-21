@@ -4,15 +4,6 @@ defmodule AppWeb.ChatLive.Show do
   alias App.Chat
   alias App.Chat.Message
 
-  @reasoning_effort_atoms %{
-    "default" => :default,
-    "none" => :none,
-    "minimal" => :minimal,
-    "low" => :low,
-    "medium" => :medium,
-    "high" => :high,
-    "xhigh" => :xhigh
-  }
   @hidden_tool_names ["update_chatroom_title"]
 
   @impl true
@@ -32,6 +23,7 @@ defmodule AppWeb.ChatLive.Show do
      |> assign(:streaming_message_inserted_at, nil)
      |> assign(:streaming_content, nil)
      |> assign(:streaming_thinking, nil)
+     |> assign(:streaming_tool_calls, [])
      |> assign(:streaming_tool_responses, [])
      |> assign(:streaming_token_count, 0)
      |> assign(:streaming_active?, false)
@@ -89,7 +81,7 @@ defmodule AppWeb.ChatLive.Show do
                      chat_room,
                      messages,
                      placeholder_message,
-                     reasoning_stream_opts(socket)
+                     stream_run_opts(socket)
                    ) do
                 {:ok, _pid} ->
                   Chat.broadcast_chat_room_from(
@@ -164,7 +156,7 @@ defmodule AppWeb.ChatLive.Show do
                        chat_room,
                        prior_messages,
                        placeholder_message,
-                       reasoning_stream_opts(socket)
+                       stream_run_opts(socket)
                      ) do
                   {:ok, _pid} ->
                     Chat.broadcast_chat_room_from(
@@ -365,6 +357,14 @@ defmodule AppWeb.ChatLive.Show do
     end
   end
 
+  def handle_info({:stream_complete, _message_id, _content}, socket) do
+    {:noreply, socket |> refresh_chat_messages() |> reset_main_stream()}
+  end
+
+  def handle_info({:stream_error, _message_id, _content}, socket) do
+    {:noreply, socket |> refresh_chat_messages() |> reset_main_stream()}
+  end
+
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   def user_message?(message), do: message.role == "user"
@@ -466,7 +466,15 @@ defmodule AppWeb.ChatLive.Show do
     |> Enum.reject(&hidden_tool_call?/1)
   end
 
+  def assistant_tool_entries(%Message{} = message) do
+    do_assistant_tool_entries(message, include_orphan_responses?: true)
+  end
+
   def assistant_tool_entries(message) do
+    do_assistant_tool_entries(message, include_orphan_responses?: false)
+  end
+
+  defp do_assistant_tool_entries(message, opts) do
     tool_calls = assistant_tool_calls(message)
     tool_responses = tool_responses(message)
 
@@ -486,11 +494,15 @@ defmodule AppWeb.ChatLive.Show do
       end)
 
     extra_entries =
-      tool_responses
-      |> Enum.reject(&(tool_response_id(&1) in used_response_ids))
-      |> Enum.map(fn tool_response ->
-        %{tool_call: nil, tool_response: tool_response}
-      end)
+      if Keyword.get(opts, :include_orphan_responses?, false) do
+        tool_responses
+        |> Enum.reject(&(tool_response_id(&1) in used_response_ids))
+        |> Enum.map(fn tool_response ->
+          %{tool_call: nil, tool_response: tool_response}
+        end)
+      else
+        []
+      end
 
     entries ++ extra_entries
   end
@@ -659,6 +671,9 @@ defmodule AppWeb.ChatLive.Show do
     streaming_thinking =
       if placeholder_message, do: message_thinking(placeholder_message) || "", else: ""
 
+    streaming_tool_calls =
+      if placeholder_message, do: assistant_tool_calls(placeholder_message), else: []
+
     streaming_tool_responses =
       if placeholder_message, do: tool_responses(placeholder_message), else: []
 
@@ -669,27 +684,37 @@ defmodule AppWeb.ChatLive.Show do
     |> assign(:streaming_message_inserted_at, streaming_message_inserted_at)
     |> assign(:streaming_content, streaming_content)
     |> assign(:streaming_thinking, streaming_thinking)
+    |> assign(:streaming_tool_calls, streaming_tool_calls)
     |> assign(:streaming_tool_responses, streaming_tool_responses)
     |> assign(:streaming_token_count, 0)
     |> assign(:streaming_active?, true)
   end
 
-  defp reasoning_stream_opts(socket) do
+  defp stream_run_opts(socket) do
     active_agent = active_agent_for_room(socket.assigns.chat_room)
-    reasoning_effort = agent_reasoning_effort(active_agent)
+    [thinking_mode: agent_thinking_mode(active_agent)]
+  end
 
-    case Map.fetch(@reasoning_effort_atoms, reasoning_effort) do
-      {:ok, :default} -> []
-      {:ok, effort} -> [reasoning_effort: effort]
-      :error -> []
+  defp agent_thinking_mode(%{extra_params: extra_params}) when is_map(extra_params) do
+    cond do
+      Map.get(extra_params, "thinking") == "enabled" ->
+        "enabled"
+
+      Map.get(extra_params, :thinking) == "enabled" ->
+        "enabled"
+
+      Map.get(extra_params, "reasoning_effort") in ["minimal", "low", "medium", "high", "xhigh"] ->
+        "enabled"
+
+      Map.get(extra_params, :reasoning_effort) in ["minimal", "low", "medium", "high", "xhigh"] ->
+        "enabled"
+
+      true ->
+        "disabled"
     end
   end
 
-  defp agent_reasoning_effort(%{extra_params: %{"reasoning_effort" => effort}})
-       when is_binary(effort),
-       do: effort
-
-  defp agent_reasoning_effort(_agent), do: "default"
+  defp agent_thinking_mode(_agent), do: "disabled"
 
   defp reset_main_stream(socket) do
     socket
@@ -698,6 +723,7 @@ defmodule AppWeb.ChatLive.Show do
     |> assign(:streaming_message_inserted_at, nil)
     |> assign(:streaming_content, nil)
     |> assign(:streaming_thinking, nil)
+    |> assign(:streaming_tool_calls, [])
     |> assign(:streaming_tool_responses, [])
     |> assign(:streaming_token_count, 0)
     |> assign(:streaming_active?, false)
@@ -727,6 +753,7 @@ defmodule AppWeb.ChatLive.Show do
     build_message_metadata(
       %{},
       socket.assigns.streaming_thinking,
+      socket.assigns.streaming_tool_calls,
       socket.assigns.streaming_tool_responses
     )
   end
@@ -827,6 +854,7 @@ defmodule AppWeb.ChatLive.Show do
         build_message_metadata(
           stream_state.metadata,
           stream_state.thinking,
+          stream_state.tool_calls,
           stream_state.tool_responses
         ),
       agent: stream_state.agent,
@@ -848,6 +876,7 @@ defmodule AppWeb.ChatLive.Show do
             %{
               content: message.content || "",
               thinking: message_thinking(message) || "",
+              tool_calls: assistant_tool_calls(message),
               tool_responses: tool_responses(message),
               token_count: 0,
               inserted_at: message.inserted_at,
@@ -901,10 +930,11 @@ defmodule AppWeb.ChatLive.Show do
 
   defp format_currency(cost), do: "$" <> :erlang.float_to_binary(cost, decimals: 6)
 
-  defp build_message_metadata(existing_metadata, thinking, tool_responses) do
+  defp build_message_metadata(existing_metadata, thinking, tool_calls, tool_responses) do
     existing_metadata
     |> normalize_metadata_map()
     |> put_metadata_value("thinking", blank_to_nil(thinking))
+    |> put_metadata_value("tool_calls", empty_to_nil(tool_calls))
     |> put_metadata_value("tool_responses", empty_to_nil(tool_responses))
   end
 
@@ -925,7 +955,8 @@ defmodule AppWeb.ChatLive.Show do
       "tool_responses",
       "finish_reason",
       "provider_meta",
-      "error"
+      "error",
+      "reasoning_effort"
     ])
   end
 
@@ -983,6 +1014,7 @@ defmodule AppWeb.ChatLive.Show do
       |> assign(:streaming_message_inserted_at, message.inserted_at)
       |> assign(:streaming_content, message.content || "")
       |> assign(:streaming_thinking, message_thinking(message) || "")
+      |> assign(:streaming_tool_calls, assistant_tool_calls(message))
       |> assign(:streaming_tool_responses, tool_responses(message))
       |> assign(:streaming_active?, true)
     else

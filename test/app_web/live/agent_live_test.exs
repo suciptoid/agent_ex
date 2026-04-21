@@ -62,7 +62,7 @@ defmodule AppWeb.AgentLiveTest do
             "provider_id" => provider.id,
             "temperature" => "0.4",
             "max_tokens" => "256",
-            "reasoning_effort" => "low",
+            "thinking_mode" => "enabled",
             "tools" => ["", "web_fetch", "create_tool", custom_tool.name]
           }
         })
@@ -75,7 +75,7 @@ defmodule AppWeb.AgentLiveTest do
       assert created_agent.name == "Planner"
       assert has_element?(redirected_view, "#agent-#{created_agent.id}")
       assert has_element?(redirected_view, "#edit-agent-#{created_agent.id}")
-      assert created_agent.extra_params["reasoning_effort"] == "low"
+      assert created_agent.extra_params["thinking"] == "enabled"
       assert Enum.sort(created_agent.tools) == ["brave_search", "create_tool", "web_fetch"]
     end
 
@@ -105,7 +105,7 @@ defmodule AppWeb.AgentLiveTest do
           "name" => "Editor",
           "model" => "claude-haiku-4-5",
           "provider_id" => provider.id,
-          "reasoning_effort" => "none",
+          "thinking_mode" => "disabled",
           "tools" => [""]
         }
       })
@@ -114,7 +114,7 @@ defmodule AppWeb.AgentLiveTest do
 
       updated_agent = Agents.get_agent!(scope, agent.id)
       assert updated_agent.name == "Editor"
-      assert updated_agent.extra_params["reasoning_effort"] == "none"
+      refute Map.has_key?(updated_agent.extra_params, "thinking")
     end
 
     test "deletes an agent", %{conn: conn, user: user} do

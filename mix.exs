@@ -40,6 +40,7 @@ defmodule App.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
+      {:tidewave, "~> 0.5", only: [:dev]},
       {:bcrypt_elixir, "~> 3.0"},
       {:ueberauth, "~> 0.10.8"},
       {:ueberauth_google, "~> 0.12.1"},

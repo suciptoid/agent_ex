@@ -151,7 +151,28 @@ defmodule App.Agents do
       agent
       | temperature: Map.get(extra_params, "temperature"),
         max_tokens: Map.get(extra_params, "max_tokens"),
-        reasoning_effort: Map.get(extra_params, "reasoning_effort", "default")
+        thinking_mode: thinking_mode_from_extra_params(extra_params)
     }
   end
+
+  defp thinking_mode_from_extra_params(extra_params) when is_map(extra_params) do
+    cond do
+      Map.get(extra_params, "thinking") == "enabled" ->
+        "enabled"
+
+      Map.get(extra_params, :thinking) == "enabled" ->
+        "enabled"
+
+      Map.get(extra_params, "reasoning_effort") in ["minimal", "low", "medium", "high", "xhigh"] ->
+        "enabled"
+
+      Map.get(extra_params, :reasoning_effort) in ["minimal", "low", "medium", "high", "xhigh"] ->
+        "enabled"
+
+      true ->
+        "disabled"
+    end
+  end
+
+  defp thinking_mode_from_extra_params(_extra_params), do: "disabled"
 end

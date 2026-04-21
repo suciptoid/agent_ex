@@ -227,7 +227,7 @@ defmodule AppWeb.ChatLiveTest do
       refute has_element?(live_view, "#message-#{checkpoint_message.id}")
     end
 
-    test "uses the active agent reasoning setting for supported models", %{
+    test "uses the active agent thinking mode for supported models", %{
       conn: conn,
       user: user,
       scope: scope
@@ -246,7 +246,7 @@ defmodule AppWeb.ChatLiveTest do
           provider: provider,
           name: "Reasoner",
           model: "gemini-2.5-flash",
-          reasoning_effort: "none"
+          thinking_mode: "disabled"
         })
 
       room =
@@ -267,7 +267,7 @@ defmodule AppWeb.ChatLiveTest do
       |> render_submit()
 
       assert_receive {:agent_runner_streaming_opts, opts}
-      assert opts[:reasoning_effort] == :none
+      assert opts[:thinking_mode] == "disabled"
 
       assistant_message =
         wait_for_messages(live_view, scope, room.id, fn messages ->
@@ -277,7 +277,7 @@ defmodule AppWeb.ChatLiveTest do
       assert assistant_message.content == "Reasoner: Keep it concise"
     end
 
-    test "omits the default agent reasoning effort for supported models", %{
+    test "defaults agent thinking mode to disabled", %{
       conn: conn,
       user: user,
       scope: scope
@@ -311,22 +311,22 @@ defmodule AppWeb.ChatLiveTest do
 
       live_view
       |> form("#chat-message-form", %{
-        "message" => %{"content" => "Use the default reasoning mode"}
+        "message" => %{"content" => "Use the default thinking mode"}
       })
       |> render_submit()
 
       assert_receive {:agent_runner_streaming_opts, opts}
-      refute Keyword.has_key?(opts, :reasoning_effort)
+      assert opts[:thinking_mode] == "disabled"
 
       assistant_message =
         wait_for_messages(live_view, scope, room.id, fn messages ->
           Enum.find(messages, &(&1.role == "assistant" && &1.status == :completed))
         end)
 
-      assert assistant_message.content == "Reasoner: Use the default reasoning mode"
+      assert assistant_message.content == "Reasoner: Use the default thinking mode"
     end
 
-    test "always forwards non-default agent reasoning effort", %{
+    test "forwards enabled thinking mode for agents that opt in", %{
       conn: conn,
       user: user
     } do
@@ -338,7 +338,7 @@ defmodule AppWeb.ChatLiveTest do
         agent_fixture(user, %{
           provider: provider,
           model: "gpt-4.1-mini",
-          reasoning_effort: "high"
+          thinking_mode: "enabled"
         })
 
       room =
@@ -354,12 +354,12 @@ defmodule AppWeb.ChatLiveTest do
 
       live_view
       |> form("#chat-message-form", %{
-        "message" => %{"content" => "Skip reasoning"}
+        "message" => %{"content" => "Think through it"}
       })
       |> render_submit()
 
       assert_receive {:agent_runner_streaming_opts, opts}
-      assert opts[:reasoning_effort] == :high
+      assert opts[:thinking_mode] == "enabled"
     end
 
     test "sends a message and streams the assistant reply", %{
@@ -1115,6 +1115,165 @@ defmodule AppWeb.ChatLiveTest do
         end)
 
       assert completed_message.id == followup_message.id
+    end
+
+    test "does not carry prior tool rows into the next streamed assistant message", %{
+      conn: conn,
+      user: user,
+      scope: scope
+    } do
+      previous_runner = Application.get_env(:app, :agent_runner)
+      previous_stub_config = Application.get_env(:app, App.TestSupport.ToolTurnPauseRunnerStub)
+
+      Application.put_env(:app, :agent_runner, App.TestSupport.ToolTurnPauseRunnerStub)
+
+      Application.put_env(:app, App.TestSupport.ToolTurnPauseRunnerStub,
+        notify_pid: self(),
+        tool_response: %{
+          "id" => "tool_repeat",
+          "name" => "web_fetch",
+          "arguments" => %{"url" => "https://example.com"},
+          "content" => "sample payload",
+          "status" => "ok"
+        }
+      )
+
+      on_exit(fn ->
+        if previous_runner do
+          Application.put_env(:app, :agent_runner, previous_runner)
+        else
+          Application.delete_env(:app, :agent_runner)
+        end
+
+        if previous_stub_config do
+          Application.put_env(:app, App.TestSupport.ToolTurnPauseRunnerStub, previous_stub_config)
+        else
+          Application.delete_env(:app, App.TestSupport.ToolTurnPauseRunnerStub)
+        end
+      end)
+
+      provider = provider_fixture(user)
+      agent = agent_fixture(user, %{provider: provider, name: "Tool Agent"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Carryover Guard",
+          agents: [agent],
+          active_agent_id: agent.id
+        })
+
+      {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
+
+      live_view
+      |> form("#chat-message-form", %{
+        "message" => %{"content" => "Fetch the first item"}
+      })
+      |> render_submit()
+
+      assert_receive {:tool_turn_runner_started, first_runner_pid}
+
+      first_tool_call_message =
+        wait_for_messages(live_view, scope, room.id, fn messages ->
+          Enum.find(messages, fn message ->
+            message.role == "assistant" and length(message.metadata["tool_calls"] || []) == 1
+          end)
+        end)
+
+      send(first_runner_pid, :emit_tool_result)
+      assert_receive {:tool_turn_runner_tool_result_emitted, ^first_runner_pid}
+
+      first_followup_message =
+        wait_for_messages(live_view, scope, room.id, fn messages ->
+          Enum.find(messages, fn message ->
+            message.role == "assistant" and message.status == :pending and
+              message.id != first_tool_call_message.id
+          end)
+        end)
+
+      refute has_element?(live_view, "#message-tool-#{first_followup_message.id}-0")
+
+      first_runner_ref = Process.monitor(first_runner_pid)
+      send(first_runner_pid, :continue)
+      assert_receive {:DOWN, ^first_runner_ref, :process, ^first_runner_pid, _reason}
+
+      wait_for_messages(live_view, scope, room.id, fn messages ->
+        Enum.find(messages, fn message ->
+          message.role == "assistant" and message.status == :completed and
+            message.id == first_followup_message.id
+        end)
+      end)
+
+      live_view
+      |> form("#chat-message-form", %{
+        "message" => %{"content" => "Fetch the second item"}
+      })
+      |> render_submit()
+
+      assert_receive {:tool_turn_runner_started, second_runner_pid}
+
+      second_tool_call_message =
+        wait_for_messages(live_view, scope, room.id, fn messages ->
+          Enum.find(messages, fn message ->
+            message.role == "assistant" and
+              length(message.metadata["tool_calls"] || []) == 1 and
+              message.id != first_tool_call_message.id
+          end)
+        end)
+
+      assert has_element?(
+               live_view,
+               "#message-tool-#{second_tool_call_message.id}-0",
+               "Waiting for tool output"
+             )
+
+      send(second_runner_pid, :emit_tool_result)
+      assert_receive {:tool_turn_runner_tool_result_emitted, ^second_runner_pid}
+
+      second_followup_message =
+        wait_for_messages(live_view, scope, room.id, fn messages ->
+          Enum.find(messages, fn message ->
+            message.role == "assistant" and message.status == :pending and
+              message.id not in [
+                first_tool_call_message.id,
+                first_followup_message.id,
+                second_tool_call_message.id
+              ]
+          end)
+        end)
+
+      assert has_element?(live_view, "#message-#{second_followup_message.id}")
+      refute has_element?(live_view, "#message-tool-#{second_followup_message.id}-0")
+      refute has_element?(live_view, "#message-#{second_followup_message.id}", "sample payload")
+
+      second_runner_ref = Process.monitor(second_runner_pid)
+      send(second_runner_pid, :continue)
+      assert_receive {:DOWN, ^second_runner_ref, :process, ^second_runner_pid, _reason}
+
+      wait_for_messages(live_view, scope, room.id, fn messages ->
+        Enum.find(messages, fn message ->
+          message.role == "assistant" and message.status == :completed and
+            message.id == second_followup_message.id
+        end)
+      end)
+    end
+
+    test "ignores orphan tool responses on synthetic streamed assistant rows" do
+      message = %{
+        role: "assistant",
+        status: :pending,
+        metadata: %{
+          "tool_responses" => [
+            %{
+              "id" => "tool_orphan",
+              "name" => "web_fetch",
+              "content" => "stale payload",
+              "status" => "ok"
+            }
+          ]
+        }
+      }
+
+      assert AppWeb.ChatLive.Show.assistant_tool_entries(message) == []
     end
 
     test "renders only the exception message for failed assistant runs", %{

@@ -50,60 +50,79 @@ defmodule AppWeb.DashboardLive do
     >
       <div class="flex h-full min-h-0 flex-col gap-6 p-4 sm:p-6 lg:p-8">
         <%!-- Hero Section --%>
-        <section class="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-primary/5 via-card to-card p-6 shadow-sm">
-          <div class="absolute right-0 top-0 -mr-16 -mt-16 size-64 rounded-full bg-primary/5 blur-3xl" />
-
-          <div class="relative flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-            <div class="space-y-4">
-              <div
-                id="dashboard-status-pill"
-                class="inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/5 px-3 py-1 text-xs font-medium text-primary"
-              >
-                <.icon
-                  name={workspace_status_icon(@providers_count, @agents_count, @conversations_count)}
-                  class="size-3.5"
-                />
-                <span>
-                  {workspace_status_label(@providers_count, @agents_count, @conversations_count)}
-                </span>
-              </div>
-
-              <div class="space-y-2">
-                <div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <span class="inline-flex items-center rounded-full border border-border bg-muted/60 px-2.5 py-1 font-medium text-foreground">
-                    {@organization_name}
-                  </span>
-                  <span class="inline-flex items-center rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 font-medium text-primary">
-                    {@organization_role_label}
+        <section class="rounded-3xl border border-border/70 bg-card px-5 py-5 shadow-sm sm:px-6 sm:py-6 lg:px-8 lg:py-7">
+          <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+            <div class="flex max-w-3xl flex-col gap-4">
+              <div class="flex flex-wrap items-center gap-2">
+                <div
+                  id="dashboard-status-pill"
+                  class="inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/5 px-3 py-1 text-xs font-medium text-primary"
+                >
+                  <.icon
+                    name={
+                      workspace_status_icon(@providers_count, @agents_count, @conversations_count)
+                    }
+                    class="size-3.5"
+                  />
+                  <span>
+                    {workspace_status_label(@providers_count, @agents_count, @conversations_count)}
                   </span>
                 </div>
 
-                <h1 id="dashboard-heading" class="text-2xl font-bold tracking-tight text-foreground">
-                  Dashboard
-                </h1>
-                <p id="dashboard-summary" class="max-w-2xl text-sm leading-6 text-muted-foreground">
-                  {hero_copy(
-                    @organization_name,
-                    @current_scope.user.email,
-                    @providers_count,
-                    @agents_count,
-                    @conversations_count,
-                    @can_manage_organization?
-                  )}
+                <span class="inline-flex items-center rounded-full border border-border bg-muted/50 px-2.5 py-1 text-xs font-medium text-foreground">
+                  {@organization_name}
+                </span>
+
+                <span class="inline-flex items-center rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+                  {@organization_role_label}
+                </span>
+              </div>
+
+              <div class="space-y-3">
+                <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+                  Workspace overview
                 </p>
+
+                <div class="space-y-2">
+                  <h1
+                    id="dashboard-heading"
+                    class="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl"
+                  >
+                    Dashboard
+                  </h1>
+                  <p
+                    id="dashboard-summary"
+                    class="max-w-[68ch] text-sm leading-6 text-muted-foreground"
+                  >
+                    {hero_copy(
+                      @organization_name,
+                      @current_scope.user.email,
+                      @providers_count,
+                      @agents_count,
+                      @conversations_count,
+                      @can_manage_organization?
+                    )}
+                  </p>
+                </div>
               </div>
             </div>
 
-            <.link
-              :if={@primary_action}
-              id="dashboard-primary-action"
-              navigate={@primary_action.href}
-            >
-              <.button class="gap-2">
-                <.icon name={@primary_action.icon} class="size-4" />
-                {@primary_action.label}
-              </.button>
-            </.link>
+            <div class="flex flex-col items-start gap-3 lg:max-w-xs lg:items-end">
+              <.link
+                :if={@primary_action}
+                id="dashboard-primary-action"
+                navigate={@primary_action.href}
+              >
+                <.button class="gap-2 shadow-none">
+                  <.icon name={@primary_action.icon} class="size-4" />
+                  {@primary_action.label}
+                </.button>
+              </.link>
+
+              <p class="text-sm leading-6 text-muted-foreground lg:text-right">
+                Stay close to the work that needs attention next without losing the bigger workspace picture.
+              </p>
+            </div>
           </div>
         </section>
 

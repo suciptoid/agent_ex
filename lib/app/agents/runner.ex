@@ -22,6 +22,7 @@ defmodule App.Agents.Runner do
     alloy_messages = build_alloy_messages(messages_for_provider, opts)
     alloy_tools = resolve_tools(agent, opts)
     provider = build_provider(agent, provider_opts)
+    thinking_enabled? = thinking_enabled?(agent, opts)
 
     alloy_opts =
       [
@@ -40,7 +41,7 @@ defmodule App.Agents.Runner do
 
     case Alloy.run(alloy_opts) do
       {:ok, %Alloy.Result{} = result} ->
-        {:ok, alloy_result_to_runner_result(result)}
+        {:ok, alloy_result_to_runner_result(result, thinking_enabled?)}
 
       {:error, %Alloy.Result{error: error}} ->
         Logger.error("[Runner] Alloy run failed: #{inspect(error)}")
@@ -65,13 +66,14 @@ defmodule App.Agents.Runner do
     alloy_messages = build_alloy_messages(messages_for_provider, opts)
     alloy_tools = resolve_tools(agent, opts)
     provider = build_provider(agent, provider_opts)
+    thinking_enabled? = thinking_enabled?(agent, opts)
 
     on_chunk = fn chunk ->
       callbacks.on_result.(chunk)
     end
 
     on_event = fn event ->
-      handle_alloy_event(event, callbacks)
+      handle_alloy_event(event, callbacks, thinking_enabled?)
     end
 
     alloy_opts =
@@ -91,7 +93,7 @@ defmodule App.Agents.Runner do
 
     case Alloy.stream(nil, on_chunk, alloy_opts) do
       {:ok, %Alloy.Result{} = result} ->
-        {:ok, alloy_result_to_runner_result(result)}
+        {:ok, alloy_result_to_runner_result(result, thinking_enabled?)}
 
       {:error, %Alloy.Result{error: error}} ->
         Logger.error("[Runner] Alloy stream failed: #{inspect(error)}")
@@ -237,11 +239,7 @@ defmodule App.Agents.Runner do
       Map.get(extra, "max_tokens") || Map.get(extra, :max_tokens)
     )
     |> maybe_put_openai_compat_extra(provider_type, "temperature", Map.get(extra, "temperature"))
-    |> maybe_put_openai_compat_extra(
-      provider_type,
-      "reasoning_effort",
-      reasoning_effort(extra, opts)
-    )
+    |> maybe_put_extended_thinking(provider_type, agent, extra, opts)
   end
 
   defp maybe_put_provider_opt(opts, _key, nil), do: opts
@@ -270,10 +268,26 @@ defmodule App.Agents.Runner do
     Keyword.put(opts, :extra_body, extra_body)
   end
 
-  defp reasoning_effort(extra, opts) do
-    Keyword.get(opts, :reasoning_effort) ||
-      Map.get(extra, "reasoning_effort") ||
-      Map.get(extra, :reasoning_effort)
+  defp maybe_put_extended_thinking(opts, "anthropic", agent, extra, run_opts) do
+    if thinking_enabled?(agent, extra, run_opts) do
+      Keyword.put(opts, :extended_thinking,
+        budget_tokens: anthropic_thinking_budget(extra, run_opts)
+      )
+    else
+      opts
+    end
+  end
+
+  defp maybe_put_extended_thinking(opts, _provider_type, _agent, _extra, _run_opts), do: opts
+
+  defp anthropic_thinking_budget(extra, run_opts) do
+    extra
+    |> Map.get("max_tokens", Map.get(extra, :max_tokens))
+    |> case do
+      value when is_integer(value) and value >= 1024 -> min(value, 4_096)
+      _ -> 2_048
+    end
+    |> then(&Keyword.get(run_opts, :thinking_budget_tokens, &1))
   end
 
   defp normalize_provider_param(value) when is_atom(value), do: Atom.to_string(value)
@@ -435,11 +449,13 @@ defmodule App.Agents.Runner do
     end
   end
 
-  defp handle_alloy_event(%{event: :thinking_delta, payload: payload}, callbacks) do
+  defp handle_alloy_event(%{event: :thinking_delta, payload: payload}, callbacks, true) do
     callbacks.on_thinking.(thinking_payload_text(payload))
   end
 
-  defp handle_alloy_event(%{event: :tool_start, payload: payload}, callbacks) do
+  defp handle_alloy_event(%{event: :thinking_delta}, _callbacks, false), do: :ok
+
+  defp handle_alloy_event(%{event: :tool_start, payload: payload}, callbacks, _thinking_enabled?) do
     tool_result = %{
       "id" => Map.get(payload, :tool_use_id) || Map.get(payload, :id) || "",
       "name" => Map.get(payload, :name) || "",
@@ -451,7 +467,7 @@ defmodule App.Agents.Runner do
     callbacks.on_tool_start.(tool_result)
   end
 
-  defp handle_alloy_event(%{event: :tool_end, payload: payload}, callbacks) do
+  defp handle_alloy_event(%{event: :tool_end, payload: payload}, callbacks, _thinking_enabled?) do
     tool_result = %{
       "id" => Map.get(payload, :tool_use_id) || Map.get(payload, :id) || "",
       "name" => Map.get(payload, :name) || "",
@@ -463,8 +479,7 @@ defmodule App.Agents.Runner do
     callbacks.on_tool_result.(tool_result)
   end
 
-  defp handle_alloy_event(%{event: :tool_calls, payload: payload}, callbacks) do
-
+  defp handle_alloy_event(%{event: :tool_calls, payload: payload}, callbacks, thinking_enabled?) do
     tool_calls =
       payload
       |> Map.get(:tool_calls, [])
@@ -478,14 +493,14 @@ defmodule App.Agents.Runner do
 
     tool_call_turn = %{
       "content" => Map.get(payload, :text),
-      "thinking" => Map.get(payload, :thinking),
+      "thinking" => if(thinking_enabled?, do: Map.get(payload, :thinking)),
       "tool_calls" => tool_calls
     }
 
     callbacks.on_tool_calls.(tool_call_turn)
   end
 
-  defp handle_alloy_event(_event, _callbacks), do: :ok
+  defp handle_alloy_event(_event, _callbacks, _thinking_enabled?), do: :ok
 
   defp thinking_payload_text(payload) when is_binary(payload), do: payload
 
@@ -502,10 +517,10 @@ defmodule App.Agents.Runner do
   defp tool_end_status(%{error: error}) when not is_nil(error), do: "error"
   defp tool_end_status(_payload), do: "ok"
 
-  defp alloy_result_to_runner_result(%Alloy.Result{} = result) do
+  defp alloy_result_to_runner_result(%Alloy.Result{} = result, thinking_enabled?) do
     provider_metadata = result.metadata || %{}
 
-    thinking = extract_thinking(result)
+    thinking = if(thinking_enabled?, do: extract_thinking(result))
 
     usage =
       case result.usage do
@@ -522,7 +537,7 @@ defmodule App.Agents.Runner do
       end
 
     tool_responses = extract_tool_responses(result)
-    tool_call_turns = extract_tool_call_turns(result)
+    tool_call_turns = extract_tool_call_turns(result, thinking_enabled?)
 
     %{
       content: result.text || "",
@@ -613,7 +628,7 @@ defmodule App.Agents.Runner do
 
   defp tool_result_block(_block), do: []
 
-  defp extract_tool_call_turns(%Alloy.Result{messages: messages}) do
+  defp extract_tool_call_turns(%Alloy.Result{messages: messages}, thinking_enabled?) do
     messages
     |> Enum.filter(fn msg -> msg.role == :assistant and has_tool_use?(msg) end)
     |> Enum.map(fn msg ->
@@ -627,13 +642,15 @@ defmodule App.Agents.Runner do
         end)
 
       thinking =
-        Enum.find_value(blocks, fn
-          %{type: "thinking", thinking: t} -> t
-          %{type: "thinking", text: t} -> t
-          %{"type" => "thinking", "thinking" => t} -> t
-          %{"type" => "thinking", "text" => t} -> t
-          _ -> nil
-        end)
+        if thinking_enabled? do
+          Enum.find_value(blocks, fn
+            %{type: "thinking", thinking: t} -> t
+            %{type: "thinking", text: t} -> t
+            %{"type" => "thinking", "thinking" => t} -> t
+            %{"type" => "thinking", "text" => t} -> t
+            _ -> nil
+          end)
+        end
 
       tool_calls =
         Enum.flat_map(blocks, fn
@@ -675,6 +692,31 @@ defmodule App.Agents.Runner do
   end
 
   defp has_tool_use?(_msg), do: false
+
+  defp thinking_enabled?(%Agent{} = agent, opts) do
+    thinking_enabled?(agent, agent.extra_params || %{}, opts)
+  end
+
+  defp thinking_enabled?(%Agent{}, extra, opts) do
+    case thinking_mode(extra, opts) do
+      "enabled" -> true
+      _ -> false
+    end
+  end
+
+  defp thinking_mode(extra, opts) do
+    Keyword.get(opts, :thinking_mode) ||
+      Map.get(extra, "thinking") ||
+      Map.get(extra, :thinking) ||
+      legacy_thinking_mode(extra)
+  end
+
+  defp legacy_thinking_mode(extra) do
+    case Map.get(extra, "reasoning_effort") || Map.get(extra, :reasoning_effort) do
+      value when value in ["minimal", "low", "medium", "high", "xhigh"] -> "enabled"
+      _ -> "disabled"
+    end
+  end
 
   defp merge_extra_params(opts, %Agent{}), do: opts
 

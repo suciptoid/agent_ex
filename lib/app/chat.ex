@@ -235,7 +235,7 @@ defmodule App.Chat do
        tool_responses: Message.tool_responses(message),
        tool_call_turns: Message.tool_call_turns(message),
        metadata: message.metadata || %{},
-       run_opts: Keyword.take(opts, [:reasoning_effort, :extra_system_prompt])}
+       run_opts: Keyword.take(opts, [:thinking_mode, :extra_system_prompt])}
     )
   end
 

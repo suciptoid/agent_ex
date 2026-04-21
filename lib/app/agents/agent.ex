@@ -3,7 +3,7 @@ defmodule App.Agents.Agent do
 
   import Ecto.Changeset
 
-  @reasoning_efforts ~w(default none minimal low medium high xhigh)
+  @thinking_modes ~w(disabled enabled)
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -15,7 +15,7 @@ defmodule App.Agents.Agent do
     field :tools, {:array, :string}, default: []
     field :temperature, :float, virtual: true
     field :max_tokens, :integer, virtual: true
-    field :reasoning_effort, :string, virtual: true, default: "default"
+    field :thinking_mode, :string, virtual: true, default: "disabled"
 
     belongs_to :provider, App.Providers.Provider
     belongs_to :organization, App.Organizations.Organization
@@ -36,7 +36,7 @@ defmodule App.Agents.Agent do
       :tools,
       :temperature,
       :max_tokens,
-      :reasoning_effort
+      :thinking_mode
     ])
     |> update_change(:name, &trim_text/1)
     |> update_change(:system_prompt, &normalize_optional_text/1)
@@ -46,7 +46,7 @@ defmodule App.Agents.Agent do
     |> validate_length(:name, max: 120)
     |> validate_number(:temperature, greater_than_or_equal_to: 0, less_than_or_equal_to: 2)
     |> validate_number(:max_tokens, greater_than: 0)
-    |> validate_inclusion(:reasoning_effort, @reasoning_efforts)
+    |> validate_inclusion(:thinking_mode, @thinking_modes)
     |> validate_tools(Keyword.get(opts, :allowed_tools, App.Agents.Tools.available_tools()))
     |> put_extra_params()
     |> foreign_key_constraint(:provider_id)
@@ -78,10 +78,10 @@ defmodule App.Agents.Agent do
 
     extra_params =
       existing_extra_params
-      |> Map.drop(["temperature", "max_tokens", "reasoning_effort"])
+      |> Map.drop(["temperature", "max_tokens", "reasoning_effort", "thinking"])
       |> maybe_put_extra_param("temperature", get_field(changeset, :temperature))
       |> maybe_put_extra_param("max_tokens", get_field(changeset, :max_tokens))
-      |> maybe_put_reasoning_effort(get_field(changeset, :reasoning_effort))
+      |> maybe_put_thinking_mode(get_field(changeset, :thinking_mode))
 
     put_change(changeset, :extra_params, extra_params)
   end
@@ -89,11 +89,13 @@ defmodule App.Agents.Agent do
   defp maybe_put_extra_param(extra_params, _key, nil), do: extra_params
   defp maybe_put_extra_param(extra_params, key, value), do: Map.put(extra_params, key, value)
 
-  defp maybe_put_reasoning_effort(extra_params, value) when value in [nil, "", "default"],
+  defp maybe_put_thinking_mode(extra_params, value) when value in [nil, "", "disabled"],
     do: extra_params
 
-  defp maybe_put_reasoning_effort(extra_params, value),
-    do: Map.put(extra_params, "reasoning_effort", value)
+  defp maybe_put_thinking_mode(extra_params, "enabled"),
+    do: Map.put(extra_params, "thinking", "enabled")
+
+  defp maybe_put_thinking_mode(extra_params, _value), do: extra_params
 
   defp trim_text(value) when is_binary(value), do: String.trim(value)
   defp trim_text(value), do: value

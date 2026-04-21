@@ -284,7 +284,7 @@ defmodule App.Chat.Orchestrator do
     existing_metadata
     |> normalize_metadata()
     |> Kernel.||(%{})
-    |> Map.merge(%{"delegated" => true, "tool_name" => "ask_agent"})
+    |> Map.merge(%{"delegated" => true, "tool_name" => "delegated_agent"})
     |> Map.merge(Keyword.get(extra_attrs, :response_metadata, %{}))
     |> maybe_put_metadata("error", Keyword.get(extra_attrs, :error))
   end

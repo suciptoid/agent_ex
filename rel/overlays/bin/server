@@ -2,4 +2,5 @@
 set -eu
 
 cd -P -- "$(dirname -- "$0")"
+./migrate
 PHX_SERVER=true exec ./app start

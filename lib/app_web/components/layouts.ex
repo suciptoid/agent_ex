@@ -318,6 +318,13 @@ defmodule AppWeb.Layouts do
                   </span>
                 </.menu_item>
                 <.menu_separator />
+                <.menu_item
+                  :if={organization_manager?(@current_scope)}
+                  navigate={~p"/organizations/settings"}
+                >
+                  <.icon name="hero-adjustments-horizontal" class="size-4" /> Organization Settings
+                </.menu_item>
+                <.menu_separator :if={organization_manager?(@current_scope)} />
                 <.menu_item navigate={~p"/organizations/select?new=true"}>
                   <.icon name="hero-plus" class="size-4" /> Create New Organization
                 </.menu_item>
@@ -632,6 +639,9 @@ defmodule AppWeb.Layouts do
 
   defp active_organization_subtitle(_scope, []), do: "Create your first workspace"
   defp active_organization_subtitle(_scope, _sidebar_organizations), do: "Switch workspace"
+
+  defp organization_manager?(%{organization_role: role}), do: role in ~w(owner admin)
+  defp organization_manager?(_scope), do: false
 
   defp organization_active?(membership, %{organization: %{id: organization_id}}) do
     membership.organization_id == organization_id

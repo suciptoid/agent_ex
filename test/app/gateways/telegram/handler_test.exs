@@ -153,6 +153,44 @@ defmodule App.Gateways.Telegram.HandlerTest do
     assert fresh_payload["text"] == "Gateway Agent: Fresh context"
   end
 
+  test "gateway-created chat rooms include all assigned agents and activate the configured default",
+       %{
+         user: user,
+         scope: scope
+       } do
+    primary_provider = provider_fixture(user)
+    fallback_provider = provider_fixture(user)
+    primary_agent = agent_fixture(user, %{provider: primary_provider, name: "Primary Agent"})
+    fallback_agent = agent_fixture(user, %{provider: fallback_provider, name: "Fallback Agent"})
+
+    {:ok, gateway} =
+      Gateways.create_gateway(scope, %{
+        "name" => "Multi Agent Bot",
+        "type" => "telegram",
+        "token" => "telegram-token",
+        "config" => %{
+          "agent_ids" => [primary_agent.id, fallback_agent.id],
+          "agent_id" => fallback_agent.id,
+          "allow_all_users" => true
+        }
+      })
+
+    {:ok, channel} =
+      Gateways.find_or_create_channel(gateway, %{
+        external_chat_id: "4321",
+        external_user_id: "5678",
+        external_username: "Gateway User"
+      })
+
+    chat_room = Chat.get_chat_room!(scope, channel.chat_room_id)
+    active_chat_room_agent = Enum.find(chat_room.chat_room_agents, & &1.is_active)
+
+    assert Enum.sort(Enum.map(chat_room.chat_room_agents, & &1.agent_id)) ==
+             Enum.sort([primary_agent.id, fallback_agent.id])
+
+    assert active_chat_room_agent.agent_id == fallback_agent.id
+  end
+
   test "telegram relay preserves bold markdown while escaping surrounding punctuation", %{
     user: user,
     scope: scope
@@ -232,7 +270,13 @@ defmodule App.Gateways.Telegram.HandlerTest do
     assert Enum.map(Enum.filter(first_messages, &(&1.role == "user")), &{&1.name, &1.content}) ==
              [{"Alex", "Need support"}]
 
-    assert_receive {:telegram_send_message, "/bottelegram-token/sendMessage", first_payload}
+    assert_receive {:telegram_chat_action, "/bottelegram-token/sendChatAction", typing_payload}
+    assert typing_payload["chat_id"] == to_string(group_chat_id)
+    assert typing_payload["action"] == "typing"
+
+    assert_receive {:telegram_send_message, "/bottelegram-token/sendMessage", first_payload},
+                   1_000
+
     assert first_payload["chat_id"] == to_string(group_chat_id)
 
     channel = Gateways.get_channel(gateway, group_chat_id)

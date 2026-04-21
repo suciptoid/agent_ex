@@ -4,6 +4,7 @@ defmodule AppWeb.GatewayLive.FormComponent do
   alias App.Agents
   alias App.Gateways
   alias App.Gateways.Telegram.Webhook, as: TelegramWebhook
+  alias App.Organizations
 
   @impl true
   def render(assigns) do
@@ -83,7 +84,8 @@ defmodule AppWeb.GatewayLive.FormComponent do
 
   @impl true
   def update(%{gateway: gateway} = assigns, socket) do
-    changeset = Gateways.change_gateway(gateway)
+    default_agent = Organizations.default_agent(assigns.current_scope)
+    changeset = Gateways.change_gateway(gateway, default_gateway_attrs(gateway, default_agent))
 
     agent_options =
       assigns.current_scope
@@ -221,11 +223,46 @@ defmodule AppWeb.GatewayLive.FormComponent do
           <p class="mb-3 text-sm font-medium text-foreground">Channel Configuration</p>
 
           <.inputs_for :let={config_form} field={@form[:config]}>
+            <div class="space-y-3 rounded-2xl border border-border bg-muted/20 p-4">
+              <div class="space-y-1">
+                <p class="text-sm font-medium text-foreground">Assigned Agents</p>
+                <p class="text-xs leading-5 text-muted-foreground">
+                  New gateway chat rooms will include each selected agent. The default agent becomes the active responder for the first turn.
+                </p>
+              </div>
+
+              <input type="hidden" name={config_form[:agent_ids].name <> "[]"} value="" />
+
+              <div class="grid gap-2 sm:grid-cols-2">
+                <label
+                  :for={
+                    {agent_id, agent_name} <-
+                      Enum.reject(@agent_options, fn {id, _name} -> id == "" end)
+                  }
+                  class="flex items-start gap-3 rounded-xl border border-border bg-background px-3 py-3 text-sm transition hover:border-primary/30 hover:bg-accent/10"
+                >
+                  <input
+                    type="checkbox"
+                    name={config_form[:agent_ids].name <> "[]"}
+                    value={agent_id}
+                    checked={agent_selected?(config_form[:agent_ids].value, agent_id)}
+                    class="mt-0.5 size-4 rounded border-border text-primary focus:ring-primary"
+                  />
+                  <span class="min-w-0">
+                    <span class="block truncate font-medium text-foreground">{agent_name}</span>
+                    <span class="block text-xs text-muted-foreground">
+                      Available for new gateway conversations
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
             <.select
               field={config_form[:agent_id]}
-              label="Default Agent"
+              label="Default Active Agent"
               options={@agent_options}
-              placeholder="Select an agent for new channels"
+              placeholder="Select the active agent for new channels"
             />
 
             <div class="mt-4 space-y-2">
@@ -295,6 +332,22 @@ defmodule AppWeb.GatewayLive.FormComponent do
   defp navigate_after_save(%{assigns: %{return_to: return_to}} = socket) do
     push_patch(socket, to: return_to)
   end
+
+  defp default_gateway_attrs(%{id: nil, config: nil}, nil), do: %{}
+
+  defp default_gateway_attrs(%{id: nil, config: nil}, default_agent) do
+    %{
+      "config" => %{
+        "agent_id" => default_agent.id,
+        "agent_ids" => [default_agent.id]
+      }
+    }
+  end
+
+  defp default_gateway_attrs(_gateway, _default_agent), do: %{}
+
+  defp agent_selected?(value, agent_id) when is_list(value), do: agent_id in value
+  defp agent_selected?(_value, _agent_id), do: false
 
   defp save_label(:edit), do: "Save Changes"
   defp save_label(_action), do: "Save Gateway"

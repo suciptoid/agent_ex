@@ -32,7 +32,8 @@ defmodule AppWeb.GatewayLiveTest do
     user: user,
     scope: scope
   } do
-    agent = agent_fixture(user, %{name: "Telegram Support"})
+    primary_agent = agent_fixture(user, %{name: "Telegram Support"})
+    backup_agent = agent_fixture(user, %{name: "Telegram Backup"})
     stub_telegram_webhook(self())
 
     {:ok, index_view, _html} = live(conn, ~p"/gateways")
@@ -66,8 +67,13 @@ defmodule AppWeb.GatewayLiveTest do
 
     assert has_element?(
              live_view,
-             "#gateway-form [role=\"option\"][data-value=\"#{agent.id}\"]",
+             "#gateway-form [role=\"option\"][data-value=\"#{primary_agent.id}\"]",
              "Telegram Support"
+           )
+
+    assert has_element?(
+             live_view,
+             "#gateway-form input[type=\"checkbox\"][name=\"gateway[config][agent_ids][]\"][value=\"#{primary_agent.id}\"]"
            )
 
     assert has_element?(
@@ -90,7 +96,8 @@ defmodule AppWeb.GatewayLiveTest do
           "token" => "123456:telegram-bot-token",
           "status" => "active",
           "config" => %{
-            "agent_id" => agent.id,
+            "agent_ids" => [primary_agent.id, backup_agent.id],
+            "agent_id" => backup_agent.id,
             "allow_all_users" => "false",
             "welcome_message" => "Hello from Telegram"
           }
@@ -106,7 +113,8 @@ defmodule AppWeb.GatewayLiveTest do
     assert gateway.name == "Support Bot"
     assert gateway.type == :telegram
     assert gateway.status == :active
-    assert gateway.config.agent_id == agent.id
+    assert Enum.sort(gateway.config.agent_ids) == Enum.sort([primary_agent.id, backup_agent.id])
+    assert gateway.config.agent_id == backup_agent.id
     assert gateway.config.allow_all_users == false
     assert gateway.config.welcome_message == "Hello from Telegram"
     assert has_element?(redirected_view, "#edit-gateway-#{gateway.id}")

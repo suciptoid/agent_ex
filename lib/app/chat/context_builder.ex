@@ -9,7 +9,13 @@ defmodule App.Chat.ContextBuilder do
 
   @checkpoint_version 1
   @old_tool_placeholder "[Older tool result omitted from prompt; stored in transcript]"
-  @internal_tool_names MapSet.new(["update_chatroom_title"])
+  @internal_tool_names MapSet.new([
+                         "update_chatroom_title",
+                         "subagent_lists",
+                         "subagent_report",
+                         "subagent_spawn",
+                         "subagent_wait"
+                       ])
   @default_policy %{
     context_window_tokens: 131_072,
     reserve_tokens: 16_384,

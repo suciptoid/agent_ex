@@ -76,40 +76,25 @@ defmodule App.Chat do
   end
 
   def create_chat_room(%Scope{} = scope, attrs) do
-    changeset =
-      %ChatRoom{organization_id: Scope.organization_id!(scope)}
-      |> ChatRoom.changeset(attrs)
+    organization_id = Scope.organization_id!(scope)
 
-    with %{valid?: true} <- changeset,
-         agent_ids <- Ecto.Changeset.get_field(changeset, :agent_ids, []),
-         active_id <-
-           Ecto.Changeset.get_field(changeset, :active_agent_id) || List.first(agent_ids) do
-      if agent_ids == [] do
-        case Repo.insert(changeset) do
-          {:ok, chat_room} -> {:ok, get_chat_room!(scope, chat_room.id)}
-          {:error, changeset} -> {:error, changeset}
-        end
-      else
-        case fetch_agents(scope, agent_ids, changeset) do
-          {:ok, agents} ->
-            Multi.new()
-            |> Multi.insert(:chat_room, changeset)
-            |> Multi.run(:chat_room_agents, fn repo, %{chat_room: chat_room} ->
-              insert_chat_room_agents(repo, chat_room, agents, active_id)
-            end)
-            |> Repo.transaction()
-            |> case do
-              {:ok, %{chat_room: chat_room}} -> {:ok, get_chat_room!(scope, chat_room.id)}
-              {:error, :chat_room, changeset, _changes} -> {:error, changeset}
-              {:error, :chat_room_agents, changeset, _changes} -> {:error, changeset}
-            end
+    case do_create_chat_room(organization_id, attrs) do
+      {:ok, chat_room} -> {:ok, get_chat_room!(scope, chat_room.id)}
+      {:error, _reason} = error -> error
+    end
+  end
 
-          {:error, changeset} ->
-            {:error, changeset}
-        end
-      end
-    else
-      %{valid?: false} -> {:error, changeset}
+  def create_subagent_chat_room(%ChatRoom{} = parent_room, %Agent{} = agent, attrs \\ %{}) do
+    attrs =
+      attrs
+      |> Map.new()
+      |> Map.put(:parent_id, parent_room.id)
+      |> Map.put(:agent_ids, [agent.id])
+      |> Map.put_new(:active_agent_id, agent.id)
+
+    with true <- agent.organization_id == parent_room.organization_id || {:error, :invalid_agent},
+         {:ok, chat_room} <- do_create_chat_room(parent_room.organization_id, attrs) do
+      {:ok, preload_chat_room(chat_room)}
     end
   end
 
@@ -235,7 +220,8 @@ defmodule App.Chat do
        tool_responses: Message.tool_responses(message),
        tool_call_turns: Message.tool_call_turns(message),
        metadata: message.metadata || %{},
-       run_opts: Keyword.take(opts, [:thinking_mode, :extra_system_prompt])}
+       run_opts:
+         Keyword.take(opts, [:thinking_mode, :extra_system_prompt, :extra_tools, :alloy_context])}
     )
   end
 
@@ -312,13 +298,95 @@ defmodule App.Chat do
     chat_orchestrator().send_message(scope, chat_room, content)
   end
 
+  def find_subagent_report(%ChatRoom{} = chat_room, subagent_id) when is_binary(subagent_id) do
+    get_subagent_chat_room(chat_room, subagent_id)
+    |> case do
+      %ChatRoom{} = child_room -> latest_assistant_message(child_room)
+      nil -> nil
+    end
+  end
+
+  def wait_for_subagent_report(%ChatRoom{} = chat_room, subagent_id, timeout_ms \\ 60_000)
+      when is_binary(subagent_id) and is_integer(timeout_ms) and timeout_ms >= 0 do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    do_wait_for_subagent_report(chat_room, subagent_id, deadline)
+  end
+
+  def get_subagent_chat_room(%ChatRoom{} = parent_room, subagent_id)
+      when is_binary(subagent_id) do
+    ChatRoom
+    |> where(
+      [chat_room],
+      chat_room.organization_id == ^parent_room.organization_id and
+        chat_room.parent_id == ^parent_room.id and chat_room.id == ^subagent_id
+    )
+    |> preload(^chat_room_preloads())
+    |> Repo.one()
+  end
+
+  def latest_assistant_message(%ChatRoom{} = chat_room) do
+    chat_room
+    |> list_messages()
+    |> Enum.filter(&(&1.role == "assistant"))
+    |> List.last()
+  end
+
+  def room_stream_running?(%ChatRoom{} = chat_room) do
+    chat_room
+    |> list_messages()
+    |> Enum.any?(fn message ->
+      message.role == "assistant" and message.status in [:pending, :streaming] and
+        stream_running?(message.id)
+    end)
+  end
+
+  def start_parent_followup_stream(
+        %ChatRoom{} = parent_room,
+        subagent_id,
+        extra_system_prompt \\ nil
+      )
+      when is_binary(subagent_id) do
+    parent_room = preload_chat_room(parent_room)
+    messages = list_messages(parent_room)
+
+    with {:ok, agent} <- active_agent_for_room(parent_room),
+         {:ok, placeholder_message} <-
+           create_message(parent_room, %{
+             role: "assistant",
+             content: nil,
+             status: :pending,
+             agent_id: agent.id,
+             metadata: %{
+               "subagent_followup" => true,
+               "subagent_room_id" => subagent_id
+             }
+           }),
+         {:ok, stream_pid} <-
+           start_stream(
+             parent_room,
+             messages,
+             placeholder_message,
+             followup_stream_opts(agent, extra_system_prompt)
+           ) do
+      broadcast_chat_room(parent_room.id, {:agent_message_created, placeholder_message})
+      {:ok, stream_pid}
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   defp chat_room_preloads do
     message_query =
       from message in Message,
         order_by: [asc: message.position],
         preload: ^message_preloads()
 
-    [chat_room_agents: [agent: :provider], agents: [:provider], messages: message_query]
+    [
+      :parent,
+      chat_room_agents: [agent: :provider],
+      agents: [:provider],
+      messages: message_query
+    ]
   end
 
   defp message_preloads do
@@ -330,12 +398,11 @@ defmodule App.Chat do
     [:agent, tool_messages: tool_message_query]
   end
 
-  defp fetch_agents(%Scope{} = scope, agent_ids, %Ecto.Changeset{} = changeset) do
+  defp fetch_agents(organization_id, agent_ids, %Ecto.Changeset{} = changeset) do
     agents =
       Repo.all(
         from agent in Agent,
-          where:
-            agent.organization_id == ^Scope.organization_id!(scope) and agent.id in ^agent_ids,
+          where: agent.organization_id == ^organization_id and agent.id in ^agent_ids,
           preload: [:provider]
       )
 
@@ -347,7 +414,8 @@ defmodule App.Chat do
 
       {:ok, ordered_agents}
     else
-      {:error, Ecto.Changeset.add_error(changeset, :agent_ids, "must belong to the current user")}
+      {:error,
+       Ecto.Changeset.add_error(changeset, :agent_ids, "must belong to the current organization")}
     end
   end
 
@@ -517,6 +585,130 @@ defmodule App.Chat do
       end
     end)
   end
+
+  defp do_create_chat_room(organization_id, attrs) do
+    changeset =
+      %ChatRoom{organization_id: organization_id}
+      |> ChatRoom.changeset(attrs)
+      |> validate_parent_room(organization_id)
+
+    with %{valid?: true} <- changeset,
+         agent_ids <- Ecto.Changeset.get_field(changeset, :agent_ids, []),
+         active_id <-
+           Ecto.Changeset.get_field(changeset, :active_agent_id) || List.first(agent_ids) do
+      if agent_ids == [] do
+        Repo.insert(changeset)
+      else
+        case fetch_agents(organization_id, agent_ids, changeset) do
+          {:ok, agents} ->
+            Multi.new()
+            |> Multi.insert(:chat_room, changeset)
+            |> Multi.run(:chat_room_agents, fn repo, %{chat_room: chat_room} ->
+              insert_chat_room_agents(repo, chat_room, agents, active_id)
+            end)
+            |> Repo.transaction()
+            |> case do
+              {:ok, %{chat_room: chat_room}} -> {:ok, chat_room}
+              {:error, :chat_room, changeset, _changes} -> {:error, changeset}
+              {:error, :chat_room_agents, changeset, _changes} -> {:error, changeset}
+            end
+
+          {:error, _reason} = error ->
+            error
+        end
+      end
+    else
+      %{valid?: false} -> {:error, changeset}
+    end
+  end
+
+  defp validate_parent_room(changeset, organization_id) do
+    case Ecto.Changeset.get_field(changeset, :parent_id) do
+      nil ->
+        changeset
+
+      parent_id ->
+        if Repo.exists?(
+             from chat_room in ChatRoom,
+               where: chat_room.id == ^parent_id and chat_room.organization_id == ^organization_id
+           ) do
+          changeset
+        else
+          Ecto.Changeset.add_error(
+            changeset,
+            :parent_id,
+            "must belong to the current organization"
+          )
+        end
+    end
+  end
+
+  defp do_wait_for_subagent_report(%ChatRoom{} = chat_room, subagent_id, deadline) do
+    case get_subagent_chat_room(chat_room, subagent_id) do
+      nil ->
+        {:error, "Unknown subagent_id: #{subagent_id}"}
+
+      child_room ->
+        case latest_assistant_message(child_room) do
+          %Message{status: status} = report when status in [:completed, :error] ->
+            if stream_running?(report.id) do
+              wait_for_subagent_again(chat_room, subagent_id, deadline)
+            else
+              {:ok, report}
+            end
+
+          _other ->
+            wait_for_subagent_again(chat_room, subagent_id, deadline)
+        end
+    end
+  end
+
+  defp wait_for_subagent_again(chat_room, subagent_id, deadline) do
+    if System.monotonic_time(:millisecond) >= deadline do
+      {:error, :timeout}
+    else
+      Process.sleep(250)
+      do_wait_for_subagent_report(chat_room, subagent_id, deadline)
+    end
+  end
+
+  defp active_agent_for_room(%ChatRoom{chat_room_agents: chat_room_agents}) do
+    case Enum.find(chat_room_agents, & &1.is_active) || List.first(chat_room_agents) do
+      %{agent: %Agent{} = agent} -> {:ok, agent}
+      _other -> {:error, :no_active_agent}
+    end
+  end
+
+  defp followup_stream_opts(agent, extra_system_prompt) do
+    [thinking_mode: thinking_mode(agent)]
+    |> maybe_put_extra_system_prompt(extra_system_prompt)
+  end
+
+  defp maybe_put_extra_system_prompt(opts, prompt) when prompt in [nil, ""], do: opts
+
+  defp maybe_put_extra_system_prompt(opts, prompt),
+    do: Keyword.put(opts, :extra_system_prompt, prompt)
+
+  defp thinking_mode(%Agent{extra_params: extra_params}) when is_map(extra_params) do
+    cond do
+      Map.get(extra_params, "thinking") == "enabled" ->
+        "enabled"
+
+      Map.get(extra_params, :thinking) == "enabled" ->
+        "enabled"
+
+      Map.get(extra_params, "reasoning_effort") in ["minimal", "low", "medium", "high", "xhigh"] ->
+        "enabled"
+
+      Map.get(extra_params, :reasoning_effort) in ["minimal", "low", "medium", "high", "xhigh"] ->
+        "enabled"
+
+      true ->
+        "disabled"
+    end
+  end
+
+  defp thinking_mode(_agent), do: "disabled"
 
   @doc """
   Returns a lightweight list of chat rooms for the sidebar.

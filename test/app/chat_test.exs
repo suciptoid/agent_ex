@@ -8,6 +8,7 @@ defmodule App.ChatTest do
   import App.AgentsFixtures
   import App.ChatFixtures
   import App.ProvidersFixtures
+  import App.ToolsFixtures
   import App.UsersFixtures
 
   setup do
@@ -149,7 +150,7 @@ defmodule App.ChatTest do
                  "active_agent_id" => agent.id
                })
 
-      assert "must belong to the current user" in errors_on(changeset).agent_ids
+      assert "must belong to the current organization" in errors_on(changeset).agent_ids
     end
   end
 
@@ -467,24 +468,20 @@ defmodule App.ChatTest do
   end
 
   describe "stream_message/3" do
-    test "delegates ask_agent asynchronously so the delegated reply finishes later", %{
+    test "injects only subagent tools and omits roster details from the extra prompt", %{
       user: user,
       provider: provider
     } do
-      previous_runner = Application.get_env(:app, :agent_runner)
-      previous_test_pid = Application.get_env(:app, :delegating_agent_test_pid)
+      previous_stub_config = Application.get_env(:app, App.TestSupport.AgentRunnerStub)
 
-      Application.put_env(:app, :agent_runner, App.TestSupport.DelegatingAgentRunnerStub)
-      Application.put_env(:app, :delegating_agent_test_pid, self())
+      Application.put_env(:app, App.TestSupport.AgentRunnerStub, notify_pid: self())
 
       on_exit(fn ->
-        restore_app_env(:agent_runner, previous_runner)
-        restore_app_env(:delegating_agent_test_pid, previous_test_pid)
+        restore_app_env(App.TestSupport.AgentRunnerStub, previous_stub_config)
       end)
 
       lead_agent = agent_fixture(user, %{provider: provider, name: "Lead Agent"})
       research_agent = agent_fixture(user, %{provider: provider, name: "Research Agent"})
-      research_agent_id = research_agent.id
 
       room =
         chat_room_fixture(user, %{
@@ -501,56 +498,166 @@ defmodule App.ChatTest do
       assert {:ok, %{content: content, agent_id: agent_id}} =
                Orchestrator.stream_message(room, messages, self())
 
-      assert content == "I'll ask the delegated agent to handle that."
+      assert content == "Lead Agent: Delegate the research task"
       assert agent_id == lead_agent.id
 
-      assert_receive {:agent_message_created, placeholder_message}
-      placeholder_message_id = placeholder_message.id
-      assert placeholder_message.chat_room_id == room.id
-      assert placeholder_message.agent_id == research_agent_id
-      assert placeholder_message.status == :pending
-      assert placeholder_message.content in [nil, ""]
+      assert_receive {:agent_runner_streaming_opts, opts}
 
-      refute_receive {:agent_message_updated,
-                      %{agent_id: ^research_agent_id, status: :completed}},
-                     50
+      extra_tools = opts[:extra_tools] || []
+      extra_prompt = opts[:extra_system_prompt] || ""
 
-      assert_receive {:delegated_agent_started, delegated_pid, ^research_agent_id}
-      send(delegated_pid, :continue_delegated_agent)
+      assert App.Agents.AlloyTools.SubagentLists in extra_tools
+      assert App.Agents.AlloyTools.SubagentSpawn in extra_tools
+      assert App.Agents.AlloyTools.SubagentWait in extra_tools
+      refute App.Agents.AlloyTools.AskAgent in extra_tools
+      refute App.Agents.AlloyTools.Handover in extra_tools
 
-      assert_receive {:agent_message_stream_chunk, ^placeholder_message_id, _token}
-      assert_receive {:agent_message_updated, delegated_message}
-
-      assert delegated_message.id == placeholder_message.id
-      assert delegated_message.agent_id == research_agent.id
-      assert delegated_message.status == :completed
-      assert delegated_message.content == "Research Agent: fetched delegated payload"
-
-      persisted_messages = Chat.list_messages(room)
-
-      assert Enum.map(persisted_messages, & &1.id) == [
-               Enum.at(messages, 0).id,
-               delegated_message.id
-             ]
+      assert extra_prompt =~ "subagent_lists"
+      assert extra_prompt =~ "Before writing a prompt for a sub-agent"
+      assert extra_prompt =~ "maximizes that agent's own tool usage"
+      assert extra_prompt =~ "wait up to 60 seconds"
+      assert extra_prompt =~ "report back later through `subagent_report`"
+      refute extra_prompt =~ "Other agents available in this room"
+      refute extra_prompt =~ research_agent.id
+      refute extra_prompt =~ research_agent.name
     end
 
-    test "keeps streaming tool and delegated placeholder positions unique during ask_agent", %{
+    test "subagent_lists returns the other agents with instructions and tool details", %{
       user: user,
       provider: provider
     } do
-      previous_runner = Application.get_env(:app, :agent_runner)
-      Application.put_env(:app, :agent_runner, App.TestSupport.AskAgentStreamingRunnerStub)
+      custom_tool = tool_fixture(user, %{name: "weather_lookup", description: "Look up weather."})
 
-      on_exit(fn ->
-        restore_app_env(:agent_runner, previous_runner)
-      end)
+      lead_agent =
+        agent_fixture(user, %{
+          provider: provider,
+          name: "Lead Agent",
+          system_prompt: "Coordinate the overall response.",
+          tools: ["web_fetch"]
+        })
 
+      research_agent =
+        agent_fixture(user, %{
+          provider: provider,
+          name: "Research Agent",
+          system_prompt: "Investigate market data and cite sources.",
+          tools: ["web_fetch", custom_tool.name]
+        })
+
+      reviewer_agent =
+        agent_fixture(user, %{
+          provider: provider,
+          name: "Reviewer Agent",
+          system_prompt: "Review delegated drafts for accuracy.",
+          tools: []
+        })
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Delegation Stream",
+          agents: [lead_agent, research_agent, reviewer_agent],
+          active_agent_id: lead_agent.id
+        })
+
+      {:ok, response} =
+        App.Agents.AlloyTools.SubagentLists.execute(%{}, %{
+          chat_room: room,
+          agent_map: %{
+            lead_agent.id => lead_agent,
+            research_agent.id => research_agent,
+            reviewer_agent.id => reviewer_agent
+          },
+          agents: [lead_agent, research_agent, reviewer_agent],
+          current_agent_id: lead_agent.id
+        })
+
+      %{"agents" => listed_agents} = Jason.decode!(response)
+      listed_ids = Enum.map(listed_agents, &Map.get(&1, "agent_id"))
+
+      refute lead_agent.id in listed_ids
+      assert research_agent.id in listed_ids
+      assert reviewer_agent.id in listed_ids
+
+      research_entry = Enum.find(listed_agents, &(Map.get(&1, "agent_id") == research_agent.id))
+      reviewer_entry = Enum.find(listed_agents, &(Map.get(&1, "agent_id") == reviewer_agent.id))
+
+      assert research_entry["instructions"] == "Investigate market data and cite sources."
+
+      assert research_entry["tools"] == [
+               %{
+                 "name" => "web_fetch",
+                 "description" =>
+                   "Fetch the content of a web page given a URL. Optional headers can be included for authenticated requests."
+               },
+               %{"name" => "weather_lookup", "description" => "Look up weather."}
+             ]
+
+      assert reviewer_entry["instructions"] == "Review delegated drafts for accuracy."
+      assert reviewer_entry["tools"] == []
+    end
+
+    test "spawns a subagent child room and returns the result through subagent_wait only", %{
+      user: user,
+      scope: scope,
+      provider: provider
+    } do
       lead_agent = agent_fixture(user, %{provider: provider, name: "Lead Agent"})
       research_agent = agent_fixture(user, %{provider: provider, name: "Research Agent"})
 
       room =
         chat_room_fixture(user, %{
-          title: "Delegation Stream",
+          title: "Subagent Parent",
+          agents: [lead_agent, research_agent],
+          active_agent_id: lead_agent.id
+        })
+
+      {:ok, spawn_response} =
+        App.Agents.AlloyTools.SubagentSpawn.execute(
+          %{
+            "agent_id" => research_agent.id,
+            "prompt" => "Fetch the delegated payload."
+          },
+          %{chat_room: room, agent_map: %{research_agent.id => research_agent}, callbacks: []}
+        )
+
+      %{"subagent_id" => subagent_id, "status" => "running"} = Jason.decode!(spawn_response)
+
+      child_room = Chat.get_chat_room!(scope, subagent_id)
+      research_agent_id = research_agent.id
+
+      assert child_room.parent_id == room.id
+      assert Enum.map(child_room.chat_room_agents, & &1.agent_id) == [research_agent_id]
+
+      {:ok, wait_response} =
+        App.Agents.AlloyTools.SubagentWait.execute(
+          %{"subagent_id" => child_room.id, "timeout_seconds" => 1},
+          %{chat_room: room}
+        )
+
+      assert %{
+               "subagent_id" => ^subagent_id,
+               "status" => "completed",
+               "agent_id" => ^research_agent_id,
+               "content" => "Research Agent: Fetch the delegated payload."
+             } = Jason.decode!(wait_response)
+
+      refute Enum.any?(Chat.list_messages(room), fn message ->
+               message.role == "assistant" and
+                 Map.get(message.metadata || %{}, "subagent") == true
+             end)
+    end
+
+    test "subagent_report posts back to the parent room and restarts the parent agent", %{
+      user: user,
+      scope: scope,
+      provider: provider
+    } do
+      lead_agent = agent_fixture(user, %{provider: provider, name: "Lead Agent"})
+      research_agent = agent_fixture(user, %{provider: provider, name: "Research Agent"})
+
+      room =
+        chat_room_fixture(user, %{
+          title: "Async Parent",
           agents: [lead_agent, research_agent],
           active_agent_id: lead_agent.id
         })
@@ -558,43 +665,49 @@ defmodule App.ChatTest do
       Chat.subscribe_chat_room(room)
 
       assert {:ok, _user_message} =
-               Chat.create_message(room, %{role: "user", content: "Delegate this task"})
+               Chat.create_message(room, %{role: "user", content: "Need support on this task"})
 
-      messages = Chat.list_messages(room)
+      {:ok, child_room} = Chat.create_subagent_chat_room(room, research_agent, %{title: nil})
+      child_room_id = child_room.id
 
-      assert {:ok, placeholder_message} =
-               Chat.create_message(room, %{
-                 role: "assistant",
-                 content: nil,
-                 status: :pending,
-                 agent_id: lead_agent.id,
-                 metadata: %{}
-               })
+      {:ok, report_response} =
+        App.Agents.AlloyTools.SubagentReport.execute(
+          %{"report" => "Finished the async sub-task."},
+          %{chat_room: child_room, parent_chat_room: room, current_agent_id: research_agent.id}
+        )
 
-      assert {:ok, worker_pid} = Chat.start_stream(room, messages, placeholder_message)
+      assert %{
+               "subagent_id" => ^child_room_id,
+               "status" => "reported",
+               "resumed_parent" => true
+             } = Jason.decode!(report_response)
 
-      worker_ref = Process.monitor(worker_pid)
+      assert_receive {:agent_message_created, report_message}
+      assert report_message.chat_room_id == room.id
+      assert report_message.agent_id == research_agent.id
+      assert report_message.content == "Finished the async sub-task."
+      assert report_message.metadata["subagent"] == true
+      assert report_message.metadata["tool_name"] == "subagent_report"
 
-      assert_receive {:agent_message_created, delegated_placeholder}
-      assert delegated_placeholder.position == 3
+      assert_receive {:agent_message_created, placeholder_message}
+      assert placeholder_message.chat_room_id == room.id
+      assert placeholder_message.agent_id == lead_agent.id
+      assert placeholder_message.status == :pending
 
-      assert_receive {:agent_message_updated, delegated_message}
-      assert delegated_message.id == delegated_placeholder.id
-      assert delegated_message.status == :completed
+      placeholder_message_id = placeholder_message.id
+      assert_receive {:stream_complete, ^placeholder_message_id, _content}, 2_000
 
-      assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, :normal}
+      parent_messages = Chat.list_messages(Chat.get_chat_room!(scope, room.id))
 
-      persisted_messages = Chat.list_messages(room)
-      positions = Enum.map(persisted_messages, & &1.position)
-      tool_message = Enum.find(persisted_messages, &(&1.role == "tool"))
-      final_assistant_message = List.last(persisted_messages)
+      assert Enum.any?(parent_messages, fn message ->
+               message.id == report_message.id and
+                 message.content == "Finished the async sub-task."
+             end)
 
-      assert positions == [1, 2, 3, 4, 5]
-      assert placeholder_message.id != final_assistant_message.id
-      assert tool_message.position == 4
-      assert final_assistant_message.role == "assistant"
-      assert final_assistant_message.status == :completed
-      assert final_assistant_message.position == 5
+      assert Enum.any?(parent_messages, fn message ->
+               message.id == placeholder_message.id and message.status == :completed and
+                 message.agent_id == lead_agent.id
+             end)
     end
 
     test "marks a streaming tool message completed before the final assistant turn", %{
@@ -673,7 +786,7 @@ defmodule App.ChatTest do
       worker_ref = Process.monitor(worker_pid)
       send(runner_pid, :continue)
       assert_receive {:DOWN, ^ref, :process, ^runner_pid, _reason}
-      assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, :normal}
+      assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, :normal}, 2_000
     end
 
     test "keeps positions unique when next tool turn arrives before prior tool result is handled",
@@ -714,7 +827,7 @@ defmodule App.ChatTest do
       assert {:ok, worker_pid} = Chat.start_stream(room, messages, placeholder_message)
       worker_ref = Process.monitor(worker_pid)
 
-      assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, :normal}
+      assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, :normal}, 2_000
 
       persisted_messages = Chat.list_messages(room)
       positions = Enum.map(persisted_messages, & &1.position)

@@ -3,11 +3,12 @@ defmodule AppWeb.ChatLive.Index do
 
   alias App.Agents
   alias App.Chat
+  alias App.Organizations
 
   @impl true
   def mount(_params, _session, socket) do
     available_agents = Agents.list_agents(socket.assigns.current_scope)
-    default_agent = List.first(available_agents)
+    default_agent = Organizations.default_agent(socket.assigns.current_scope)
 
     {:ok,
      socket

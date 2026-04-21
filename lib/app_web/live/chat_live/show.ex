@@ -4,7 +4,9 @@ defmodule AppWeb.ChatLive.Show do
   alias App.Chat
   alias App.Chat.Message
 
-  @hidden_tool_names ["update_chatroom_title"]
+  @hidden_tool_names [
+    "update_chatroom_title"
+  ]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -772,7 +774,7 @@ defmodule AppWeb.ChatLive.Show do
     message_has_content?(message) or
       message_thinking(message) not in [nil, ""] or
       tool_responses(message) != [] or
-      message.status == :streaming
+      message.status in [:pending, :streaming]
   end
 
   defp delegated_stream_started_from_state?(stream_state) do

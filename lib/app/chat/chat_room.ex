@@ -12,23 +12,26 @@ defmodule App.Chat.ChatRoom do
     field :active_agent_id, :binary_id, virtual: true
 
     belongs_to :organization, App.Organizations.Organization
+    belongs_to :parent, __MODULE__
 
     has_many :chat_room_agents, App.Chat.ChatRoomAgent
     has_many :agents, through: [:chat_room_agents, :agent]
     has_many :messages, App.Chat.Message
+    has_many :child_rooms, __MODULE__, foreign_key: :parent_id
 
     timestamps(type: :utc_datetime_usec)
   end
 
   def changeset(chat_room, attrs) do
     chat_room
-    |> cast(attrs, [:title, :agent_ids, :active_agent_id])
+    |> cast(attrs, [:title, :agent_ids, :active_agent_id, :parent_id])
     |> update_change(:title, &trim_text/1)
     |> update_change(:agent_ids, &normalize_agent_ids/1)
     |> validate_length(:title, max: 160)
     |> validate_agent_ids()
     |> validate_active_agent()
     |> foreign_key_constraint(:organization_id)
+    |> foreign_key_constraint(:parent_id)
   end
 
   defp validate_agent_ids(changeset) do

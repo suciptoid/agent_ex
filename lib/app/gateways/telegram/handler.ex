@@ -166,11 +166,18 @@ defmodule App.Gateways.Telegram.Handler do
         {:ok, assistant_message} ->
           messages = chat_room.messages
           Chat.broadcast_chat_room(chat_room.id, {:agent_message_created, assistant_message})
-          :ok = start_relay(gateway, channel, chat_room, assistant_message)
 
-          Chat.start_stream(chat_room, messages, assistant_message,
-            extra_system_prompt: telegram_reply_prompt()
-          )
+          case Chat.start_stream(chat_room, messages, assistant_message,
+                 extra_system_prompt: telegram_reply_prompt()
+               ) do
+            {:ok, stream_pid} ->
+              :ok = start_relay(gateway, channel, chat_room, stream_pid)
+              {:ok, stream_pid}
+
+            {:error, reason} ->
+              Logger.error("Failed to start Telegram chat stream: #{inspect(reason)}")
+              :ok
+          end
 
         {:error, reason} ->
           Logger.error("Failed to create assistant message: #{inspect(reason)}")
@@ -186,33 +193,16 @@ defmodule App.Gateways.Telegram.Handler do
     end
   end
 
-  defp receive_loop(gateway, channel, message_id) do
+  defp receive_loop(gateway, channel, chat_room, stream_pid) do
+    monitor_ref = Process.monitor(stream_pid)
+
     receive do
-      {:stream_complete, ^message_id, content} when is_binary(content) and content != "" ->
-        client = Client.new(gateway.token)
-
-        case Client.send_markdown_message(client, channel.external_chat_id, content) do
-          {:ok, _response} ->
-            :ok
-
-          {:error, reason} ->
-            Logger.error("Failed to send Telegram assistant reply: #{inspect(reason)}")
-        end
-
-      {:stream_error, ^message_id, _reason} ->
-        client = Client.new(gateway.token)
-
-        Client.send_message(
-          client,
-          channel.external_chat_id,
-          "Sorry, an error occurred while processing your message."
-        )
-
-      _other ->
-        receive_loop(gateway, channel, message_id)
+      {:DOWN, ^monitor_ref, :process, _pid, _reason} ->
+        relay_final_message(gateway, channel, chat_room)
     after
       120_000 ->
-        Logger.warning("Relay timeout for message #{message_id}")
+        Logger.warning("Relay timeout for Telegram chat room #{chat_room.id}")
+        relay_timeout_message(gateway, channel)
     end
   end
 
@@ -271,37 +261,26 @@ defmodule App.Gateways.Telegram.Handler do
     end
   end
 
-  defp start_relay(gateway, channel, chat_room, assistant_message) do
-    parent = self()
-    ready_ref = make_ref()
+  defp start_relay(gateway, channel, chat_room, stream_pid) do
+    client = Client.new(gateway.token)
+    _ = Client.send_chat_action(client, channel.external_chat_id)
 
     {:ok, _relay_pid} =
       Task.start(fn ->
-        Chat.subscribe_chat_room(chat_room)
         typing_pid = start_typing_indicator(gateway, channel.external_chat_id)
-        send(parent, {:gateway_relay_ready, ready_ref})
 
         try do
-          receive_loop(gateway, channel, assistant_message.id)
+          receive_loop(gateway, channel, chat_room, stream_pid)
         after
           stop_typing_indicator(typing_pid)
-          Chat.unsubscribe_chat_room(chat_room)
         end
       end)
 
-    receive do
-      {:gateway_relay_ready, ^ready_ref} ->
-        :ok
-    after
-      1_000 ->
-        Logger.warning("Relay subscription setup timed out for message #{assistant_message.id}")
-        :ok
-    end
+    :ok
   end
 
   defp start_typing_indicator(%Gateway{} = gateway, chat_id) do
     client = Client.new(gateway.token)
-    _ = Client.send_chat_action(client, chat_id)
 
     case Task.start(fn -> typing_loop(client, chat_id) end) do
       {:ok, pid} ->
@@ -325,6 +304,45 @@ defmodule App.Gateways.Telegram.Handler do
         _ = Client.send_chat_action(client, chat_id)
         typing_loop(client, chat_id)
     end
+  end
+
+  defp relay_final_message(gateway, channel, chat_room) do
+    client = Client.new(gateway.token)
+
+    case Chat.latest_assistant_message(chat_room) do
+      %{status: :completed, content: content} when is_binary(content) and content != "" ->
+        case Client.send_markdown_message(client, channel.external_chat_id, content) do
+          {:ok, _response} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.error("Failed to send Telegram assistant reply: #{inspect(reason)}")
+        end
+
+      %{status: :completed} ->
+        Client.send_message(
+          client,
+          channel.external_chat_id,
+          "The agent finished without a reply."
+        )
+
+      _message ->
+        Client.send_message(
+          client,
+          channel.external_chat_id,
+          "Sorry, an error occurred while processing your message."
+        )
+    end
+  end
+
+  defp relay_timeout_message(gateway, channel) do
+    client = Client.new(gateway.token)
+
+    Client.send_message(
+      client,
+      channel.external_chat_id,
+      "Sorry, the response took too long."
+    )
   end
 
   defp telegram_reply_prompt do

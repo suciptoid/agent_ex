@@ -101,37 +101,31 @@ defmodule App.Chat.Orchestrator do
     end
   end
 
-  # Returns extra opts for multi-agent rooms: system prompt roster + handover/ask_agent tools
+  # Returns extra opts for multi-agent rooms.
   defp multi_agent_opts(
          %ChatRoom{chat_room_agents: chat_room_agents} = chat_room,
          messages,
          callbacks
        ) do
     agents = Enum.map(chat_room_agents, & &1.agent)
+    current_agent_id = active_chat_room_agent_id(chat_room_agents)
 
     if length(agents) <= 1 do
       []
     else
-      agent_roster =
-        agents
-        |> Enum.map(fn a ->
-          desc =
-            if blank?(a.system_prompt),
-              do: "general assistant",
-              else: String.slice(a.system_prompt, 0, 120)
-
-          "- #{a.name} (id: #{a.id}): #{desc}"
-        end)
-        |> Enum.join("\n")
-
       extra_prompt = """
       ## Multi-Agent Room
-      You are the active agent. Other agents available in this room:
-      #{agent_roster}
+      You are the active agent in a multi-agent room.
+      Spawn a sub-agent only when the task depends on capabilities, tools, or instructions that you do not have yourself.
+      Before writing a prompt for a sub-agent, inspect the other agents with `subagent_lists`, compare their instructions and tools, and choose the one whose capabilities best match the task.
+      When you spawn a sub-agent, write the prompt so it maximizes that agent's own tool usage and specialized instructions instead of asking it to behave like a generic assistant.
+      Use `subagent_wait` only when you need the result in this turn; it can wait up to 60 seconds and the result will come back in the tool output.
+      If the delegated work may take longer than that or should continue asynchronously, spawn the sub-agent without waiting and let that child agent report back later through `subagent_report`.
 
-      You have two special tools available:
-      - `handover`: Transfer control to another agent, making them the active agent for future messages.
-      - `ask_agent`: Delegate a task to another agent and receive their response in this conversation. The delegated agent will post their reply as a message in the chat.
+      You have three special tools available:
+      - `subagent_lists`: Inspect the other assigned agents, including their instructions and available tools, before choosing one for a sub-task.
+      - `subagent_spawn`: Start another assigned agent in a child chat room for an independent sub-task. Provide the target agent id and a focused prompt.
+      - `subagent_wait`: Wait up to 60 seconds for a spawned sub-agent to finish and return its result in the tool output.
       """
 
       agent_map = Map.new(agents, fn a -> {to_string(a.id), a} end)
@@ -139,6 +133,8 @@ defmodule App.Chat.Orchestrator do
       alloy_context = %{
         chat_room: chat_room,
         agent_map: agent_map,
+        agents: agents,
+        current_agent_id: current_agent_id,
         callbacks: callbacks,
         messages_snapshot: messages,
         run_delegated_agent: &run_delegated_agent/6
@@ -147,11 +143,19 @@ defmodule App.Chat.Orchestrator do
       [
         extra_system_prompt: extra_prompt,
         extra_tools: [
-          App.Agents.AlloyTools.Handover,
-          App.Agents.AlloyTools.AskAgent
+          App.Agents.AlloyTools.SubagentLists,
+          App.Agents.AlloyTools.SubagentSpawn,
+          App.Agents.AlloyTools.SubagentWait
         ],
         alloy_context: alloy_context
       ]
+    end
+  end
+
+  defp active_chat_room_agent_id(chat_room_agents) when is_list(chat_room_agents) do
+    case Enum.find(chat_room_agents, & &1.is_active) || List.first(chat_room_agents) do
+      %ChatRoomAgent{agent_id: agent_id} -> agent_id
+      _other -> nil
     end
   end
 

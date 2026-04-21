@@ -19,6 +19,7 @@ defmodule App.Organizations.Organization do
     has_many :agents, App.Agents.Agent
     has_many :chat_rooms, App.Chat.ChatRoom
     has_many :gateways, App.Gateways.Gateway
+    has_many :secrets, App.Organizations.Secret
 
     many_to_many :users, App.Users.User,
       join_through: App.Organizations.Membership,

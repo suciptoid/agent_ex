@@ -936,6 +936,31 @@ defmodule AppWeb.ChatLiveTest do
           content: "Here's the output of df -h from the shell you requested."
         })
 
+      subagent_tool_call_message =
+        message_fixture(room, %{
+          role: "assistant",
+          agent_id: agent.id,
+          content: "I checked the other agents before delegating.",
+          status: :completed,
+          metadata: %{
+            "tool_calls" => [
+              %{
+                "id" => "subagent_list_1",
+                "name" => "subagent_lists",
+                "arguments" => %{}
+              }
+            ],
+            "tool_responses" => [
+              %{
+                "id" => "subagent_list_1",
+                "name" => "subagent_lists",
+                "content" => Jason.encode!(%{"agents" => [%{"name" => "Research Agent"}]}),
+                "status" => "ok"
+              }
+            ]
+          }
+        })
+
       {:ok, live_view, _html} = live(conn, ~p"/chat/#{room.id}")
 
       refute has_element?(live_view, "#message-#{internal_tool_call_message.id}")
@@ -950,11 +975,22 @@ defmodule AppWeb.ChatLiveTest do
                "shell"
              )
 
+      assert has_element?(live_view, "#message-tool-#{subagent_tool_call_message.id}-0")
+
+      assert has_element?(
+               live_view,
+               "#message-tool-#{subagent_tool_call_message.id}-0 details summary",
+               "subagent_lists"
+             )
+
       refute has_element?(live_view, "#message-#{visible_tool_message.id}")
       assert has_element?(live_view, "#message-#{final_message.id}")
     end
 
-    test "renders delegated agent streaming updates", %{conn: conn, user: user} do
+    test "renders subagent placeholder updates without hiding the pending placeholder", %{
+      conn: conn,
+      user: user
+    } do
       provider = provider_fixture(user)
       lead_agent = agent_fixture(user, %{provider: provider, name: "Lead Agent"})
       delegated_agent = agent_fixture(user, %{provider: provider, name: "Research Agent"})
@@ -974,14 +1010,18 @@ defmodule AppWeb.ChatLiveTest do
                  content: nil,
                  status: :pending,
                  agent_id: delegated_agent.id,
-                 metadata: %{"delegated" => true, "tool_name" => "ask_agent"}
+                 metadata: %{
+                   "delegated" => true,
+                   "subagent" => true,
+                   "tool_name" => "subagent_spawn"
+                 }
                })
 
       send(live_view.pid, {:agent_message_created, placeholder_message})
       _ = :sys.get_state(live_view.pid)
 
       assert has_element?(live_view, "#message-#{placeholder_message.id}")
-      refute has_element?(live_view, "#message-streaming-#{placeholder_message.id}")
+      assert has_element?(live_view, "#message-streaming-#{placeholder_message.id}")
 
       send(live_view.pid, {:agent_message_stream_chunk, placeholder_message.id, "Hello"})
       send(live_view.pid, {:agent_message_stream_chunk, placeholder_message.id, " world"})

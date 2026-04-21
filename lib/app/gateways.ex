@@ -36,6 +36,7 @@ defmodule App.Gateways do
   def create_gateway(%Scope{} = scope, attrs) do
     %Gateway{organization_id: Scope.organization_id!(scope)}
     |> Gateway.changeset(attrs)
+    |> validate_gateway_agents(scope)
     |> Repo.insert()
   end
 
@@ -44,6 +45,7 @@ defmodule App.Gateways do
 
     gateway
     |> Gateway.changeset(attrs)
+    |> validate_gateway_agents(scope)
     |> Repo.update()
   end
 
@@ -236,37 +238,84 @@ defmodule App.Gateways do
 
   defp gateway_chat_room_multi(multi, %Gateway{} = gateway, external_username, external_chat_id) do
     title = channel_title(external_username, external_chat_id)
-    agent_id = gateway_agent_id(gateway.config || %{})
+    agent_ids = gateway_agent_ids(gateway.config || %{})
+    default_agent_id = gateway_default_agent_id(gateway.config || %{})
 
     multi
     |> Multi.insert(:chat_room, fn _changes ->
       %ChatRoom{organization_id: gateway.organization_id}
       |> ChatRoom.changeset(%{title: title})
     end)
-    |> Multi.run(:chat_room_agent, fn repo, %{chat_room: chat_room} ->
-      maybe_insert_gateway_chat_room_agent(repo, chat_room, agent_id)
+    |> Multi.run(:chat_room_agents, fn repo, %{chat_room: chat_room} ->
+      insert_gateway_chat_room_agents(
+        repo,
+        chat_room,
+        gateway.organization_id,
+        agent_ids,
+        default_agent_id
+      )
     end)
   end
 
-  defp maybe_insert_gateway_chat_room_agent(_repo, _chat_room, nil), do: {:ok, nil}
+  defp insert_gateway_chat_room_agents(
+         _repo,
+         _chat_room,
+         _organization_id,
+         [],
+         _default_agent_id
+       ),
+       do: {:ok, []}
 
-  defp maybe_insert_gateway_chat_room_agent(repo, chat_room, agent_id) do
-    case repo.get(Agent, agent_id) do
-      nil ->
-        {:ok, nil}
+  defp insert_gateway_chat_room_agents(
+         repo,
+         chat_room,
+         organization_id,
+         agent_ids,
+         default_agent_id
+       ) do
+    agents =
+      from(agent in Agent,
+        where: agent.organization_id == ^organization_id and agent.id in ^agent_ids
+      )
+      |> repo.all()
+      |> Enum.sort_by(fn agent -> Enum.find_index(agent_ids, &(&1 == agent.id)) end)
 
-      _agent ->
-        %App.Chat.ChatRoomAgent{}
-        |> App.Chat.ChatRoomAgent.changeset(%{
-          chat_room_id: chat_room.id,
-          agent_id: agent_id,
-          is_active: true
-        })
-        |> repo.insert()
+    active_agent_id =
+      cond do
+        default_agent_id in Enum.map(agents, & &1.id) -> default_agent_id
+        agents == [] -> nil
+        true -> List.first(agents).id
+      end
+
+    Enum.reduce_while(agents, {:ok, []}, fn agent, {:ok, chat_room_agents} ->
+      case %App.Chat.ChatRoomAgent{}
+           |> App.Chat.ChatRoomAgent.changeset(%{
+             chat_room_id: chat_room.id,
+             agent_id: agent.id,
+             is_active: agent.id == active_agent_id
+           })
+           |> repo.insert() do
+        {:ok, chat_room_agent} ->
+          {:cont, {:ok, [chat_room_agent | chat_room_agents]}}
+
+        {:error, changeset} ->
+          {:halt, {:error, changeset}}
+      end
+    end)
+    |> case do
+      {:ok, chat_room_agents} -> {:ok, Enum.reverse(chat_room_agents)}
+      {:error, _reason} = error -> error
     end
   end
 
-  defp gateway_agent_id(config), do: config_value(config, :agent_id, nil)
+  defp gateway_agent_ids(config) do
+    config_value(config, :agent_ids, [])
+    |> List.wrap()
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.uniq()
+  end
+
+  defp gateway_default_agent_id(config), do: config_value(config, :agent_id, nil)
 
   defp channel_title(nil, external_chat_id), do: "Chat #{external_chat_id}"
   defp channel_title("", external_chat_id), do: "Chat #{external_chat_id}"
@@ -311,6 +360,38 @@ defmodule App.Gateways do
   defp ensure_organization_owns!(%Scope{} = scope, %Gateway{organization_id: org_id}) do
     if org_id != Scope.organization_id!(scope) do
       raise Ecto.NoResultsError, query: Gateway
+    end
+  end
+
+  defp validate_gateway_agents(changeset, %Scope{} = scope) do
+    config = Ecto.Changeset.get_field(changeset, :config)
+    agent_ids = gateway_agent_ids(config || %{})
+    default_agent_id = gateway_default_agent_id(config || %{})
+
+    valid_agent_ids =
+      from(agent in Agent,
+        where: agent.organization_id == ^Scope.organization_id!(scope) and agent.id in ^agent_ids,
+        select: agent.id
+      )
+      |> Repo.all()
+
+    cond do
+      length(valid_agent_ids) != length(agent_ids) ->
+        Ecto.Changeset.add_error(
+          changeset,
+          :config,
+          "assigned agents must belong to the current organization"
+        )
+
+      is_binary(default_agent_id) and default_agent_id not in valid_agent_ids ->
+        Ecto.Changeset.add_error(
+          changeset,
+          :config,
+          "default agent must be one of the assigned agents"
+        )
+
+      true ->
+        changeset
     end
   end
 end

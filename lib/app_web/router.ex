@@ -80,6 +80,7 @@ defmodule AppWeb.Router do
     live_session :require_active_organization,
       on_mount: [{AppWeb.UserAuth, :require_authenticated}] do
       live "/dashboard", DashboardLive, :index
+      live "/organizations/settings", OrganizationLive.Settings, :edit
       live "/providers", ProviderLive.Index, :index
       live "/providers/new", ProviderLive.Index, :new
       live "/providers/:id/edit", ProviderLive.Index, :edit

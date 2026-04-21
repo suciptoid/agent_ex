@@ -11,6 +11,7 @@ defmodule AppWeb.ProviderLiveTest do
     assert has_element?(live_view, "#provider-form")
     assert has_element?(live_view, "#provider-form [role=\"option\"][data-value=\"openai\"]")
     assert has_element?(live_view, "#provider-form [role=\"option\"][data-value=\"anthropic\"]")
+    assert has_element?(live_view, "#provider-form [role=\"option\"][data-value=\"gemini\"]")
 
     assert has_element?(
              live_view,

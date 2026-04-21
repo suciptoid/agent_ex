@@ -22,6 +22,9 @@ defmodule App.Providers.AlloyConfig do
       "anthropic" ->
         {Alloy.Provider.Anthropic, base_opts ++ maybe_api_url(provider)}
 
+      "gemini" ->
+        {Alloy.Provider.Gemini, base_opts ++ maybe_api_url(provider)}
+
       "openai" ->
         {Alloy.Provider.OpenAI, base_opts ++ maybe_api_url(provider)}
 

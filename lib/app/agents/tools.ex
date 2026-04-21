@@ -100,7 +100,7 @@ defmodule App.Agents.Tools do
     |> then(fn normalized ->
       do_web_fetch(%{
         url: Map.get(normalized, "url"),
-        headers: Map.get(normalized, "headers", %{})
+        headers: Map.get(normalized, "headers", [])
       })
     end)
   end
@@ -250,8 +250,26 @@ defmodule App.Agents.Tools do
     Enum.map(headers, fn {key, value} -> {key, to_string(value)} end)
   end
 
+  defp headers_list(headers) when is_list(headers) do
+    Enum.flat_map(headers, fn
+      %{"key" => key, "value" => value} -> [{key, to_string(value)}]
+      %{key: key, value: value} -> [{key, to_string(value)}]
+      {key, value} -> [{to_string(key), to_string(value)}]
+      _other -> []
+    end)
+  end
+
   defp normalize_headers(headers) when is_map(headers) do
     Map.new(headers, fn {key, value} -> {to_string(key), to_string(value)} end)
+  end
+
+  defp normalize_headers(headers) when is_list(headers) do
+    Enum.reduce(headers, %{}, fn
+      %{"key" => key, "value" => value}, acc -> Map.put(acc, to_string(key), to_string(value))
+      %{key: key, value: value}, acc -> Map.put(acc, to_string(key), to_string(value))
+      {key, value}, acc -> Map.put(acc, to_string(key), to_string(value))
+      _other, acc -> acc
+    end)
   end
 
   defp normalize_headers(_headers), do: %{}

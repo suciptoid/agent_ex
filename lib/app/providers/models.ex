@@ -38,6 +38,14 @@ defmodule App.Providers.Models do
     {"claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet v2"}
   ]
 
+  @known_gemini_models [
+    {"gemini-2.5-flash", "Gemini 2.5 Flash"},
+    {"gemini-2.5-pro", "Gemini 2.5 Pro"},
+    {"gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite"},
+    {"gemini-3-flash-preview", "Gemini 3 Flash Preview"},
+    {"gemini-3-pro-preview", "Gemini 3 Pro Preview"}
+  ]
+
   @doc """
   Returns a list of `{model_id, display_label}` tuples for the given provider.
 
@@ -57,6 +65,7 @@ defmodule App.Providers.Models do
     case Provider.alloy_provider_type(provider) do
       "openai" -> @known_openai_models
       "anthropic" -> @known_anthropic_models
+      "gemini" -> @known_gemini_models
       _other -> []
     end
   end
@@ -64,6 +73,7 @@ defmodule App.Providers.Models do
   defp fetch_models_from_api(%Provider{} = provider) do
     case Provider.alloy_provider_type(provider) do
       "openai" -> fetch_openai_models(provider)
+      "gemini" -> fetch_gemini_models(provider)
       "openai_compat" -> fetch_openai_compat_models(provider)
       _other -> {:ok, []}
     end
@@ -110,9 +120,43 @@ defmodule App.Providers.Models do
     end
   end
 
+  defp fetch_gemini_models(%Provider{api_key: api_key} = provider) do
+    base_url = provider.base_url || "https://generativelanguage.googleapis.com"
+    url = "#{String.trim_trailing(base_url, "/")}/v1beta/models"
+
+    case Req.get(url, params: [key: api_key], receive_timeout: 10_000) do
+      {:ok, %{status: 200, body: %{"models" => models}}} when is_list(models) ->
+        models =
+          models
+          |> Enum.filter(fn model ->
+            "generateContent" in List.wrap(Map.get(model, "supportedGenerationMethods", []))
+          end)
+          |> Enum.map(fn model ->
+            name = Map.get(model, "name", "")
+            model_id = String.replace_prefix(name, "models/", "")
+            label = Map.get(model, "displayName") || display_label(model_id)
+            {model_id, label}
+          end)
+          |> Enum.reject(fn {model_id, _label} -> model_id == "" end)
+
+        {:ok, models}
+
+      _ ->
+        {:ok, []}
+    end
+  end
+
   defp is_chat_model?(%{"id" => id}) do
     not String.contains?(id, ["embedding", "whisper", "tts", "dall-e", "davinci", "babbage"])
   end
 
   defp is_chat_model?(_), do: false
+
+  defp display_label(model_id) do
+    model_id
+    |> String.replace_prefix("gemini-", "Gemini ")
+    |> String.replace("-", " ")
+    |> String.split()
+    |> Enum.map_join(" ", &String.capitalize/1)
+  end
 end

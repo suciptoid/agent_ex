@@ -4,3 +4,5 @@
 - Keep `provider` as the single source of truth for provider classification.
 - Update the existing migration file to stop adding/backfilling `provider_type`.
 - Run the relevant test subset, then `mix precommit`.
+- Completed with Gemini support added as a provider alias and backend target.
+- Completed with Gemini-compatible `web_fetch` tool schema.

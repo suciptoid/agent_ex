@@ -17,6 +17,8 @@ defmodule App.Providers.Provider do
 
   def alloy_provider_type(%__MODULE__{provider: "anthropic"}), do: "anthropic"
   def alloy_provider_type(%__MODULE__{provider: "openai"}), do: "openai"
+  def alloy_provider_type(%__MODULE__{provider: "gemini"}), do: "gemini"
+  def alloy_provider_type(%__MODULE__{provider: "google"}), do: "gemini"
   def alloy_provider_type(%__MODULE__{}), do: "openai_compat"
 
   def changeset(provider, attrs) do

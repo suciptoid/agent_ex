@@ -10,7 +10,7 @@ defmodule App.Providers do
   alias App.Users.Scope
   alias App.Users.User
 
-  @known_provider_options ~w(anthropic openai openai_compat)
+  @known_provider_options ~w(anthropic gemini openai openai_compat)
 
   def list_providers(%Scope{} = scope) do
     Repo.all(

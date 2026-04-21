@@ -45,12 +45,24 @@ defmodule App.ProvidersTest do
       assert {:ok, provider} = Providers.create_provider(scope, attrs)
       assert provider.provider == "custom_llm"
     end
+
+    test "accepts gemini as a supported provider", %{scope: scope} do
+      attrs = %{
+        "name" => "Gemini",
+        "provider" => "gemini",
+        "api_key" => "key"
+      }
+
+      assert {:ok, provider} = Providers.create_provider(scope, attrs)
+      assert provider.provider == "gemini"
+    end
   end
 
   describe "provider_options/0" do
     test "returns provider type options" do
       options = Providers.provider_options()
       assert {"anthropic", "Anthropic"} in options
+      assert {"gemini", "Gemini"} in options
       assert {"openai", "Openai"} in options
       assert {"openai_compat", "Openai Compat"} in options
     end

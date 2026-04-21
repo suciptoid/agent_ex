@@ -17,9 +17,16 @@ defmodule App.Agents.AlloyTools.WebFetch do
       properties: %{
         url: %{type: "string", description: "The URL to fetch"},
         headers: %{
-          type: "object",
+          type: "array",
           description: "Optional HTTP headers such as Authorization",
-          additionalProperties: %{type: "string"}
+          items: %{
+            type: "object",
+            properties: %{
+              key: %{type: "string", description: "Header name"},
+              value: %{type: "string", description: "Header value"}
+            },
+            required: ["key", "value"]
+          }
         }
       },
       required: ["url"]

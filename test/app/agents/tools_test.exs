@@ -89,6 +89,19 @@ defmodule App.Agents.ToolsTest do
     assert {:ok, "authorized"} =
              Tools.do_web_fetch(%{
                url: "https://example.test",
+               headers: [%{"key" => "authorization", "value" => "Bearer 123"}]
+             })
+  end
+
+  test "do_web_fetch/1 still accepts map headers for backward compatibility" do
+    Req.Test.stub(__MODULE__, fn conn ->
+      assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer 123"]
+      Plug.Conn.send_resp(conn, 200, "authorized")
+    end)
+
+    assert {:ok, "authorized"} =
+             Tools.do_web_fetch(%{
+               url: "https://example.test",
                headers: %{"authorization" => "Bearer 123"}
              })
   end

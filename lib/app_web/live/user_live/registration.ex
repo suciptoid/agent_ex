@@ -80,6 +80,13 @@ defmodule AppWeb.UserLive.Registration do
                 class="space-y-3"
               >
                 <.input
+                  field={@form[:name]}
+                  type="text"
+                  label="Name"
+                  autocomplete="name"
+                  placeholder="Your name (optional)"
+                />
+                <.input
                   field={@form[:email]}
                   type="email"
                   label="Email"

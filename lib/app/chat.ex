@@ -401,7 +401,7 @@ defmodule App.Chat do
         where: tool_message.role == "tool",
         order_by: [asc: tool_message.position]
 
-    [:agent, tool_messages: tool_message_query]
+    [:agent, :user, tool_messages: tool_message_query]
   end
 
   defp fetch_agents(organization_id, agent_ids, %Ecto.Changeset{} = changeset) do

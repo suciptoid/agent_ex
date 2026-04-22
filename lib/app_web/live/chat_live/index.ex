@@ -48,7 +48,11 @@ defmodule AppWeb.ChatLive.Index do
                "active_agent_id" => active_agent_id
              }) do
           {:ok, chat_room} ->
-            case Chat.create_message(chat_room, %{role: "user", content: content}) do
+            case Chat.create_message(chat_room, %{
+                   role: "user",
+                   content: content,
+                   user_id: socket.assigns.current_scope.user.id
+                 }) do
               {:ok, user_message} ->
                 Chat.broadcast_chat_room(
                   chat_room.id,

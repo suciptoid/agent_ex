@@ -3,6 +3,7 @@ defmodule AppWeb.ChatLive.Show do
 
   alias App.Chat
   alias App.Chat.Message
+  alias App.Users.User
 
   @hidden_tool_names [
     "update_chatroom_title"
@@ -60,7 +61,11 @@ defmodule AppWeb.ChatLive.Show do
     else
       chat_room = socket.assigns.chat_room
 
-      case Chat.create_message(chat_room, %{role: "user", content: content}) do
+      case Chat.create_message(chat_room, %{
+             role: "user",
+             content: content,
+             user_id: socket.assigns.current_scope.user.id
+           }) do
         {:ok, user_message} ->
           Chat.broadcast_chat_room_from(
             chat_room.id,
@@ -408,6 +413,12 @@ defmodule AppWeb.ChatLive.Show do
         true
     end
   end
+
+  def speaker_name(%{role: "user", user: %User{name: name}}) when is_binary(name) and name != "",
+    do: name
+
+  def speaker_name(%{role: "user", user: %User{email: email}})
+      when is_binary(email) and email != "", do: email
 
   def speaker_name(%{role: "user"}), do: "You"
   def speaker_name(%{role: "tool", name: name}) when is_binary(name) and name != "", do: name

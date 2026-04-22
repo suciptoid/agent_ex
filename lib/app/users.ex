@@ -96,6 +96,16 @@ defmodule App.Users do
 
   ## Settings
 
+  def change_user_name(user, attrs \\ %{}) do
+    User.name_changeset(user, attrs)
+  end
+
+  def update_user_name(user, attrs) do
+    user
+    |> User.name_changeset(attrs)
+    |> Repo.update()
+  end
+
   @doc """
   Returns an `%Ecto.Changeset{}` for changing the user email.
 
@@ -180,12 +190,16 @@ defmodule App.Users do
   @doc """
   Finds or creates a user for a verified Google account.
   """
-  def get_or_register_user_by_google(%{
-        google_id: google_id,
-        email: email,
-        email_verified?: email_verified?
-      })
+  def get_or_register_user_by_google(
+        %{
+          google_id: google_id,
+          email: email,
+          email_verified?: email_verified?
+        } = attrs
+      )
       when is_binary(google_id) do
+    name = Map.get(attrs, :name)
+
     cond do
       not email_verified? ->
         {:error, :email_not_verified}
@@ -194,13 +208,13 @@ defmodule App.Users do
         {:error, :email_missing}
 
       user = get_user_by_google_id(google_id) ->
-        maybe_confirm_google_user(user, google_id)
+        maybe_confirm_google_user(user, google_id, name)
 
       user = get_user_by_email(email) ->
-        link_google_user(user, google_id, email)
+        link_google_user(user, google_id, email, name)
 
       true ->
-        create_google_user(google_id, email)
+        create_google_user(google_id, email, name)
     end
   end
 
@@ -298,43 +312,53 @@ defmodule App.Users do
     end)
   end
 
-  defp create_google_user(google_id, email) do
+  defp create_google_user(google_id, email, name) do
     %User{}
     |> User.google_changeset(%{
       email: email,
       google_id: google_id,
+      name: name,
       confirmed_at: DateTime.utc_now(:second)
     })
     |> Repo.insert()
   end
 
-  defp link_google_user(%User{google_id: nil} = user, google_id, email) do
-    user
-    |> User.google_changeset(%{
+  defp link_google_user(%User{google_id: nil} = user, google_id, email, name) do
+    attrs = %{
       email: email,
       google_id: google_id,
       confirmed_at: user.confirmed_at || DateTime.utc_now(:second)
-    })
+    }
+
+    attrs = if name && user.name in [nil, ""], do: Map.put(attrs, :name, name), else: attrs
+
+    user
+    |> User.google_changeset(attrs)
     |> Repo.update()
   end
 
-  defp link_google_user(%User{google_id: google_id} = user, google_id, _email) do
-    maybe_confirm_google_user(user, google_id)
+  defp link_google_user(%User{google_id: google_id} = user, google_id, _email, name) do
+    maybe_confirm_google_user(user, google_id, name)
   end
 
-  defp link_google_user(%User{}, _google_id, _email), do: {:error, :google_account_conflict}
+  defp link_google_user(%User{}, _google_id, _email, _name),
+    do: {:error, :google_account_conflict}
 
-  defp maybe_confirm_google_user(%User{confirmed_at: nil} = user, google_id) do
-    user
-    |> User.google_changeset(%{
+  defp maybe_confirm_google_user(%User{confirmed_at: nil} = user, google_id, name) do
+    attrs = %{
       email: user.email,
       google_id: google_id,
       confirmed_at: DateTime.utc_now(:second)
-    })
+    }
+
+    attrs = if name && user.name in [nil, ""], do: Map.put(attrs, :name, name), else: attrs
+
+    user
+    |> User.google_changeset(attrs)
     |> Repo.update()
   end
 
-  defp maybe_confirm_google_user(%User{} = user, _google_id), do: {:ok, user}
+  defp maybe_confirm_google_user(%User{} = user, _google_id, _name), do: {:ok, user}
 
   defp valid_google_email?(email) when is_binary(email), do: String.trim(email) != ""
   defp valid_google_email?(_email), do: false

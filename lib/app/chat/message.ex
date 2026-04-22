@@ -20,6 +20,7 @@ defmodule App.Chat.Message do
     field :metadata, :map, default: %{}
 
     belongs_to :chat_room, App.Chat.ChatRoom
+    belongs_to :user, App.Users.User
     belongs_to :agent, App.Agents.Agent
     belongs_to :parent_message, __MODULE__
     has_many :tool_messages, __MODULE__, foreign_key: :parent_message_id
@@ -36,6 +37,7 @@ defmodule App.Chat.Message do
       :name,
       :tool_call_id,
       :status,
+      :user_id,
       :agent_id,
       :metadata,
       :parent_message_id
@@ -49,6 +51,7 @@ defmodule App.Chat.Message do
     |> validate_tool_message_fields()
     |> validate_content_required()
     |> foreign_key_constraint(:chat_room_id)
+    |> foreign_key_constraint(:user_id)
     |> foreign_key_constraint(:agent_id)
     |> foreign_key_constraint(:parent_message_id)
     |> unique_constraint(:position, name: :chat_messages_chat_room_id_position_index)

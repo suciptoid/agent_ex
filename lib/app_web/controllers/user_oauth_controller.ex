@@ -43,9 +43,19 @@ defmodule AppWeb.UserOAuthController do
     %{
       google_id: auth.uid,
       email: auth.info.email,
+      name: google_user_name(auth.info),
       email_verified?: google_user["email_verified"] == true
     }
   end
+
+  defp google_user_name(%{name: name}) when is_binary(name) and name != "", do: name
+
+  defp google_user_name(%{first_name: first, last_name: last})
+       when is_binary(first) and is_binary(last), do: "#{first} #{last}"
+
+  defp google_user_name(%{first_name: first}) when is_binary(first) and first != "", do: first
+  defp google_user_name(%{nickname: nick}) when is_binary(nick) and nick != "", do: nick
+  defp google_user_name(_), do: nil
 
   defp oauth_error(conn, message) do
     conn

@@ -6,6 +6,7 @@ defmodule App.Users.User do
   @foreign_key_type :binary_id
   schema "users" do
     field :email, :string
+    field :name, :string
     field :google_id, :string
     field :password, :string, virtual: true, redact: true
     field :hashed_password, :string, redact: true
@@ -39,11 +40,20 @@ defmodule App.Users.User do
   end
 
   @doc """
+  A user changeset for updating the name.
+  """
+  def name_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:name])
+    |> validate_length(:name, max: 160)
+  end
+
+  @doc """
   A user changeset for password-based registration.
   """
   def registration_changeset(user, attrs, opts \\ []) do
     user
-    |> cast(attrs, [:email])
+    |> cast(attrs, [:email, :name])
     |> validate_email(Keyword.put_new(opts, :validate_changed, false))
     |> cast(attrs, [:password])
     |> validate_confirmation(:password, message: "does not match password")
@@ -55,7 +65,7 @@ defmodule App.Users.User do
   """
   def google_changeset(user, attrs, opts \\ []) do
     user
-    |> cast(attrs, [:email, :google_id, :confirmed_at])
+    |> cast(attrs, [:email, :name, :google_id, :confirmed_at])
     |> validate_email(Keyword.put_new(opts, :validate_changed, false))
     |> validate_required([:google_id])
     |> validate_length(:google_id, max: 255)

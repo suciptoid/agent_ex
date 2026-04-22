@@ -24,6 +24,33 @@ defmodule AppWeb.UserLive.Settings do
             </p>
           </div>
 
+          <%!-- Name Settings Card --%>
+          <.card>
+            <.card_header>
+              <.card_title>Name</.card_title>
+              <.card_description>Update your display name</.card_description>
+            </.card_header>
+            <.card_content>
+              <.form
+                for={@name_form}
+                id="name_form"
+                phx-submit="update_name"
+                phx-change="validate_name"
+              >
+                <.input
+                  field={@name_form[:name]}
+                  type="text"
+                  label="Name"
+                  autocomplete="name"
+                  placeholder="Your display name"
+                />
+                <div class="mt-4">
+                  <.button phx-disable-with="Saving...">Save Name</.button>
+                </div>
+              </.form>
+            </.card_content>
+          </.card>
+
           <%!-- Email Settings Card --%>
           <.card>
             <.card_header>
@@ -122,18 +149,42 @@ defmodule AppWeb.UserLive.Settings do
     user = socket.assigns.current_scope.user
     email_changeset = Users.change_user_email(user, %{}, validate_unique: false)
     password_changeset = Users.change_user_password(user, %{}, hash_password: false)
+    name_changeset = Users.change_user_name(user, %{name: user.name})
 
     socket =
       socket
       |> assign(:current_email, user.email)
       |> assign(:email_form, to_form(email_changeset))
       |> assign(:password_form, to_form(password_changeset))
+      |> assign(:name_form, to_form(name_changeset))
       |> assign(:trigger_submit, false)
 
     {:ok, socket}
   end
 
   @impl true
+  def handle_event("validate_name", %{"user" => user_params}, socket) do
+    name_form =
+      socket.assigns.current_scope.user
+      |> Users.change_user_name(user_params)
+      |> Map.put(:action, :validate)
+      |> to_form()
+
+    {:noreply, assign(socket, name_form: name_form)}
+  end
+
+  def handle_event("update_name", %{"user" => user_params}, socket) do
+    user = socket.assigns.current_scope.user
+
+    case Users.update_user_name(user, user_params) do
+      {:ok, _user} ->
+        {:noreply, put_flash(socket, :info, "Name updated successfully.")}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, name_form: to_form(changeset, action: :insert))}
+    end
+  end
+
   def handle_event("validate_email", params, socket) do
     %{"user" => user_params} = params
 

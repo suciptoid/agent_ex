@@ -20,7 +20,11 @@ defmodule App.Chat.Orchestrator do
       )
 
       with {:ok, _user_message} <-
-             Chat.create_message(chat_room, %{role: "user", content: content}),
+             Chat.create_message(chat_room, %{
+               role: "user",
+               content: content,
+               user_id: scope.user.id
+             }),
            messages <- Chat.list_messages(chat_room),
            {:ok, agent} <- active_agent(chat_room) do
         Logger.debug("[Orchestrator] Running agent #{agent.name} (#{agent.id})")

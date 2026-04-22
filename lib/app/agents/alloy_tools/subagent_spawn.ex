@@ -26,6 +26,10 @@ defmodule App.Agents.AlloyTools.SubagentSpawn do
         prompt: %{
           type: "string",
           description: "The exact task for the sub-agent to complete"
+        },
+        title: %{
+          type: "string",
+          description: "Optional title for the sub-agent's child chat room"
         }
       },
       required: ["agent_id", "prompt"]
@@ -38,7 +42,9 @@ defmodule App.Agents.AlloyTools.SubagentSpawn do
          {:ok, prompt} <- validate_prompt(Map.get(input, "prompt")),
          {:ok, target_agent} <- fetch_target_agent(input, context),
          {:ok, child_room} <-
-           Chat.create_subagent_chat_room(parent_room, target_agent, %{title: nil}),
+           Chat.create_subagent_chat_room(parent_room, target_agent, %{
+             title: Map.get(input, "title")
+           }),
          {:ok, user_message} <- Chat.create_message(child_room, %{role: "user", content: prompt}),
          {:ok, child_placeholder} <-
            Chat.create_message(child_room, %{

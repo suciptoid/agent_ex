@@ -468,10 +468,11 @@ defmodule App.ChatTest do
   end
 
   describe "stream_message/3" do
-    test "injects only subagent tools and omits roster details from the extra prompt", %{
-      user: user,
-      provider: provider
-    } do
+    test "injects subagent tools and agent roster with id, name, and tools in the extra prompt",
+         %{
+           user: user,
+           provider: provider
+         } do
       previous_stub_config = Application.get_env(:app, App.TestSupport.AgentRunnerStub)
 
       Application.put_env(:app, App.TestSupport.AgentRunnerStub, notify_pid: self())
@@ -517,9 +518,9 @@ defmodule App.ChatTest do
       assert extra_prompt =~ "maximizes that agent's own tool usage"
       assert extra_prompt =~ "wait up to 60 seconds"
       assert extra_prompt =~ "report back later through `subagent_report`"
-      refute extra_prompt =~ "Other agents available in this room"
-      refute extra_prompt =~ research_agent.id
-      refute extra_prompt =~ research_agent.name
+      assert extra_prompt =~ research_agent.id
+      assert extra_prompt =~ research_agent.name
+      assert extra_prompt =~ "Available Agents"
     end
 
     test "subagent_lists returns the other agents with instructions and tool details", %{

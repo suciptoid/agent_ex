@@ -125,9 +125,12 @@ defmodule App.Chat.Orchestrator do
       If the delegated work may take longer than that or should continue asynchronously, spawn the sub-agent without waiting and let that child agent report back later through `subagent_report`.
 
       You have three special tools available:
-      - `subagent_lists`: Inspect the other assigned agents, including their instructions and available tools, before choosing one for a sub-task.
-      - `subagent_spawn`: Start another assigned agent in a child chat room for an independent sub-task. Provide the target agent id and a focused prompt.
-      - `subagent_wait`: Wait up to 60 seconds for a spawned sub-agent to finish and return its result in the tool output.
+      - `subagent_lists`
+      - `subagent_spawn`
+      - `subagent_wait`
+
+      ## Available Agents
+      #{format_agent_list(agents)}
       """
 
       agent_map = Map.new(agents, fn a -> {to_string(a.id), a} end)
@@ -152,6 +155,20 @@ defmodule App.Chat.Orchestrator do
         alloy_context: alloy_context
       ]
     end
+  end
+
+  defp format_agent_list(agents) do
+    agents
+    |> Enum.map(fn a ->
+      tools_part =
+        case a.tools do
+          [] -> ""
+          tools -> " — tools: #{Enum.join(tools, ", ")}"
+        end
+
+      "- #{a.name} (id: #{a.id})#{tools_part}"
+    end)
+    |> Enum.join("\n")
   end
 
   defp active_chat_room_agent_id(chat_room_agents) when is_list(chat_room_agents) do

@@ -555,22 +555,32 @@ defmodule App.Agents.Runner do
 
   defp extract_thinking(%Alloy.Result{messages: messages}) do
     messages
-    |> Enum.flat_map(fn msg ->
-      case msg.content do
-        blocks when is_list(blocks) ->
-          Enum.flat_map(blocks, fn
-            %{type: "thinking", thinking: thinking} -> [thinking]
-            %{type: "thinking", text: text} -> [text]
-            %{"type" => "thinking", "thinking" => thinking} -> [thinking]
-            %{"type" => "thinking", "text" => text} -> [text]
-            _ -> []
-          end)
-
-        _ ->
-          []
-      end
+    |> Enum.reverse()
+    |> Enum.find(fn msg ->
+      role = Map.get(msg, :role) || Map.get(msg, "role")
+      role == :assistant or role == "assistant"
     end)
-    |> Enum.join("")
+    |> case do
+      nil ->
+        ""
+
+      msg ->
+        case msg.content do
+          blocks when is_list(blocks) ->
+            blocks
+            |> Enum.flat_map(fn
+              %{type: "thinking", thinking: thinking} -> [thinking]
+              %{type: "thinking", text: text} -> [text]
+              %{"type" => "thinking", "thinking" => thinking} -> [thinking]
+              %{"type" => "thinking", "text" => text} -> [text]
+              _ -> []
+            end)
+            |> Enum.join("")
+
+          _ ->
+            ""
+        end
+    end
   end
 
   defp extract_tool_responses(%Alloy.Result{messages: messages, tool_calls: tool_calls})

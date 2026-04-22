@@ -14,6 +14,9 @@ defmodule App.Application do
       {Phoenix.PubSub, name: App.PubSub},
       {Registry, keys: :unique, name: App.Chat.StreamRegistry},
       {DynamicSupervisor, name: App.Chat.StreamSupervisor, strategy: :one_for_one},
+      {Registry, keys: :unique, name: App.Gateways.Telegram.PollerRegistry},
+      {DynamicSupervisor, name: App.Gateways.Telegram.PollerSupervisor, strategy: :one_for_one},
+      App.Gateways.Telegram.Runtime,
       App.Vault,
       # Start a worker by calling: App.Worker.start_link(arg)
       # {App.Worker, []},

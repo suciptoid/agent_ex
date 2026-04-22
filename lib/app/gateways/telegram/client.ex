@@ -56,6 +56,10 @@ defmodule App.Gateways.Telegram.Client do
 
   def get_me(client), do: request(client, "getMe")
 
+  def get_updates(client, params \\ %{}) do
+    request(client, "getUpdates", params)
+  end
+
   def send_message(client, chat_id, text, extra \\ %{}) do
     params = Map.merge(%{chat_id: chat_id, text: text}, extra)
     request(client, "sendMessage", params)

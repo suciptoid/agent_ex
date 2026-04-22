@@ -21,6 +21,62 @@
         class="relative flex min-h-0 flex-1 flex-col"
         style="--chat-composer-offset: var(--chat-room-layout-composer-offset, 12rem);"
       >
+        <%= if @pending_channel do %>
+          <div class="pointer-events-none absolute inset-x-0 top-3 z-40 px-4 sm:px-5 lg:px-6">
+            <div class="mx-auto flex w-full max-w-4xl justify-center">
+              <div class="pointer-events-auto flex w-full max-w-3xl flex-col gap-3 rounded-2xl border border-amber-300/70 bg-amber-50/95 px-4 py-3 shadow-lg shadow-amber-900/10 backdrop-blur dark:border-amber-800/80 dark:bg-amber-950/90 sm:flex-row sm:items-center sm:justify-between">
+                <div class="flex min-w-0 items-start gap-3 text-sm text-amber-900 dark:text-amber-200">
+                  <span class="mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-300">
+                    <.icon name="hero-exclamation-triangle" class="size-4" />
+                  </span>
+                  <div class="min-w-0 space-y-1">
+                    <p class="font-semibold tracking-tight">Pending approval</p>
+                    <p class="leading-5 text-amber-800/90 dark:text-amber-200/85">
+                      External user
+                      <strong>
+                        {@pending_channel.external_username || @pending_channel.external_user_id}
+                      </strong>
+                      is waiting for an organization member mapping before replies can continue.
+                    </p>
+                  </div>
+                </div>
+
+                <form
+                  id="approve-channel-form"
+                  phx-submit="approve-channel"
+                  class="flex flex-col gap-2 sm:min-w-[21rem] sm:flex-row"
+                >
+                  <select
+                    id="approve-channel-user-select"
+                    name="user_id"
+                    class="h-10 min-w-0 flex-1 rounded-xl border border-amber-300/80 bg-background/95 px-3 text-sm shadow-sm outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-300/60 dark:border-amber-800 dark:bg-background"
+                  >
+                    <option value="">Map to user...</option>
+                    <%= for user <- @organization_users do %>
+                      <option value={user.id}>{user.name || user.email || "Unnamed"}</option>
+                    <% end %>
+                  </select>
+                  <div class="flex gap-2">
+                    <.button id="approve-channel-button" type="submit" class="flex-1 sm:flex-none">
+                      Approve
+                    </.button>
+                    <.button
+                      id="reject-channel-button"
+                      type="button"
+                      variant="destructive"
+                      phx-click="reject-channel"
+                      data-confirm="Reject this channel? Messages will be blocked."
+                      class="flex-1 sm:flex-none"
+                    >
+                      Reject
+                    </.button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        <% end %>
+
         <button
           id="chat-agent-sidebar-toggle"
           type="button"
@@ -40,7 +96,10 @@
               phx-update="stream"
               phx-hook=".ChatMessages"
               data-messages-revision={@messages_revision}
-              class="flex h-full min-h-full w-full flex-1 flex-col overflow-y-auto overscroll-contain pb-[var(--chat-composer-offset)]"
+              class={[
+                "flex h-full min-h-full w-full flex-1 flex-col overflow-y-auto overscroll-contain pb-[var(--chat-composer-offset)]",
+                @pending_channel && "pt-28 sm:pt-24"
+              ]}
             >
               <div
                 id="chat-messages-empty-state"

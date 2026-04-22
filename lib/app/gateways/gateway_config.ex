@@ -4,6 +4,7 @@ defmodule App.Gateways.Gateway.Config do
   import Ecto.Changeset
 
   @primary_key false
+  @update_modes [:webhook, :longpoll]
 
   embedded_schema do
     field :agent_id, :binary_id
@@ -12,6 +13,7 @@ defmodule App.Gateways.Gateway.Config do
     field :allowed_user_ids, {:array, :string}, default: []
     field :welcome_message, :string
     field :allowed_updates, {:array, :string}, default: ["message", "callback_query"]
+    field :update_mode, Ecto.Enum, values: @update_modes, default: :webhook
   end
 
   def changeset(config, attrs) do
@@ -22,7 +24,8 @@ defmodule App.Gateways.Gateway.Config do
       :allow_all_users,
       :allowed_user_ids,
       :welcome_message,
-      :allowed_updates
+      :allowed_updates,
+      :update_mode
     ])
     |> update_change(:agent_id, &normalize_optional_id/1)
     |> update_change(:agent_ids, &normalize_list/1)
@@ -32,6 +35,7 @@ defmodule App.Gateways.Gateway.Config do
     |> put_agent_ids_from_default_agent()
     |> ensure_default_agent()
     |> validate_default_agent()
+    |> validate_inclusion(:update_mode, @update_modes)
   end
 
   defp normalize_list(list) when is_list(list) do

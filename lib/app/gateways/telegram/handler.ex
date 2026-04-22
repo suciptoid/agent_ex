@@ -127,18 +127,23 @@ defmodule App.Gateways.Telegram.Handler do
 
   defp send_to_chat_room(%Gateway{} = gateway, %Channel{} = channel, sender_name, content) do
     chat_room = channel.chat_room
+    mapped_user_id = Gateways.mapped_user_id_for_channel(channel)
 
     # Create user message in the chat room
     case Chat.create_message(chat_room, %{
            role: "user",
            content: content,
-           name: sender_name || channel.external_username || "User"
+           name: sender_name || channel.external_username || "User",
+           user_id: mapped_user_id
          }) do
       {:ok, message} ->
         Chat.broadcast_chat_room(chat_room.id, {:user_message_created, message})
 
-        # Subscribe to chat room to relay agent responses back
-        maybe_start_agent_and_relay(gateway, channel, chat_room, message)
+        if Gateways.channel_pending_approval?(channel) do
+          relay_pending_approval_message(gateway, channel)
+        else
+          maybe_start_agent_and_relay(gateway, channel, chat_room, message, mapped_user_id)
+        end
 
       {:error, reason} ->
         Logger.error("Failed to create message: #{inspect(reason)}")
@@ -150,7 +155,8 @@ defmodule App.Gateways.Telegram.Handler do
          %Gateway{} = gateway,
          %Channel{} = channel,
          chat_room,
-         _user_message
+         _user_message,
+         mapped_user_id
        ) do
     chat_room = Chat.preload_chat_room(chat_room)
     active_agent = active_agent(chat_room)
@@ -168,7 +174,8 @@ defmodule App.Gateways.Telegram.Handler do
           Chat.broadcast_chat_room(chat_room.id, {:agent_message_created, assistant_message})
 
           case Chat.start_stream(chat_room, messages, assistant_message,
-                 extra_system_prompt: telegram_reply_prompt()
+                 extra_system_prompt: telegram_reply_prompt(),
+                 user_id: mapped_user_id
                ) do
             {:ok, stream_pid} ->
               :ok = start_relay(gateway, channel, chat_room, stream_pid)
@@ -342,6 +349,16 @@ defmodule App.Gateways.Telegram.Handler do
       client,
       channel.external_chat_id,
       "Sorry, the response took too long."
+    )
+  end
+
+  defp relay_pending_approval_message(gateway, channel) do
+    client = Client.new(gateway.token)
+
+    Client.send_message(
+      client,
+      channel.external_chat_id,
+      "Your message has been received and is pending approval. You will receive a reply once an administrator approves your account."
     )
   end
 

@@ -414,7 +414,15 @@ defmodule AppWeb.Layouts do
                   class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-xs text-foreground/65 transition-colors aria-[current=page]:font-semibold aria-[current=page]:text-foreground"
                 >
                   <span
-                    :if={chat.gateway_linked}
+                    :if={chat.approval_needed}
+                    id={"sidebar-chat-approval-icon-#{chat.id}"}
+                    class="inline-flex size-4 flex-shrink-0 items-center justify-center rounded-full bg-amber-500/10 text-amber-500"
+                    title="Pending approval"
+                  >
+                    <.icon name="hero-exclamation-triangle" class="size-2.5" />
+                  </span>
+                  <span
+                    :if={not chat.approval_needed and chat.gateway_linked}
                     id={"sidebar-chat-gateway-icon-#{chat.id}"}
                     class="inline-flex size-4 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
                     title="Linked to a gateway channel"

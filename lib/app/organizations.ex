@@ -8,8 +8,9 @@ defmodule App.Organizations do
   alias App.Agents
   alias App.Agents.Agent
   alias Ecto.Multi
-  alias App.Organizations.{Membership, Organization, Secret, Settings}
+  alias App.Organizations.{MemberForm, Membership, Organization, Secret, Settings}
   alias App.Repo
+  alias App.Users
   alias App.Users.Scope
   alias App.Users.User
 
@@ -81,6 +82,62 @@ defmodule App.Organizations do
 
   def manager?(%Scope{} = scope), do: Scope.manager?(scope)
 
+  def change_member_form(attrs \\ %{}) do
+    MemberForm.changeset(%MemberForm{}, attrs)
+  end
+
+  def list_organization_members(%Scope{} = scope) do
+    Membership
+    |> where([membership], membership.organization_id == ^Scope.organization_id!(scope))
+    |> join(:inner, [membership], user in assoc(membership, :user))
+    |> preload([membership, user], user: user)
+    |> order_by([_membership, user],
+      asc: fragment("lower(coalesce(?, ?))", user.name, user.email)
+    )
+    |> order_by([_membership, user], asc: fragment("lower(?)", user.email))
+    |> Repo.all()
+  end
+
+  def add_member_by_email(%Scope{} = scope, email, role) do
+    with :ok <- authorize_manager(scope),
+         %Ecto.Changeset{valid?: true} = changeset <-
+           change_member_form(%{email: email, role: role}),
+         email <- Ecto.Changeset.get_field(changeset, :email),
+         role <- Ecto.Changeset.get_field(changeset, :role),
+         %User{} = user <- Users.get_user_by_email(email),
+         nil <- get_membership(user, Scope.organization_id!(scope)),
+         {:ok, membership} <-
+           %Membership{}
+           |> Membership.changeset(%{
+             organization_id: Scope.organization_id!(scope),
+             user_id: user.id,
+             role: role
+           })
+           |> Repo.insert() do
+      {:ok, Repo.preload(membership, [:user, :organization])}
+    else
+      %Ecto.Changeset{} = changeset ->
+        {:error, changeset}
+
+      nil ->
+        changeset =
+          change_member_form(%{email: email, role: role})
+          |> Ecto.Changeset.add_error(:email, "does not belong to an existing user")
+
+        {:error, changeset}
+
+      %Membership{} ->
+        changeset =
+          change_member_form(%{email: email, role: role})
+          |> Ecto.Changeset.add_error(:email, "is already a member of this organization")
+
+        {:error, changeset}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
   def get_secret(%Scope{} = scope, key) when is_binary(key) do
     Repo.get_by(Secret,
       organization_id: Scope.organization_id!(scope),
@@ -92,6 +149,12 @@ defmodule App.Organizations do
     case get_secret(scope, key) do
       %Secret{value: value} -> value
       nil -> nil
+    end
+  end
+
+  def put_secret_value(%Scope{} = scope, key, value) when is_binary(key) do
+    with :ok <- authorize_manager(scope) do
+      do_put_secret(scope, key, value)
     end
   end
 
@@ -126,7 +189,7 @@ defmodule App.Organizations do
       if changeset.valid? do
         default_agent_id = Ecto.Changeset.get_field(changeset, :default_agent_id)
 
-        case put_secret(scope, @default_agent_secret_key, default_agent_id) do
+        case do_put_secret(scope, @default_agent_secret_key, default_agent_id) do
           {:ok, _secret_or_nil} -> {:ok, default_agent_id(scope)}
           {:error, _reason} = error -> error
         end
@@ -154,7 +217,7 @@ defmodule App.Organizations do
   def manager_role?(role) when is_binary(role), do: role in Membership.manager_roles()
   def manager_role?(_role), do: false
 
-  defp put_secret(%Scope{} = scope, key, value) when is_binary(key) do
+  defp do_put_secret(%Scope{} = scope, key, value) when is_binary(key) do
     normalized_key = String.trim(key)
     secret = get_secret(scope, normalized_key)
 

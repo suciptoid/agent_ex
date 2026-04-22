@@ -9,6 +9,7 @@ defmodule App.Gateways do
   alias App.Agents.Agent
   alias App.Chat.ChatRoom
   alias App.Gateways.{Channel, Gateway}
+  alias App.Organizations
   alias App.Repo
   alias App.Users.Scope
 
@@ -78,9 +79,18 @@ defmodule App.Gateways do
     |> Repo.get(id)
   end
 
+  def get_channel_by_chat_room_id(chat_room_id) do
+    Channel
+    |> preload([:gateway, :chat_room])
+    |> Repo.get_by(chat_room_id: chat_room_id)
+  end
+
   @doc """
   Finds an existing channel or creates a new one with an associated ChatRoom.
   Returns `{:ok, channel}` or `{:error, reason}`.
+
+  When the external user is not mapped to an app user, the channel is created
+  with `approval_status: :pending_approval`. Otherwise it defaults to `:approved`.
   """
   def find_or_create_channel(%Gateway{} = gateway, attrs) do
     external_chat_id = to_string(attrs[:external_chat_id] || attrs["external_chat_id"])
@@ -96,7 +106,8 @@ defmodule App.Gateways do
         end)
 
       nil ->
-        create_channel_with_chat_room(gateway, attrs)
+        approval_status = determine_approval_status(gateway, attrs)
+        create_channel_with_chat_room(gateway, attrs, approval_status)
     end
   end
 
@@ -142,9 +153,151 @@ defmodule App.Gateways do
     end
   end
 
+  @doc """
+  Checks if a channel requires approval (pending_approval status).
+  """
+  def channel_pending_approval?(%Channel{approval_status: :pending_approval}), do: true
+  def channel_pending_approval?(%Channel{}), do: false
+
+  @doc """
+  Approves a pending channel and maps the external user to the given app user.
+  """
+  def approve_channel(%Scope{} = scope, %Channel{} = channel, user_id) do
+    channel = Repo.preload(channel, :gateway)
+
+    with :ok <- validate_channel_mapping_user_id(user_id),
+         {:ok, _secret} <- put_channel_user_mapping(scope, channel, user_id),
+         {:ok, channel} <-
+           channel
+           |> Channel.changeset(%{approval_status: :approved})
+           |> Repo.update(),
+         {_count, nil} <- backfill_channel_message_user_ids(channel, user_id) do
+      {:ok, Repo.preload(channel, [:chat_room, :gateway])}
+    end
+  end
+
+  @doc """
+  Rejects a pending channel.
+  """
+  def reject_channel(%Channel{} = channel) do
+    channel
+    |> Channel.changeset(%{approval_status: :rejected, status: :blocked})
+    |> Repo.update()
+  end
+
+  @doc """
+  Returns the mapped app user_id for a given gateway type + external_user_id,
+  or nil if no mapping exists.
+  """
+  def get_mapped_user_id(%Scope{} = scope, gateway_type, external_user_id)
+      when is_atom(gateway_type) and is_binary(external_user_id) do
+    key = channel_user_mapping_key(gateway_type, external_user_id)
+    Organizations.get_secret_value(scope, key)
+  end
+
+  @doc """
+  Resolves the mapped app user_id for a channel, or nil when the channel is not mapped.
+  """
+  def mapped_user_id_for_channel(%Channel{} = channel) do
+    gateway = channel.gateway || Repo.preload(channel, :gateway).gateway
+
+    with %Gateway{} = gateway <- gateway,
+         external_user_id when is_binary(external_user_id) and external_user_id != "" <-
+           channel.external_user_id do
+      scope = scope_for_gateway(gateway)
+      get_mapped_user_id(scope, gateway.type, external_user_id)
+    else
+      _other -> nil
+    end
+  end
+
+  @doc """
+  Stores a channel user mapping: gateway_type + external_user_id -> app_user_id.
+  """
+  def put_channel_user_mapping(%Scope{} = scope, %Channel{} = channel, user_id) do
+    gateway = channel.gateway || Repo.preload(channel, :gateway).gateway
+    key = channel_user_mapping_key(gateway.type, channel.external_user_id)
+    Organizations.get_secret(scope, key) || %App.Organizations.Secret{}
+
+    cond do
+      is_nil(user_id) or user_id == "" ->
+        {:ok, nil}
+
+      true ->
+        Organizations.put_secret_value(scope, key, user_id)
+    end
+  end
+
+  @doc """
+  Lists all channel user mappings for the current organization.
+  Returns a list of `%{gateway_type: atom, external_user_id: string, user_id: string, key: string}`.
+  """
+  def list_channel_user_mappings(%Scope{} = scope) do
+    import Ecto.Query
+
+    prefix = "channel_user_map:"
+
+    from(s in App.Organizations.Secret,
+      where: s.organization_id == ^Scope.organization_id!(scope) and like(s.key, ^"#{prefix}%"),
+      select: %{key: s.key, value: s.value}
+    )
+    |> Repo.all()
+    |> Enum.map(fn %{key: key, value: user_id} ->
+      case String.split(String.replace_prefix(key, prefix, ""), ":", parts: 2) do
+        [gateway_type, external_user_id] ->
+          %{
+            gateway_type: gateway_type,
+            external_user_id: external_user_id,
+            user_id: user_id,
+            key: key
+          }
+
+        _ ->
+          nil
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  @doc """
+  Deletes a channel user mapping by key.
+  """
+  def delete_channel_user_mapping(%Scope{} = scope, key) when is_binary(key) do
+    case Organizations.get_secret(scope, key) do
+      nil -> {:error, :not_found}
+      secret -> Repo.delete(secret)
+    end
+  end
+
+  defp validate_channel_mapping_user_id(user_id) when is_binary(user_id) do
+    if String.trim(user_id) == "" do
+      {:error, :user_id_required}
+    else
+      :ok
+    end
+  end
+
+  defp validate_channel_mapping_user_id(_user_id), do: {:error, :user_id_required}
+
+  defp backfill_channel_message_user_ids(%Channel{chat_room_id: chat_room_id}, user_id) do
+    import Ecto.Query
+
+    from(message in App.Chat.Message,
+      where:
+        message.chat_room_id == ^chat_room_id and
+          message.role == "user" and
+          is_nil(message.user_id)
+    )
+    |> Repo.update_all(set: [user_id: user_id])
+  end
+
+  defp channel_user_mapping_key(gateway_type, external_user_id) do
+    "channel_user_map:#{gateway_type}:#{external_user_id}"
+  end
+
   # --- Private ---
 
-  defp create_channel_with_chat_room(%Gateway{} = gateway, attrs) do
+  defp create_channel_with_chat_room(%Gateway{} = gateway, attrs, approval_status) do
     external_chat_id = to_string(attrs[:external_chat_id] || attrs["external_chat_id"])
     external_user_id = attrs[:external_user_id] || attrs["external_user_id"]
     external_username = attrs[:external_username] || attrs["external_username"]
@@ -159,7 +312,8 @@ defmodule App.Gateways do
         external_user_id: external_user_id && to_string(external_user_id),
         external_username: external_username,
         metadata: metadata,
-        chat_room_id: chat_room.id
+        chat_room_id: chat_room.id,
+        approval_status: approval_status
       })
     end)
     |> Repo.transaction()
@@ -170,6 +324,26 @@ defmodule App.Gateways do
       {:error, _step, changeset, _changes} ->
         {:error, changeset}
     end
+  end
+
+  defp determine_approval_status(%Gateway{} = gateway, attrs) do
+    external_user_id = attrs[:external_user_id] || attrs["external_user_id"]
+
+    if is_nil(external_user_id) or external_user_id == "" do
+      :pending_approval
+    else
+      scope = scope_for_gateway(gateway)
+
+      case get_mapped_user_id(scope, gateway.type, to_string(external_user_id)) do
+        user_id when is_binary(user_id) and user_id != "" -> :approved
+        _ -> :pending_approval
+      end
+    end
+  end
+
+  defp scope_for_gateway(%Gateway{organization_id: org_id}) do
+    org = Repo.get(App.Organizations.Organization, org_id) || %{id: org_id}
+    %Scope{user: nil, organization: org, organization_role: "admin"}
   end
 
   defp ensure_channel_chat_room(%Channel{chat_room_id: nil} = channel),

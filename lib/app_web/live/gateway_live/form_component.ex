@@ -26,6 +26,7 @@ defmodule AppWeb.GatewayLive.FormComponent do
               form={@form}
               type_options={@type_options}
               status_options={@status_options}
+              update_mode_options={@update_mode_options}
               agent_options={@agent_options}
               target={@myself}
             />
@@ -59,6 +60,7 @@ defmodule AppWeb.GatewayLive.FormComponent do
               form={@form}
               type_options={@type_options}
               status_options={@status_options}
+              update_mode_options={@update_mode_options}
               agent_options={@agent_options}
               target={@myself}
             />
@@ -101,6 +103,7 @@ defmodule AppWeb.GatewayLive.FormComponent do
      |> assign(assigns)
      |> assign(:type_options, type_options())
      |> assign(:status_options, status_options())
+     |> assign(:update_mode_options, update_mode_options())
      |> assign(:agent_options, [{"", "None"} | agent_options])
      |> assign_form(changeset)}
   end
@@ -172,6 +175,7 @@ defmodule AppWeb.GatewayLive.FormComponent do
   attr :form, :any, required: true
   attr :type_options, :list, required: true
   attr :status_options, :list, required: true
+  attr :update_mode_options, :list, required: true
   attr :agent_options, :list, required: true
   attr :target, :any, required: true
 
@@ -265,6 +269,20 @@ defmodule AppWeb.GatewayLive.FormComponent do
               placeholder="Select the active agent for new channels"
             />
 
+            <%= if telegram_gateway?(@form[:type].value) do %>
+              <.select
+                field={config_form[:update_mode]}
+                label="Telegram Update Mode"
+                options={@update_mode_options}
+                placeholder="Select how Telegram delivers updates"
+              />
+
+              <p class="text-xs leading-5 text-muted-foreground">
+                Webhook is the default and recommended when this app is publicly reachable.
+                Long polling uses Telegram's getUpdates API from a supervised background worker.
+              </p>
+            <% end %>
+
             <div class="mt-4 space-y-2">
               <input
                 type="hidden"
@@ -317,7 +335,7 @@ defmodule AppWeb.GatewayLive.FormComponent do
          socket
          |> put_flash(
            :error,
-           "Gateway saved, but Telegram webhook registration failed: #{reason}"
+           "Gateway saved, but Telegram update sync failed: #{reason}"
          )
          |> navigate_after_save()}
     end
@@ -348,6 +366,15 @@ defmodule AppWeb.GatewayLive.FormComponent do
 
   defp agent_selected?(value, agent_id) when is_list(value), do: agent_id in value
   defp agent_selected?(_value, _agent_id), do: false
+
+  defp telegram_gateway?(value), do: to_string(value) == "telegram"
+
+  defp update_mode_options do
+    [
+      {"webhook", "Webhook"},
+      {"longpoll", "Long Polling"}
+    ]
+  end
 
   defp save_label(:edit), do: "Save Changes"
   defp save_label(_action), do: "Save Gateway"

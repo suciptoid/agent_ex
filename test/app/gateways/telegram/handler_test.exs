@@ -13,6 +13,9 @@ defmodule App.Gateways.Telegram.HandlerTest do
     organization = App.OrganizationsFixtures.organization_fixture(user)
     scope = App.OrganizationsFixtures.organization_scope_fixture(user, organization: organization)
 
+    # Pre-seed user mapping so Telegram channels are auto-approved in tests
+    App.Organizations.put_secret_value(scope, "channel_user_map:telegram:5678", user.id)
+
     previous_runner = Application.get_env(:app, :agent_runner)
 
     previous_runner_config =
@@ -75,13 +78,23 @@ defmodule App.Gateways.Telegram.HandlerTest do
     assert Ecto.assoc_loaded?(streamed_agent.provider)
     assert streamed_agent.provider.id == provider.id
     assert Enum.any?(messages, &(&1.role == "user" and &1.content == "Need support"))
+    assert_receive {:preloaded_provider_runner_opts, opts}
+    assert Keyword.get(opts, :user_id) == user.id
 
-    assert_receive {:telegram_send_message, "/bottelegram-token/sendMessage", payload}
+    assert_receive {:telegram_send_message, "/bottelegram-token/sendMessage", payload}, 1_000
     assert payload["chat_id"] == "1234"
     assert payload["text"] == "Gateway Agent: Need support"
     assert payload["parse_mode"] == "MarkdownV2"
 
-    assert %App.Gateways.Channel{} = Gateways.get_channel(gateway, 1234)
+    assert %App.Gateways.Channel{} = channel = Gateways.get_channel(gateway, 1234)
+
+    persisted_user_message =
+      scope
+      |> Chat.get_chat_room!(channel.chat_room_id)
+      |> Chat.list_messages()
+      |> Enum.find(&(&1.role == "user"))
+
+    assert persisted_user_message.user_id == user.id
   end
 
   test "telegram /new rotates the channel onto a fresh chat room", %{user: user, scope: scope} do
@@ -112,6 +125,9 @@ defmodule App.Gateways.Telegram.HandlerTest do
     assert_receive {:preloaded_provider_runner_called, initial_agent, initial_messages}
     assert initial_agent.id == agent.id
     assert Enum.map(initial_messages, &{&1.role, &1.content}) == [{"user", "Need support"}]
+
+    assert_receive {:telegram_chat_action, "/bottelegram-token/sendChatAction",
+                    _initial_action_payload}
 
     assert_receive {:telegram_send_message, "/bottelegram-token/sendMessage", initial_payload}
     assert initial_payload["text"] == "Gateway Agent: Need support"
@@ -148,6 +164,9 @@ defmodule App.Gateways.Telegram.HandlerTest do
     assert_receive {:preloaded_provider_runner_called, streamed_agent, messages}
     assert streamed_agent.id == agent.id
     assert Enum.map(messages, &{&1.role, &1.content}) == [{"user", "Fresh context"}]
+
+    assert_receive {:telegram_chat_action, "/bottelegram-token/sendChatAction",
+                    _fresh_action_payload}
 
     assert_receive {:telegram_send_message, "/bottelegram-token/sendMessage", fresh_payload}
     assert fresh_payload["text"] == "Gateway Agent: Fresh context"
@@ -189,6 +208,57 @@ defmodule App.Gateways.Telegram.HandlerTest do
              Enum.sort([primary_agent.id, fallback_agent.id])
 
     assert active_chat_room_agent.agent_id == fallback_agent.id
+  end
+
+  test "approving a pending channel backfills prior channel user messages with the mapped user id",
+       %{
+         scope: scope
+       } do
+    provider = provider_fixture(scope.user)
+    agent = agent_fixture(scope.user, %{provider: provider, name: "Gateway Agent"})
+    stub_telegram_api(self())
+
+    {:ok, gateway} =
+      Gateways.create_gateway(scope, %{
+        "name" => "Pending Bot",
+        "type" => "telegram",
+        "token" => "pending-token",
+        "config" => %{
+          "agent_id" => agent.id,
+          "allow_all_users" => true
+        }
+      })
+
+    flush_mailbox()
+
+    assert {:ok, _response} =
+             Handler.handle_update(gateway, %{
+               "message" => %{
+                 "chat" => %{"id" => 2222},
+                 "from" => %{"id" => 9999, "first_name" => "Pending"},
+                 "text" => "Please approve me"
+               }
+             })
+
+    channel = Gateways.get_channel(gateway, 2222)
+
+    [pending_message] =
+      channel.chat_room_id
+      |> then(&Chat.get_chat_room!(scope, &1))
+      |> Chat.list_messages()
+      |> Enum.filter(&(&1.role == "user"))
+
+    assert pending_message.user_id == nil
+
+    {:ok, _approved_channel} = Gateways.approve_channel(scope, channel, scope.user.id)
+
+    [approved_message] =
+      channel.chat_room_id
+      |> then(&Chat.get_chat_room!(scope, &1))
+      |> Chat.list_messages()
+      |> Enum.filter(&(&1.role == "user"))
+
+    assert approved_message.user_id == scope.user.id
   end
 
   test "telegram relay preserves bold markdown while escaping surrounding punctuation", %{

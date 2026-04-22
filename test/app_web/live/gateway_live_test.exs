@@ -11,16 +11,25 @@ defmodule AppWeb.GatewayLiveTest do
 
   setup do
     previous_config = Application.get_env(:app, App.Gateways.Telegram.Client)
+    previous_runtime_config = Application.get_env(:app, App.Gateways.Telegram.Runtime)
 
     Application.put_env(:app, App.Gateways.Telegram.Client,
       req_options: [plug: {Req.Test, __MODULE__}]
     )
+
+    Application.put_env(:app, App.Gateways.Telegram.Runtime, auto_start?: false)
 
     on_exit(fn ->
       if previous_config do
         Application.put_env(:app, App.Gateways.Telegram.Client, previous_config)
       else
         Application.delete_env(:app, App.Gateways.Telegram.Client)
+      end
+
+      if previous_runtime_config do
+        Application.put_env(:app, App.Gateways.Telegram.Runtime, previous_runtime_config)
+      else
+        Application.delete_env(:app, App.Gateways.Telegram.Runtime)
       end
     end)
 
@@ -63,6 +72,23 @@ defmodule AppWeb.GatewayLiveTest do
              live_view,
              "#gateway-form [role=\"option\"][data-value=\"whatsapp_api\"]",
              "WhatsApp API"
+           )
+
+    _ =
+      live_view
+      |> element("#gateway-form")
+      |> render_change(%{"gateway" => %{"type" => "telegram"}})
+
+    assert has_element?(
+             live_view,
+             "#gateway-form [role=\"option\"][data-value=\"webhook\"]",
+             "Webhook"
+           )
+
+    assert has_element?(
+             live_view,
+             "#gateway-form [role=\"option\"][data-value=\"longpoll\"]",
+             "Long Polling"
            )
 
     assert has_element?(
@@ -123,6 +149,42 @@ defmodule AppWeb.GatewayLiveTest do
     assert payload["url"] == TelegramWebhook.webhook_url(gateway)
     assert payload["secret_token"] == gateway.webhook_secret
     assert payload["allowed_updates"] == ["message", "callback_query"]
+  end
+
+  test "new telegram longpoll gateway saves without registering a webhook", %{
+    conn: conn,
+    scope: scope
+  } do
+    stub_telegram_api(self())
+
+    {:ok, live_view, _html} = live(conn, ~p"/gateways/new")
+
+    submit_result =
+      live_view
+      |> element("#gateway-form")
+      |> render_submit(%{
+        "gateway" => %{
+          "name" => "Polling Bot",
+          "type" => "telegram",
+          "token" => "123456:polling-bot-token",
+          "status" => "active",
+          "config" => %{
+            "update_mode" => "longpoll"
+          }
+        }
+      })
+
+    assert_redirect(live_view, ~p"/gateways")
+    {:ok, _redirected_view, _html} = follow_redirect(submit_result, conn, ~p"/gateways")
+
+    [gateway] = Gateways.list_gateways(scope)
+    assert gateway.config.update_mode == :longpoll
+
+    assert_received {:telegram_delete_webhook, "/bot123456:polling-bot-token/deleteWebhook",
+                     payload}
+
+    assert payload["drop_pending_updates"] == false
+    refute_received {:telegram_set_webhook, _, _}
   end
 
   test "edit gateway opens as a dedicated page and saves changes", %{conn: conn, scope: scope} do
@@ -205,11 +267,32 @@ defmodule AppWeb.GatewayLiveTest do
     assert payload["url"] == TelegramWebhook.webhook_url(reloaded_gateway)
   end
 
-  defp stub_telegram_webhook(test_pid) do
+  defp stub_telegram_webhook(test_pid), do: stub_telegram_api(test_pid)
+
+  defp stub_telegram_api(test_pid) do
     Req.Test.stub(__MODULE__, fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
-      send(test_pid, {:telegram_set_webhook, conn.request_path, Jason.decode!(body)})
-      Plug.Conn.send_resp(conn, 200, ~s({"ok":true,"result":true}))
+      payload = if body == "", do: %{}, else: Jason.decode!(body)
+
+      case conn.request_path do
+        path ->
+          cond do
+            String.ends_with?(path, "/setWebhook") ->
+              send(test_pid, {:telegram_set_webhook, path, payload})
+              Plug.Conn.send_resp(conn, 200, ~s({"ok":true,"result":true}))
+
+            String.ends_with?(path, "/deleteWebhook") ->
+              send(test_pid, {:telegram_delete_webhook, path, payload})
+              Plug.Conn.send_resp(conn, 200, ~s({"ok":true,"result":true}))
+
+            String.ends_with?(path, "/getUpdates") ->
+              send(test_pid, {:telegram_get_updates, path, payload})
+              Plug.Conn.send_resp(conn, 200, ~s({"ok":true,"result":[]}))
+
+            true ->
+              Plug.Conn.send_resp(conn, 200, ~s({"ok":true,"result":true}))
+          end
+      end
     end)
   end
 end

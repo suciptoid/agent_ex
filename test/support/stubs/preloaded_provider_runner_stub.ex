@@ -16,7 +16,7 @@ defmodule App.TestSupport.PreloadedProviderRunnerStub do
   def run_streaming(%Agent{provider: %Provider{}} = agent, messages, recipient, opts) do
     content = stub_content(agent, messages)
 
-    notify(agent, messages)
+    notify(agent, messages, opts)
 
     emit_chunk =
       case Keyword.get(opts, :on_result) do
@@ -45,10 +45,11 @@ defmodule App.TestSupport.PreloadedProviderRunnerStub do
     end
   end
 
-  defp notify(agent, messages) do
+  defp notify(agent, messages, opts \\ []) do
     case Application.get_env(:app, __MODULE__, []) |> Keyword.get(:notify_pid) do
       notify_pid when is_pid(notify_pid) ->
         send(notify_pid, {:preloaded_provider_runner_called, agent, messages})
+        send(notify_pid, {:preloaded_provider_runner_opts, opts})
 
       _other ->
         :ok

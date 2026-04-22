@@ -3,6 +3,7 @@ defmodule AppWeb.ChatLive.Show do
 
   alias App.Chat
   alias App.Chat.Message
+  alias App.Gateways
   alias App.Users.User
 
   @hidden_tool_names [
@@ -31,6 +32,8 @@ defmodule AppWeb.ChatLive.Show do
      |> assign(:streaming_token_count, 0)
      |> assign(:streaming_active?, false)
      |> assign(:subscribed_chat_room_id, nil)
+     |> assign(:pending_channel, nil)
+     |> assign(:organization_users, [])
      |> assign_message_form(%{"content" => ""})
      |> stream_configure(:messages, dom_id: &"message-#{&1.id}")
      |> stream(:messages, [])}
@@ -243,6 +246,38 @@ defmodule AppWeb.ChatLive.Show do
 
       {:error, _reason} ->
         {:noreply, put_flash(socket, :error, "Failed to remove agent")}
+    end
+  end
+
+  def handle_event("approve-channel", %{"user_id" => user_id}, socket) do
+    channel = socket.assigns.pending_channel
+
+    case Gateways.approve_channel(socket.assigns.current_scope, channel, user_id) do
+      {:ok, _channel} ->
+        {:noreply,
+         socket
+         |> assign(:pending_channel, nil)
+         |> put_flash(:info, "Channel approved. Messages will now be processed.")}
+
+      {:error, reason} ->
+        {:noreply,
+         put_flash(socket, :error, "Failed to approve channel: #{user_error_message(reason)}")}
+    end
+  end
+
+  def handle_event("reject-channel", _params, socket) do
+    channel = socket.assigns.pending_channel
+
+    case Gateways.reject_channel(channel) do
+      {:ok, _channel} ->
+        {:noreply,
+         socket
+         |> assign(:pending_channel, nil)
+         |> put_flash(:info, "Channel rejected.")}
+
+      {:error, reason} ->
+        {:noreply,
+         put_flash(socket, :error, "Failed to reject channel: #{user_error_message(reason)}")}
     end
   end
 
@@ -589,10 +624,14 @@ defmodule AppWeb.ChatLive.Show do
         messages = Chat.list_messages(chat_room)
         visible_messages = visible_messages(messages)
 
+        {pending_channel, org_users} = load_pending_channel_and_users(socket, chat_room)
+
         socket
         |> assign(:chat_room, chat_room)
         |> assign(:page_title, chat_room.title || "Chat")
         |> assign(:latest_message_id, latest_message_id(visible_messages))
+        |> assign(:pending_channel, pending_channel)
+        |> assign(:organization_users, org_users)
         |> refresh_sidebar_chat_rooms()
         |> bump_messages_revision()
         |> stream(:messages, visible_messages, reset: true)
@@ -629,6 +668,30 @@ defmodule AppWeb.ChatLive.Show do
       :sidebar_chat_rooms,
       App.Chat.list_chat_rooms_for_sidebar(socket.assigns.current_scope)
     )
+  end
+
+  defp load_pending_channel_and_users(socket, chat_room) do
+    channel = Gateways.get_channel_by_chat_room_id(chat_room.id)
+
+    if channel && Gateways.channel_pending_approval?(channel) do
+      users = list_organization_users(socket.assigns.current_scope)
+      {channel, users}
+    else
+      {nil, []}
+    end
+  end
+
+  defp list_organization_users(current_scope) do
+    import Ecto.Query
+
+    from(user in App.Users.User,
+      join: membership in App.Organizations.Membership,
+      on: membership.user_id == user.id,
+      where: membership.organization_id == ^current_scope.organization.id,
+      order_by: [asc: fragment("lower(?)", user.name), asc: fragment("lower(?)", user.email)],
+      select: %{id: user.id, name: user.name, email: user.email}
+    )
+    |> App.Repo.all()
   end
 
   defp switch_path(organization_id, return_to) do

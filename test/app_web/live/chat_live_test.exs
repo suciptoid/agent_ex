@@ -3,6 +3,7 @@ defmodule AppWeb.ChatLiveTest do
 
   alias App.Chat
   alias App.Gateways
+  alias App.Organizations
 
   import App.AgentsFixtures
   import App.ChatFixtures
@@ -149,6 +150,9 @@ defmodule AppWeb.ChatLiveTest do
     } do
       provider = provider_fixture(user)
       agent = agent_fixture(user, %{provider: provider, name: "Gateway Agent"})
+
+      # Pre-seed user mapping so channel is auto-approved
+      Organizations.put_secret_value(scope, "channel_user_map:telegram:5678", user.id)
 
       {:ok, gateway} =
         Gateways.create_gateway(scope, %{

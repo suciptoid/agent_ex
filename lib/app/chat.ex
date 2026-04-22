@@ -725,6 +725,7 @@ defmodule App.Chat do
   - `updated_at`
   - `loading` - true while the room has a pending or streaming assistant message
   - `gateway_linked` - true when the room is linked to a gateway channel
+  - `approval_needed` - true when the room's gateway channel is pending approval
 
   Limited to 30 most recent.
   """
@@ -739,11 +740,13 @@ defmodule App.Chat do
 
     loading_ids = sidebar_loading_chat_room_ids(chat_rooms)
     gateway_linked_ids = sidebar_gateway_linked_chat_room_ids(chat_rooms)
+    approval_needed_ids = sidebar_pending_approval_chat_room_ids(chat_rooms)
 
     Enum.map(chat_rooms, fn chat_room ->
       chat_room
       |> Map.put(:loading, MapSet.member?(loading_ids, chat_room.id))
       |> Map.put(:gateway_linked, MapSet.member?(gateway_linked_ids, chat_room.id))
+      |> Map.put(:approval_needed, MapSet.member?(approval_needed_ids, chat_room.id))
     end)
   end
 
@@ -804,6 +807,22 @@ defmodule App.Chat do
 
     from(channel in App.Gateways.Channel,
       where: channel.chat_room_id in ^chat_room_ids,
+      distinct: channel.chat_room_id,
+      select: channel.chat_room_id
+    )
+    |> Repo.all()
+    |> MapSet.new()
+  end
+
+  defp sidebar_pending_approval_chat_room_ids([]), do: MapSet.new()
+
+  defp sidebar_pending_approval_chat_room_ids(chat_rooms) do
+    chat_room_ids = Enum.map(chat_rooms, & &1.id)
+
+    from(channel in App.Gateways.Channel,
+      where:
+        channel.chat_room_id in ^chat_room_ids and
+          channel.approval_status == ^"pending_approval",
       distinct: channel.chat_room_id,
       select: channel.chat_room_id
     )

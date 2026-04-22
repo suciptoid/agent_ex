@@ -6,20 +6,43 @@ defmodule App.Gateways.Telegram.Webhook do
   alias App.Gateways.Gateway
   alias App.Gateways.Gateway.Config
   alias App.Gateways.Telegram.Client
+  alias App.Gateways.Telegram.Runtime
   alias App.Repo
 
   def sync(%Gateway{type: :telegram, status: :active} = gateway) do
-    params = %{
-      secret_token: gateway.webhook_secret,
-      allowed_updates: allowed_updates(gateway)
-    }
+    case update_mode(gateway) do
+      :webhook ->
+        with :ok <- Runtime.stop_gateway(gateway),
+             {:ok, _body} <-
+               Client.set_webhook(Client.new(gateway.token), webhook_url(gateway), %{
+                 secret_token: gateway.webhook_secret,
+                 allowed_updates: allowed_updates(gateway)
+               }) do
+          {:ok, gateway}
+        else
+          {:error, reason} -> mark_sync_error(gateway, reason)
+        end
 
-    case Client.set_webhook(Client.new(gateway.token), webhook_url(gateway), params) do
-      {:ok, _body} ->
-        {:ok, gateway}
+      :longpoll ->
+        with {:ok, _body} <-
+               Client.delete_webhook(Client.new(gateway.token), %{
+                 drop_pending_updates: false
+               }),
+             :ok <- maybe_start_runtime_gateway(gateway) do
+          {:ok, gateway}
+        else
+          {:error, reason} -> mark_sync_error(gateway, reason)
+        end
+    end
+  end
 
-      {:error, reason} ->
-        mark_sync_error(gateway, reason)
+  def sync(%Gateway{type: :telegram} = gateway) do
+    with :ok <- Runtime.stop_gateway(gateway),
+         {:ok, _body} <-
+           Client.delete_webhook(Client.new(gateway.token), %{drop_pending_updates: false}) do
+      {:ok, gateway}
+    else
+      {:error, reason} -> mark_sync_error(gateway, reason)
     end
   end
 
@@ -29,18 +52,42 @@ defmodule App.Gateways.Telegram.Webhook do
     "#{AppWeb.Endpoint.url()}/gateway/webhook/#{id}"
   end
 
-  defp allowed_updates(%Gateway{config: %Config{allowed_updates: updates}})
-       when is_list(updates) do
+  def allowed_updates(%Gateway{config: %Config{allowed_updates: updates}})
+      when is_list(updates) do
     updates
   end
 
-  defp allowed_updates(%Gateway{config: %{} = config}) do
+  def allowed_updates(%Gateway{config: %{} = config}) do
     Map.get(config, :allowed_updates) || Map.get(config, "allowed_updates") || default_updates()
   end
 
-  defp allowed_updates(_gateway), do: default_updates()
+  def allowed_updates(_gateway), do: default_updates()
+
+  def update_mode(%Gateway{config: %Config{update_mode: mode}})
+      when mode in [:webhook, :longpoll],
+      do: mode
+
+  def update_mode(%Gateway{config: %{} = config}) do
+    config
+    |> Map.get(:update_mode, Map.get(config, "update_mode", :webhook))
+    |> normalize_update_mode()
+  end
+
+  def update_mode(_gateway), do: :webhook
 
   defp default_updates, do: ["message", "callback_query"]
+
+  defp maybe_start_runtime_gateway(gateway) do
+    if Runtime.auto_start?() do
+      Runtime.ensure_gateway(gateway)
+    else
+      :ok
+    end
+  end
+
+  defp normalize_update_mode(mode) when mode in [:webhook, :longpoll], do: mode
+  defp normalize_update_mode("longpoll"), do: :longpoll
+  defp normalize_update_mode(_mode), do: :webhook
 
   defp mark_sync_error(%Gateway{} = gateway, reason) do
     case Repo.update(change(gateway, status: :error)) do

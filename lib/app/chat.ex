@@ -221,7 +221,13 @@ defmodule App.Chat do
        tool_call_turns: Message.tool_call_turns(message),
        metadata: message.metadata || %{},
        run_opts:
-         Keyword.take(opts, [:thinking_mode, :extra_system_prompt, :extra_tools, :alloy_context])}
+         Keyword.take(opts, [
+           :thinking_mode,
+           :extra_system_prompt,
+           :extra_tools,
+           :alloy_context,
+           :user_id
+         ])}
     )
   end
 

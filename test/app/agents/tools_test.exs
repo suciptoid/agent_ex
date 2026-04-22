@@ -28,22 +28,30 @@ defmodule App.Agents.ToolsTest do
   end
 
   test "resolve/1 returns configured Alloy tool modules" do
-    [tool] = Tools.resolve(["web_fetch"])
-    assert tool == App.Agents.AlloyTools.WebFetch
+    tools = Tools.resolve(["web_fetch"])
+    assert App.Agents.AlloyTools.WebFetch in tools
+    assert App.Agents.AlloyTools.MemorySet in tools
+    assert App.Agents.AlloyTools.MemoryGet in tools
+    assert App.Agents.AlloyTools.MemoryUpdate in tools
   end
 
   test "resolve/2 returns the create_tool builtin" do
-    [tool] = Tools.resolve(["create_tool"], organization_id: Ecto.UUID.generate())
-    assert tool == App.Agents.AlloyTools.CreateTool
+    tools = Tools.resolve(["create_tool"], organization_id: Ecto.UUID.generate())
+    assert App.Agents.AlloyTools.CreateTool in tools
+    assert App.Agents.AlloyTools.MemorySet in tools
   end
 
   test "resolve/2 includes custom tools for the current user", %{user: user} do
     tool = tool_fixture(user, %{name: "brave_search"})
 
-    [resolved_tool] = Tools.resolve([tool.name], organization_id: tool.organization_id)
-    assert is_atom(resolved_tool)
-    assert Code.ensure_loaded?(resolved_tool)
-    assert apply(resolved_tool, :name, []) == "brave_search"
+    resolved = Tools.resolve([tool.name], organization_id: tool.organization_id)
+
+    resolved_tool =
+      Enum.find(resolved, fn t ->
+        is_atom(t) and Code.ensure_loaded?(t) and apply(t, :name, []) == "brave_search"
+      end)
+
+    assert resolved_tool != nil
   end
 
   test "custom tool templates can interpolate runtime path params", %{user: user} do
@@ -63,10 +71,15 @@ defmodule App.Agents.ToolsTest do
       Plug.Conn.send_resp(conn, 200, "templated")
     end)
 
-    [tool] =
+    resolved =
       Tools.resolve(["jina_reader"], organization_id: user_scope_fixture(user).organization.id)
 
-    assert is_atom(tool)
+    tool =
+      Enum.find(resolved, fn t ->
+        is_atom(t) and Code.ensure_loaded?(t) and apply(t, :name, []) == "jina_reader"
+      end)
+
+    assert tool != nil
 
     assert {:ok, "templated"} =
              apply(tool, :execute, [%{"dynamic_path" => "docs/file.txt"}, %{}])

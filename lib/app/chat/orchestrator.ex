@@ -7,8 +7,9 @@ defmodule App.Chat.Orchestrator do
 
   alias App.Chat
   alias App.Chat.{ChatRoom, ChatRoomAgent, ContextBuilder, Message}
+  alias App.Users.Scope
 
-  def send_message(_scope, %ChatRoom{} = chat_room, content) when is_binary(content) do
+  def send_message(%Scope{} = scope, %ChatRoom{} = chat_room, content) when is_binary(content) do
     content = String.trim(content)
 
     if content == "" do
@@ -29,6 +30,7 @@ defmodule App.Chat.Orchestrator do
         run_opts =
           chat_room
           |> multi_agent_opts(messages, callbacks)
+          |> Keyword.put(:user_id, scope.user.id)
           |> maybe_inject_title_tool(chat_room, callbacks)
 
         maybe_seed_initial_title(chat_room, messages, callbacks)

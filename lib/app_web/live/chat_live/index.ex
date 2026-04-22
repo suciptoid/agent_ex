@@ -66,7 +66,9 @@ defmodule AppWeb.ChatLive.Index do
                        metadata: %{}
                      }) do
                   {:ok, placeholder_message} ->
-                    case Chat.start_stream(chat_room, messages, placeholder_message) do
+                    case Chat.start_stream(chat_room, messages, placeholder_message,
+                           user_id: socket.assigns.current_scope.user.id
+                         ) do
                       {:ok, _pid} ->
                         Chat.broadcast_chat_room(
                           chat_room.id,

@@ -22,6 +22,7 @@ defmodule App.Agents.Agent do
 
     has_many :chat_room_agents, App.Chat.ChatRoomAgent
     has_many :chat_rooms, through: [:chat_room_agents, :chat_room]
+    has_many :memories, App.Agents.Memory
 
     timestamps(type: :utc_datetime_usec)
   end

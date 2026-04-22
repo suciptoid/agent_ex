@@ -68,6 +68,11 @@ defmodule App.Agents.Tools do
         _name -> custom_tool(custom_tool_map[tool_name])
       end
     end)
+    |> Kernel.++(resolve_memory_tools())
+  end
+
+  def resolve_memory_tools do
+    [AlloyTools.MemorySet, AlloyTools.MemoryGet, AlloyTools.MemoryUpdate]
   end
 
   # ── Tool execution helpers (kept for the implementations) ──

@@ -694,7 +694,11 @@ defmodule AppWeb.ChatLive.Show do
 
   defp stream_run_opts(socket) do
     active_agent = active_agent_for_room(socket.assigns.chat_room)
-    [thinking_mode: agent_thinking_mode(active_agent)]
+
+    [
+      thinking_mode: agent_thinking_mode(active_agent),
+      user_id: socket.assigns.current_scope.user.id
+    ]
   end
 
   defp agent_thinking_mode(%{extra_params: extra_params}) when is_map(extra_params) do

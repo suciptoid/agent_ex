@@ -337,8 +337,9 @@ defmodule App.Agents.Runner do
 
   defp build_alloy_context(agent, opts) do
     base =
-      %{organization_id: agent.organization_id}
+      %{organization_id: agent.organization_id, agent_id: agent.id}
       |> maybe_put(:stream_callbacks, Keyword.get(opts, :stream_callbacks))
+      |> maybe_put(:user_id, Keyword.get(opts, :user_id))
 
     case Keyword.get(opts, :alloy_context) do
       nil -> base
@@ -347,7 +348,10 @@ defmodule App.Agents.Runner do
   end
 
   defp stream_middleware(opts) do
-    [App.Agents.StreamMiddleware | Keyword.get(opts, :middleware, [])]
+    [
+      App.Agents.MemoryMiddleware,
+      App.Agents.StreamMiddleware | Keyword.get(opts, :middleware, [])
+    ]
     |> Enum.uniq()
   end
 

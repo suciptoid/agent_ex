@@ -16,7 +16,7 @@ defmodule App.Gateways.Telegram.Runtime do
 
   def auto_start? do
     Application.get_env(:app, __MODULE__, [])
-    |> Keyword.get(:auto_start?, Mix.env() != :test)
+    |> Keyword.get(:auto_start?, true)
   end
 
   def ensure_gateway(%Gateway{} = gateway) do

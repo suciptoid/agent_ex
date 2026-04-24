@@ -70,7 +70,7 @@ defmodule App.Tasks do
         |> case do
           {:ok, %{task: task}} ->
             task = get_task!(scope, task.id)
-            {:ok, maybe_bootstrap_repeat_task(task)}
+            {:ok, maybe_postprocess_created_task(task)}
 
           {:error, :task, changeset, _changes} ->
             {:error, changeset}
@@ -111,7 +111,7 @@ defmodule App.Tasks do
         |> case do
           {:ok, %{task: updated_task}} ->
             task = get_task!(scope, updated_task.id)
-            {:ok, maybe_bootstrap_repeat_task(task)}
+            {:ok, maybe_postprocess_updated_task(task)}
 
           {:error, :task, changeset, _changes} ->
             {:error, changeset}
@@ -427,6 +427,16 @@ defmodule App.Tasks do
     end)
   end
 
+  defp maybe_postprocess_created_task(%ScheduledTask{} = task) do
+    task
+    |> maybe_bootstrap_repeat_task()
+    |> maybe_repair_repeat_next_run()
+  end
+
+  defp maybe_postprocess_updated_task(%ScheduledTask{} = task) do
+    maybe_repair_repeat_next_run(task)
+  end
+
   defp maybe_bootstrap_repeat_task(%ScheduledTask{repeat: true, last_run_at: nil} = task) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
@@ -455,6 +465,30 @@ defmodule App.Tasks do
   end
 
   defp maybe_bootstrap_repeat_task(%ScheduledTask{} = task), do: task
+
+  defp maybe_repair_repeat_next_run(%ScheduledTask{repeat: true} = task) do
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+    if is_nil(task.next_run) or DateTime.compare(task.next_run, now) != :gt do
+      case Schedule.next_run_after(task, now) do
+        {:ok, next_run} ->
+          task
+          |> Ecto.Changeset.change(next_run: next_run)
+          |> Repo.update()
+          |> case do
+            {:ok, repaired_task} -> get_task_by_id(repaired_task.id) || repaired_task
+            {:error, _changeset} -> task
+          end
+
+        _other ->
+          task
+      end
+    else
+      task
+    end
+  end
+
+  defp maybe_repair_repeat_next_run(%ScheduledTask{} = task), do: task
 
   defp get_task_by_id(task_id) do
     ScheduledTask

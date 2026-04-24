@@ -120,7 +120,7 @@ defmodule AppWeb.TaskLive.Form do
                         prompt="Select repeat schedule"
                       />
 
-                      <%= case @form[:schedule_type].value do %>
+                      <%= case normalized_schedule_type(@form[:schedule_type].value) do %>
                         <% :cron -> %>
                           <.input
                             field={@form[:cron_expression]}
@@ -406,6 +406,11 @@ defmodule AppWeb.TaskLive.Form do
 
   defp select_value?(current_value, option_value),
     do: to_string(current_value) == to_string(option_value)
+
+  defp normalized_schedule_type(value) when value in [:cron, :every], do: value
+  defp normalized_schedule_type("cron"), do: :cron
+  defp normalized_schedule_type("every"), do: :every
+  defp normalized_schedule_type(_value), do: :every
 
   defp run_mode_options do
     [{"once", "Once"}, {"repeat", "Repeat"}]

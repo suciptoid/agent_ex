@@ -79,6 +79,26 @@ defmodule App.TasksTest do
 
       assert task.next_run
     end
+
+    test "bootstrap-runs cron repeat tasks and persists next_run", %{
+      scope: scope,
+      agent: agent
+    } do
+      assert {:ok, task} =
+               Tasks.create_task(scope, %{
+                 "name" => "Cron repeat",
+                 "prompt" => "Run on cron",
+                 "run_mode" => "repeat",
+                 "schedule_type" => "cron",
+                 "cron_expression" => "35 4 * * *",
+                 "agent_ids" => [agent.id],
+                 "main_agent_id" => agent.id
+               })
+
+      assert task.next_run
+      assert task.schedule_type == :cron
+      assert task.cron_expression == "35 4 * * *"
+    end
   end
 
   describe "dispatch_due_tasks/1" do
@@ -112,6 +132,86 @@ defmodule App.TasksTest do
                jobs,
                &(&1.worker == "App.Tasks.TaskRunWorker" and &1.args["task_id"] == task.id)
              )
+    end
+  end
+
+  describe "update_task/3" do
+    test "repairs repeat task next_run when editing and next_run is null", %{
+      scope: scope,
+      user: user,
+      agent: agent
+    } do
+      task =
+        task_fixture(user, %{
+          agents: [agent],
+          main_agent_id: agent.id,
+          name: "Broken Cron",
+          run_mode: "repeat",
+          schedule_type: "cron",
+          cron_expression: "35 4 * * *"
+        })
+
+      {:ok, broken_task} =
+        task
+        |> Ecto.Changeset.change(
+          next_run: nil,
+          last_run_at: ~U[2026-04-23 04:35:00.000000Z]
+        )
+        |> Repo.update()
+
+      assert {:ok, updated_task} =
+               Tasks.update_task(scope, broken_task, %{
+                 "name" => "Broken Cron Updated",
+                 "prompt" => task.prompt,
+                 "run_mode" => "repeat",
+                 "schedule_type" => "cron",
+                 "cron_expression" => "35 4 * * *",
+                 "agent_ids" => [agent.id],
+                 "main_agent_id" => agent.id
+               })
+
+      assert updated_task.next_run
+      assert DateTime.compare(updated_task.next_run, DateTime.utc_now()) == :gt
+    end
+
+    test "repairs repeat task next_run when editing and next_run is in the past", %{
+      scope: scope,
+      user: user,
+      agent: agent
+    } do
+      task =
+        task_fixture(user, %{
+          agents: [agent],
+          main_agent_id: agent.id,
+          name: "Past Every",
+          run_mode: "repeat",
+          schedule_type: "every",
+          every_interval: 1,
+          every_unit: "day"
+        })
+
+      {:ok, broken_task} =
+        task
+        |> Ecto.Changeset.change(
+          next_run: ~U[2026-04-01 00:00:00.000000Z],
+          last_run_at: ~U[2026-03-31 00:00:00.000000Z]
+        )
+        |> Repo.update()
+
+      assert {:ok, updated_task} =
+               Tasks.update_task(scope, broken_task, %{
+                 "name" => "Past Every Updated",
+                 "prompt" => task.prompt,
+                 "run_mode" => "repeat",
+                 "schedule_type" => "every",
+                 "every_interval" => "1",
+                 "every_unit" => "day",
+                 "agent_ids" => [agent.id],
+                 "main_agent_id" => agent.id
+               })
+
+      assert updated_task.next_run
+      assert DateTime.compare(updated_task.next_run, DateTime.utc_now()) == :gt
     end
   end
 

@@ -38,6 +38,41 @@ defmodule AppWeb.TaskLiveTest do
     assert task.main_agent_id == agent.id
   end
 
+  test "creates a cron repeat task with persisted next_run", %{
+    conn: conn,
+    user: user,
+    scope: scope
+  } do
+    provider = provider_fixture(user)
+    agent = agent_fixture(user, %{provider: provider, name: "Scheduler"})
+
+    {:ok, live_view, _html} = live(conn, ~p"/tasks/new")
+
+    params = %{
+      "task" => %{
+        "name" => "Cron digest",
+        "prompt" => "Summarize the latest commits",
+        "run_mode" => "repeat",
+        "schedule_type" => "cron",
+        "cron_expression" => "35 4 * * *",
+        "agent_ids" => ["", agent.id],
+        "main_agent_id" => agent.id,
+        "notification_chat_room_id" => ""
+      }
+    }
+
+    render_change(live_view, "validate", params)
+    render_submit(live_view, "save", params)
+
+    assert_redirect(live_view, "/tasks")
+
+    [task] = Tasks.list_tasks(scope)
+    assert task.name == "Cron digest"
+    assert task.schedule_type == :cron
+    assert task.cron_expression == "35 4 * * *"
+    assert task.next_run
+  end
+
   test "lists tasks on the index page", %{conn: conn, user: user} do
     provider = provider_fixture(user)
     agent = agent_fixture(user, %{provider: provider, name: "Scheduler"})
@@ -119,5 +154,45 @@ defmodule AppWeb.TaskLiveTest do
     assert has_element?(live_view, "#task_cron_expression")
     assert html =~ ">Planner<"
     assert html =~ "#{channel.chat_room.title} (Gateway)"
+  end
+
+  test "editing a cron expression keeps the cron UI visible", %{conn: conn, user: user} do
+    provider = provider_fixture(user)
+    agent = agent_fixture(user, %{provider: provider, name: "Planner"})
+
+    {:ok, live_view, _html} = live(conn, ~p"/tasks/new")
+
+    render_change(live_view, "validate", %{
+      "task" => %{
+        "name" => "Morning digest",
+        "prompt" => "Summarize updates",
+        "run_mode" => "repeat",
+        "schedule_type" => "cron",
+        "cron_expression" => "35 4 * * *",
+        "agent_ids" => ["", agent.id],
+        "main_agent_id" => agent.id,
+        "notification_chat_room_id" => ""
+      }
+    })
+
+    assert has_element?(live_view, "#task_cron_expression")
+    refute has_element?(live_view, "#task_every_interval")
+
+    render_change(live_view, "validate", %{
+      "task" => %{
+        "name" => "Morning digest",
+        "prompt" => "Summarize updates",
+        "run_mode" => "repeat",
+        "schedule_type" => "cron",
+        "cron_expression" => "35 4 * * *",
+        "agent_ids" => ["", agent.id],
+        "main_agent_id" => agent.id,
+        "notification_chat_room_id" => ""
+      }
+    })
+
+    assert has_element?(live_view, "#task_schedule_type option[value=\"cron\"][selected]")
+    assert has_element?(live_view, "#task_cron_expression")
+    refute has_element?(live_view, "#task_every_interval")
   end
 end

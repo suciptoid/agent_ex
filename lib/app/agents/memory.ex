@@ -3,15 +3,13 @@ defmodule App.Agents.Memory do
 
   import Ecto.Changeset
 
-  @scopes ~w(org user)
-
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
+
   schema "agent_memories" do
     field :key, :string
     field :value, :string
     field :tags, {:array, :string}, default: []
-    field :scope, :string
 
     belongs_to :agent, App.Agents.Agent
     belongs_to :organization, App.Organizations.Organization
@@ -22,46 +20,67 @@ defmodule App.Agents.Memory do
 
   def changeset(memory, attrs) do
     memory
-    |> cast(attrs, [
-      :key,
-      :value,
-      :tags,
-      :scope,
-      :agent_id,
-      :organization_id,
-      :user_id
-    ])
-    |> validate_required([:key, :value, :scope, :agent_id, :organization_id])
-    |> validate_inclusion(:scope, @scopes)
+    |> cast(attrs, [:key, :value, :tags, :agent_id, :organization_id, :user_id])
+    |> validate_required([:key, :value, :organization_id])
     |> validate_length(:key, max: 255)
     |> update_change(:key, &trim_text/1)
     |> update_change(:tags, &normalize_tags/1)
-    |> validate_scope_fields()
+    |> normalize_ownership_fields()
+    |> validate_ownership()
     |> foreign_key_constraint(:agent_id)
     |> foreign_key_constraint(:organization_id)
     |> foreign_key_constraint(:user_id)
     |> unique_constraint(:unique_user_key,
       name: :agent_memories_unique_user_key_idx,
-      message: "memory with this key already exists for this scope"
+      message: "memory with this key already exists for this ownership"
     )
     |> unique_constraint(:unique_org_key,
       name: :agent_memories_unique_org_key_idx,
-      message: "memory with this key already exists for this scope"
+      message: "memory with this key already exists for this ownership"
+    )
+    |> unique_constraint(:unique_agent_key,
+      name: :agent_memories_unique_agent_key_idx,
+      message: "memory with this key already exists for this ownership"
     )
   end
 
-  defp validate_scope_fields(changeset) do
-    scope = get_field(changeset, :scope)
+  def ownership(%__MODULE__{agent_id: nil, user_id: nil}), do: :org
+  def ownership(%__MODULE__{agent_id: nil, user_id: user_id}) when not is_nil(user_id), do: :user
 
-    cond do
-      scope == "user" and is_nil(get_field(changeset, :user_id)) ->
-        add_error(changeset, :user_id, "is required for user-scoped memories")
+  def ownership(%__MODULE__{agent_id: agent_id, user_id: nil}) when not is_nil(agent_id),
+    do: :agent
 
-      not is_nil(get_field(changeset, :user_id)) and scope not in ["user"] ->
-        add_error(changeset, :scope, "must be user when user_id is set")
+  def ownership(%__MODULE__{}), do: :invalid
 
-      true ->
+  defp normalize_ownership_fields(changeset) do
+    case {get_field(changeset, :agent_id), get_field(changeset, :user_id)} do
+      {nil, nil} ->
         changeset
+
+      {nil, _user_id} ->
+        changeset
+
+      {_agent_id, nil} ->
+        changeset
+
+      {_agent_id, _user_id} ->
+        changeset
+    end
+  end
+
+  defp validate_ownership(changeset) do
+    case {get_field(changeset, :agent_id), get_field(changeset, :user_id)} do
+      {nil, nil} ->
+        changeset
+
+      {agent_id, nil} when not is_nil(agent_id) ->
+        changeset
+
+      {nil, user_id} when not is_nil(user_id) ->
+        changeset
+
+      {_agent_id, _user_id} ->
+        add_error(changeset, :user_id, "can't be set together with agent_id")
     end
   end
 
@@ -70,6 +89,7 @@ defmodule App.Agents.Memory do
     |> List.wrap()
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
     |> Enum.uniq()
   end
 

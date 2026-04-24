@@ -29,6 +29,12 @@ defmodule App.Agents.Tools do
       description:
         "Create and save a reusable HTTP tool for the current organization using the same fields as the tools UI.",
       visible_on_tool_list?: true
+    },
+    %{
+      name: "channel_send_message",
+      description:
+        "Send a notification into the configured gateway-linked chat room and relay it through the active channel.",
+      visible_on_tool_list?: true
     }
   ]
   @builtin_tool_names Enum.map(@builtin_tool_specs, & &1.name)
@@ -65,6 +71,7 @@ defmodule App.Agents.Tools do
         "web_fetch" -> [AlloyTools.WebFetch]
         "shell" -> [AlloyTools.Shell]
         "create_tool" -> [AlloyTools.CreateTool]
+        "channel_send_message" -> [AlloyTools.ChannelSendMessage]
         _name -> custom_tool(custom_tool_map[tool_name])
       end
     end)

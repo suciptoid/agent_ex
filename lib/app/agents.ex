@@ -110,103 +110,246 @@ defmodule App.Agents do
   # ── Memory ──
 
   def set_memory(attrs) when is_map(attrs) do
-    normalized = stringify_map(attrs)
-    scope = Map.get(normalized, "scope", "org")
+    normalized =
+      attrs
+      |> stringify_map()
+      |> normalize_memory_attrs()
 
-    merged_attrs = Map.put(normalized, "scope", scope)
-
-    case find_existing_memory(merged_attrs) do
+    case find_existing_memory(normalized) do
       %Memory{} = existing ->
-        existing
-        |> Memory.changeset(merged_attrs)
-        |> Repo.update()
+        existing |> Memory.changeset(normalized) |> Repo.update()
 
       nil ->
-        %Memory{}
-        |> Memory.changeset(merged_attrs)
-        |> Repo.insert()
+        %Memory{} |> Memory.changeset(normalized) |> Repo.insert()
     end
   end
 
-  def get_memory(scope, agent_id, key, opts \\ []) do
-    Memory
-    |> where([m], m.agent_id == ^agent_id and m.key == ^key and m.scope == ^scope)
-    |> apply_scope_filter(opts)
-    |> Repo.one()
+  def get_memory(scope, key, opts \\ [])
+
+  def get_memory(scope, key, opts) when is_list(opts) do
+    scope = normalize_optional_text(scope)
+    key = normalize_optional_text(key)
+
+    cond do
+      is_nil(scope) or is_nil(key) ->
+        nil
+
+      true ->
+        Memory
+        |> where([m], m.key == ^key)
+        |> maybe_filter_memory_scope(scope, opts)
+        |> Repo.one()
+    end
   end
 
-  def get_memories_by_tags(agent_id, tags, opts \\ []) when is_list(tags) do
-    Memory
-    |> where([m], m.agent_id == ^agent_id)
-    |> apply_scope_filter(opts)
-    |> where([m], fragment("? && ?::varchar[]", m.tags, ^tags))
-    |> order_by([m], desc: m.updated_at)
-    |> Repo.all()
+  def get_memories_by_tags(tags, opts \\ []) when is_list(tags) do
+    tags = normalize_tags(tags)
+
+    if tags == [] do
+      []
+    else
+      accessible_memories_query(opts)
+      |> where([m], fragment("? && ?::varchar[]", m.tags, ^tags))
+      |> order_by([m], desc: m.updated_at)
+      |> Repo.all()
+    end
   end
 
   def list_memories_for_prompt(agent_id, opts \\ []) do
     tags = ~w(preferences preference profile)
 
-    Memory
-    |> where([m], m.agent_id == ^agent_id)
-    |> apply_scope_filter(opts)
-    |> where([m], fragment("? && ?::varchar[]", m.tags, ^tags))
-    |> order_by([m], asc: m.inserted_at)
-    |> Repo.all()
+    case {normalize_optional_text(agent_id),
+          normalize_optional_text(Keyword.get(opts, :organization_id))} do
+      {nil, _} ->
+        []
+
+      {_, nil} ->
+        []
+
+      {agent_id, organization_id} ->
+        Memory
+        |> where(
+          [m],
+          m.organization_id == ^organization_id and m.agent_id == ^agent_id and is_nil(m.user_id)
+        )
+        |> where([m], fragment("? && ?::varchar[]", m.tags, ^tags))
+        |> order_by([m], asc: m.inserted_at)
+        |> Repo.all()
+    end
   end
 
-  def search_memories(agent_id, query, opts \\ []) when is_binary(query) do
-    pattern = "%#{query}%"
+  def search_memories(query, opts \\ []) when is_binary(query) do
+    case normalize_optional_text(query) do
+      nil ->
+        []
 
-    Memory
-    |> where([m], m.agent_id == ^agent_id)
-    |> apply_scope_filter(opts)
-    |> where([m], ilike(m.key, ^pattern) or ilike(m.value, ^pattern))
-    |> order_by([m], desc: m.updated_at)
-    |> limit(20)
-    |> Repo.all()
+      trimmed_query ->
+        pattern = "%#{trimmed_query}%"
+
+        accessible_memories_query(opts)
+        |> where([m], ilike(m.key, ^pattern) or ilike(m.value, ^pattern))
+        |> order_by([m], desc: m.updated_at)
+        |> limit(20)
+        |> Repo.all()
+    end
   end
 
   def delete_memory(%Memory{} = memory), do: Repo.delete(memory)
 
   defp find_existing_memory(attrs) do
-    agent_id = Map.get(attrs, "agent_id")
-    key = Map.get(attrs, "key")
-    scope = Map.get(attrs, "scope", "org")
-    user_id = Map.get(attrs, "user_id")
+    organization_id = normalize_optional_text(Map.get(attrs, "organization_id"))
+    key = normalize_optional_text(Map.get(attrs, "key"))
+    user_id = normalize_optional_text(Map.get(attrs, "user_id"))
+    agent_id = normalize_optional_text(Map.get(attrs, "agent_id"))
 
-    if is_nil(agent_id) or is_nil(key) do
+    if is_nil(organization_id) or is_nil(key) do
       nil
     else
       Memory
-      |> where([m], m.agent_id == ^agent_id and m.key == ^key and m.scope == ^scope)
-      |> maybe_where_user_id(user_id)
+      |> where([m], m.organization_id == ^organization_id and m.key == ^key)
+      |> maybe_owner_filter(user_id, agent_id)
       |> Repo.one()
     end
   end
 
-  defp maybe_where_user_id(query, nil), do: where(query, [m], is_nil(m.user_id))
-  defp maybe_where_user_id(query, user_id), do: where(query, [m], m.user_id == ^user_id)
+  defp maybe_owner_filter(query, nil, nil),
+    do: where(query, [m], is_nil(m.user_id) and is_nil(m.agent_id))
 
-  defp apply_scope_filter(query, opts) do
-    query
-    |> maybe_filter_scope(opts)
+  defp maybe_owner_filter(query, user_id, nil),
+    do: where(query, [m], m.user_id == ^user_id and is_nil(m.agent_id))
+
+  defp maybe_owner_filter(query, nil, agent_id),
+    do: where(query, [m], m.agent_id == ^agent_id and is_nil(m.user_id))
+
+  defp maybe_owner_filter(query, _user_id, _agent_id), do: where(query, [m], false)
+
+  defp accessible_memories_query(opts) do
+    organization_id = Keyword.get(opts, :organization_id)
+
+    if is_binary(organization_id) and organization_id != "" do
+      Memory
+      |> where([m], m.organization_id == ^organization_id)
+      |> where(^accessible_memory_dynamic(opts))
+    else
+      where(Memory, [m], false)
+    end
   end
 
-  defp maybe_filter_scope(query, opts) do
-    scope = Keyword.get(opts, :scope)
+  defp accessible_memory_dynamic(opts) do
     user_id = Keyword.get(opts, :user_id)
+    agent_id = Keyword.get(opts, :agent_id)
 
-    query
-    |> maybe_scope_where(scope)
-    |> maybe_user_where(user_id)
+    dynamic =
+      dynamic([m], is_nil(m.user_id) and is_nil(m.agent_id))
+
+    dynamic =
+      if is_binary(user_id) and user_id != "" do
+        dynamic(
+          [m],
+          ^dynamic or (m.user_id == ^user_id and is_nil(m.agent_id))
+        )
+      else
+        dynamic
+      end
+
+    if is_binary(agent_id) and agent_id != "" do
+      dynamic(
+        [m],
+        ^dynamic or (m.agent_id == ^agent_id and is_nil(m.user_id))
+      )
+    else
+      dynamic
+    end
   end
 
-  defp maybe_scope_where(query, nil), do: query
-  defp maybe_scope_where(query, scope), do: where(query, [m], m.scope == ^scope)
+  defp maybe_filter_memory_scope(query, scope, opts) do
+    organization_id = Keyword.get(opts, :organization_id)
 
-  defp maybe_user_where(query, nil), do: query
-  defp maybe_user_where(query, user_id), do: where(query, [m], m.user_id == ^user_id)
+    if is_binary(organization_id) and organization_id != "" do
+      base_query = where(query, [m], m.organization_id == ^organization_id)
+
+      case scope do
+        "org" ->
+          where(base_query, [m], is_nil(m.user_id) and is_nil(m.agent_id))
+
+        "user" ->
+          user_id = Keyword.get(opts, :user_id)
+
+          if is_binary(user_id) and user_id != "" do
+            where(base_query, [m], m.user_id == ^user_id and is_nil(m.agent_id))
+          else
+            where(base_query, [m], false)
+          end
+
+        "agent" ->
+          agent_id = Keyword.get(opts, :agent_id)
+
+          if is_binary(agent_id) and agent_id != "" do
+            where(base_query, [m], m.agent_id == ^agent_id and is_nil(m.user_id))
+          else
+            where(base_query, [m], false)
+          end
+
+        _other ->
+          where(base_query, [m], false)
+      end
+    else
+      where(query, [m], false)
+    end
+  end
+
+  defp normalize_memory_attrs(attrs) do
+    scope = normalize_optional_text(Map.get(attrs, "scope")) || "org"
+
+    attrs =
+      attrs
+      |> maybe_put_trimmed("key")
+      |> maybe_put_trimmed("value")
+      |> maybe_put_trimmed("organization_id")
+      |> maybe_put_trimmed("user_id")
+      |> maybe_put_trimmed("agent_id")
+      |> Map.delete("scope")
+
+    case scope do
+      "org" ->
+        attrs
+        |> Map.put("agent_id", nil)
+        |> Map.put("user_id", nil)
+
+      "user" ->
+        Map.put(attrs, "agent_id", nil)
+
+      "agent" ->
+        Map.put(attrs, "user_id", nil)
+
+      _other ->
+        attrs
+    end
+  end
+
+  defp maybe_put_trimmed(attrs, key) do
+    case Map.fetch(attrs, key) do
+      {:ok, value} -> Map.put(attrs, key, normalize_optional_text(value))
+      :error -> attrs
+    end
+  end
+
+  defp normalize_tags(tags) do
+    tags
+    |> List.wrap()
+    |> Enum.map(&normalize_optional_text/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+  end
+
+  defp normalize_optional_text(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp normalize_optional_text(value), do: value
 
   defp stringify_map(attrs) when is_map(attrs) do
     Map.new(attrs, fn {k, v} -> {to_string(k), v} end)

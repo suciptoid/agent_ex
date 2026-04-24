@@ -81,7 +81,12 @@ defmodule App.ChatTest do
       refute idle_entry.loading
     end
 
-    test "marks rooms linked to gateway channels", %{scope: scope, user: user, agent: agent} do
+    test "shows only general rooms in the sidebar and keeps gateway rooms in the management summary",
+         %{
+           scope: scope,
+           user: user,
+           agent: agent
+         } do
       alias App.Gateways
 
       linked_provider = provider_fixture(user)
@@ -104,12 +109,21 @@ defmodule App.ChatTest do
 
       regular_room = chat_room_fixture(user, %{title: "Regular Room", agents: [agent]})
 
+      archived_room =
+        chat_room_fixture(user, %{title: "Archived Room", agents: [agent], type: :archived})
+
       sidebar_rooms = Chat.list_chat_rooms_for_sidebar(scope)
+      management_rooms = Chat.list_chat_room_summaries(scope)
       linked_entry = Enum.find(sidebar_rooms, &(&1.id == linked_channel.chat_room_id))
       regular_entry = Enum.find(sidebar_rooms, &(&1.id == regular_room.id))
+      archived_entry = Enum.find(sidebar_rooms, &(&1.id == archived_room.id))
+      linked_summary = Enum.find(management_rooms, &(&1.id == linked_channel.chat_room_id))
 
-      assert linked_entry.gateway_linked
-      refute regular_entry.gateway_linked
+      assert regular_entry
+      assert regular_entry.type == :general
+      assert linked_entry == nil
+      assert archived_entry == nil
+      assert linked_summary.gateway_linked
     end
   end
 

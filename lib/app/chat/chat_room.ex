@@ -3,11 +3,14 @@ defmodule App.Chat.ChatRoom do
 
   import Ecto.Changeset
 
+  @types [:general, :archived, :task, :gateway]
+
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
   schema "chat_rooms" do
     field :title, :string
+    field :type, Ecto.Enum, values: @types, default: :general
     field :agent_ids, {:array, :binary_id}, virtual: true, default: []
     field :active_agent_id, :binary_id, virtual: true
 
@@ -24,7 +27,7 @@ defmodule App.Chat.ChatRoom do
 
   def changeset(chat_room, attrs) do
     chat_room
-    |> cast(attrs, [:title, :agent_ids, :active_agent_id, :parent_id])
+    |> cast(attrs, [:title, :type, :agent_ids, :active_agent_id, :parent_id])
     |> update_change(:title, &trim_text/1)
     |> update_change(:agent_ids, &normalize_agent_ids/1)
     |> validate_length(:title, max: 160)
@@ -63,6 +66,8 @@ defmodule App.Chat.ChatRoom do
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.uniq()
   end
+
+  def types, do: @types
 
   defp trim_text(value) when is_binary(value), do: String.trim(value)
   defp trim_text(value), do: value

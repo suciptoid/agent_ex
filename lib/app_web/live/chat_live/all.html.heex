@@ -1,0 +1,179 @@
+<Layouts.dashboard
+  flash={@flash}
+  current_scope={@current_scope}
+  sidebar_chat_rooms={@sidebar_chat_rooms}
+  sidebar_organizations={@sidebar_organizations}
+>
+  <div class="flex h-full min-h-0 flex-col gap-6 p-4 sm:p-6 lg:p-8">
+    <section class="rounded-3xl border border-border/70 bg-card px-5 py-5 shadow-sm sm:px-6 sm:py-6 lg:px-8">
+      <div class="flex flex-col gap-5">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div class="space-y-2">
+            <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+              Chat management
+            </p>
+            <div class="space-y-1">
+              <h1
+                id="chat-all-heading"
+                class="text-2xl font-semibold tracking-tight text-foreground"
+              >
+                All chats
+              </h1>
+              <p class="max-w-3xl text-sm leading-6 text-muted-foreground">
+                Browse general, archived, task, and gateway conversations outside the sidebar.
+              </p>
+            </div>
+          </div>
+
+          <.link navigate={~p"/chat"}>
+            <.button id="chat-all-new-chat-button" class="gap-2 shadow-none">
+              <.icon name="hero-plus" class="size-4" /> New chat
+            </.button>
+          </.link>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <.link
+            :for={tab <- tabs()}
+            id={"chat-all-tab-#{tab.id}"}
+            patch={~p"/chat/all?tab=#{tab.id}"}
+            class={[
+              "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
+              if(@selected_tab == tab.id,
+                do: "border-primary/20 bg-primary/10 text-primary",
+                else:
+                  "border-border bg-background text-foreground/70 hover:bg-accent hover:text-foreground"
+              )
+            ]}
+          >
+            <span>{tab.label}</span>
+            <span class="rounded-full bg-current/10 px-1.5 py-0.5 text-[11px] leading-none">
+              {Map.get(@tab_counts, tab.id, 0)}
+            </span>
+          </.link>
+        </div>
+      </div>
+    </section>
+
+    <section class="min-h-0 flex-1 overflow-hidden rounded-3xl border border-border/70 bg-card shadow-sm">
+      <div class="flex h-full min-h-0 flex-col">
+        <div class="border-b border-border/70 px-5 py-4 sm:px-6">
+          <p class="text-sm text-muted-foreground">
+            Showing <span class="font-semibold text-foreground">{length(@chat_rooms)}</span>
+            conversations.
+          </p>
+        </div>
+
+        <div class="min-h-0 flex-1 overflow-y-auto">
+          <div
+            :if={@chat_rooms == []}
+            id="chat-all-empty-state"
+            class="px-5 py-12 text-center sm:px-6"
+          >
+            <div class="mx-auto flex max-w-md flex-col items-center gap-3">
+              <div class="flex size-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+                <.icon name="hero-chat-bubble-left-right" class="size-7" />
+              </div>
+              <div class="space-y-1">
+                <p class="text-base font-semibold text-foreground">No chats in this tab</p>
+                <p class="text-sm text-muted-foreground">
+                  Switch tabs or start a new conversation to populate this list.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div :if={@chat_rooms != []} id="chat-all-list" class="divide-y divide-border/70">
+            <div
+              :for={chat_room <- @chat_rooms}
+              id={"chat-all-row-#{chat_room.id}"}
+              class="flex flex-col gap-4 px-5 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between"
+            >
+              <div class="min-w-0 flex-1 space-y-2">
+                <div class="flex flex-wrap items-center gap-2">
+                  <.link
+                    id={"chat-all-link-#{chat_room.id}"}
+                    navigate={~p"/chat/#{chat_room.id}"}
+                    class="truncate text-sm font-semibold text-foreground transition-colors hover:text-primary"
+                  >
+                    {chat_room_title(chat_room)}
+                  </.link>
+
+                  <span class={[
+                    "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                    chat_room_type_classes(chat_room.type)
+                  ]}>
+                    {chat_room_type_label(chat_room.type)}
+                  </span>
+
+                  <span
+                    :if={chat_room.gateway_linked}
+                    id={"chat-all-gateway-badge-#{chat_room.id}"}
+                    class="inline-flex items-center gap-1 rounded-full border border-primary/15 bg-primary/5 px-2 py-0.5 text-[11px] font-medium text-primary"
+                  >
+                    <.icon name="hero-signal" class="size-3" /> Linked channel
+                  </span>
+
+                  <span
+                    :if={chat_room.approval_needed}
+                    id={"chat-all-approval-badge-#{chat_room.id}"}
+                    class="inline-flex items-center gap-1 rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700"
+                  >
+                    <.icon name="hero-exclamation-triangle" class="size-3" /> Pending approval
+                  </span>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  <span>Updated {Calendar.strftime(chat_room.updated_at, "%Y-%m-%d %H:%M")}</span>
+                  <span
+                    :if={chat_room.loading}
+                    id={"chat-all-loading-#{chat_room.id}"}
+                    class="inline-flex items-center gap-1"
+                  >
+                    <.icon name="hero-arrow-path" class="size-3 animate-spin" /> Running
+                  </span>
+                </div>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2 lg:justify-end">
+                <button
+                  :if={action_available?(:archive, chat_room)}
+                  id={"chat-all-archive-#{chat_room.id}"}
+                  type="button"
+                  phx-click="archive-chat-room"
+                  phx-value-id={chat_room.id}
+                  data-confirm="Archive this chat?"
+                  class="inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground/80 transition hover:bg-accent hover:text-foreground"
+                >
+                  <.icon name="hero-archive-box" class="size-3.5" /> Archive
+                </button>
+
+                <button
+                  :if={action_available?(:unarchive, chat_room)}
+                  id={"chat-all-unarchive-#{chat_room.id}"}
+                  type="button"
+                  phx-click="unarchive-chat-room"
+                  phx-value-id={chat_room.id}
+                  class="inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground/80 transition hover:bg-accent hover:text-foreground"
+                >
+                  <.icon name="hero-arrow-uturn-left" class="size-3.5" /> Unarchive
+                </button>
+
+                <button
+                  id={"chat-all-delete-#{chat_room.id}"}
+                  type="button"
+                  phx-click="delete-chat-room"
+                  phx-value-id={chat_room.id}
+                  data-confirm="Delete this chat?"
+                  class="inline-flex items-center gap-2 rounded-full border border-destructive/20 bg-destructive/5 px-3 py-1.5 text-xs font-medium text-destructive transition hover:bg-destructive/10"
+                >
+                  <.icon name="hero-trash" class="size-3.5" /> Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</Layouts.dashboard>

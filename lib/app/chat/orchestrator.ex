@@ -10,7 +10,18 @@ defmodule App.Chat.Orchestrator do
   alias App.Users.Scope
 
   def send_message(%Scope{} = scope, %ChatRoom{} = chat_room, content) when is_binary(content) do
+    send_with_opts(chat_room, content, user_id: scope.user.id)
+  end
+
+  def send_system_message(%ChatRoom{} = chat_room, content, opts \\ [])
+      when is_binary(content) and is_list(opts) do
+    send_with_opts(chat_room, content, opts)
+  end
+
+  defp send_with_opts(%ChatRoom{} = chat_room, content, opts) do
     content = String.trim(content)
+    user_id = Keyword.get(opts, :user_id)
+    name = normalize_optional_text(Keyword.get(opts, :name))
 
     if content == "" do
       {:error, "Message cannot be blank"}
@@ -23,7 +34,8 @@ defmodule App.Chat.Orchestrator do
              Chat.create_message(chat_room, %{
                role: "user",
                content: content,
-               user_id: scope.user.id
+               user_id: user_id,
+               name: name
              }),
            messages <- Chat.list_messages(chat_room),
            {:ok, agent} <- active_agent(chat_room) do
@@ -33,8 +45,7 @@ defmodule App.Chat.Orchestrator do
 
         run_opts =
           chat_room
-          |> multi_agent_opts(messages, callbacks)
-          |> Keyword.put(:user_id, scope.user.id)
+          |> sync_run_opts(messages, callbacks, opts)
           |> maybe_inject_title_tool(chat_room, callbacks)
 
         maybe_seed_initial_title(chat_room, messages, callbacks)
@@ -404,6 +415,10 @@ defmodule App.Chat.Orchestrator do
 
   defp blank?(value), do: value in [nil, ""]
 
+  defp maybe_put_run_opt(opts, _key, nil), do: opts
+  defp maybe_put_run_opt(opts, _key, []), do: opts
+  defp maybe_put_run_opt(opts, key, value), do: Keyword.put(opts, key, value)
+
   defp run_sync_with_context_control(%ChatRoom{} = chat_room, agent, messages, run_opts) do
     run_with_context_control(chat_room, agent, messages, run_opts, fn prepared_messages ->
       agent_runner().run(agent, prepared_messages, run_opts)
@@ -632,6 +647,15 @@ defmodule App.Chat.Orchestrator do
   end
 
   defp normalize_stream_callbacks(_other), do: [recipient: nil]
+
+  defp sync_run_opts(chat_room, messages, callbacks, opts) do
+    chat_room
+    |> multi_agent_opts(messages, callbacks)
+    |> maybe_put_run_opt(:user_id, Keyword.get(opts, :user_id))
+    |> maybe_put_run_opt(:extra_system_prompt, Keyword.get(opts, :extra_system_prompt))
+    |> maybe_put_run_opt(:extra_tools, Keyword.get(opts, :extra_tools))
+    |> maybe_put_run_opt(:alloy_context, Keyword.get(opts, :alloy_context))
+  end
 
   defp callback_run_opts(callbacks) do
     [
@@ -924,6 +948,15 @@ defmodule App.Chat.Orchestrator do
   end
 
   defp maybe_seed_initial_title(_chat_room, _messages, _callbacks), do: :ok
+
+  defp normalize_optional_text(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp normalize_optional_text(value), do: value
 
   defp fallback_title_from_messages(messages) do
     messages

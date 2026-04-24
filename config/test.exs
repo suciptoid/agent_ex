@@ -52,3 +52,9 @@ config :app, App.Vault,
   ciphers: [
     default: {Cloak.Ciphers.AES.GCM, tag: "AES.GCM.V1", key: :crypto.strong_rand_bytes(32)}
   ]
+
+config :app, Oban,
+  repo: App.Repo,
+  testing: :manual,
+  plugins: false,
+  queues: false

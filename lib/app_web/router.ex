@@ -90,7 +90,11 @@ defmodule AppWeb.Router do
       live "/agents", AgentLive.Index, :index
       live "/agents/new", AgentLive.New, :new
       live "/agents/:id/edit", AgentLive.New, :edit
+      live "/tasks", TaskLive.Index, :index
+      live "/tasks/new", TaskLive.Form, :new
+      live "/tasks/:id/edit", TaskLive.Form, :edit
       live "/chat", ChatLive.Index, :index
+      live "/chat/all", ChatLive.All, :index
       live "/chat/:id", ChatLive.Show, :show
       live "/gateways", GatewayLive.Index, :index
       live "/gateways/new", GatewayLive.Form, :new

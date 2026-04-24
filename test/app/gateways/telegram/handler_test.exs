@@ -152,6 +152,12 @@ defmodule App.Gateways.Telegram.HandlerTest do
     rotated_channel = Gateways.get_channel(gateway, 1234)
     assert rotated_channel.chat_room_id != original_chat_room_id
 
+    original_chat_room = Chat.get_chat_room!(scope, original_chat_room_id)
+    rotated_chat_room = Chat.get_chat_room!(scope, rotated_channel.chat_room_id)
+
+    assert original_chat_room.type == :archived
+    assert rotated_chat_room.type == :gateway
+
     assert {:ok, _stream_pid} =
              Handler.handle_update(gateway, %{
                "message" => %{

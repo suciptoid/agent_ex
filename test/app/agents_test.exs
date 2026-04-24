@@ -133,4 +133,130 @@ defmodule App.AgentsTest do
       assert Ecto.Changeset.get_field(changeset, :thinking_mode) == "enabled"
     end
   end
+
+  describe "memory scoping" do
+    test "org memories are shared across agents and stored without agent or user ids", %{
+      user: user,
+      scope: scope,
+      provider: provider
+    } do
+      first_agent = agent_fixture(user, %{provider: provider, name: "Planner"})
+      second_agent = agent_fixture(user, %{provider: provider, name: "Reviewer"})
+
+      assert {:ok, memory} =
+               Agents.set_memory(%{
+                 "organization_id" => scope.organization.id,
+                 "agent_id" => first_agent.id,
+                 "user_id" => user.id,
+                 "scope" => "org",
+                 "key" => "release_window",
+                 "value" => "Friday"
+               })
+
+      assert App.Agents.Memory.ownership(memory) == :org
+      assert memory.agent_id == nil
+      assert memory.user_id == nil
+
+      assert {:ok, updated_memory} =
+               Agents.set_memory(%{
+                 "organization_id" => scope.organization.id,
+                 "agent_id" => second_agent.id,
+                 "scope" => "org",
+                 "key" => "release_window",
+                 "value" => "Monday"
+               })
+
+      assert updated_memory.id == memory.id
+
+      assert %App.Agents.Memory{} =
+               fetched =
+               Agents.get_memory("org", "release_window",
+                 organization_id: scope.organization.id,
+                 user_id: user.id,
+                 agent_id: second_agent.id
+               )
+
+      assert fetched.value == "Monday"
+      assert App.Agents.Memory.ownership(fetched) == :org
+      assert fetched.agent_id == nil
+      assert fetched.user_id == nil
+    end
+
+    test "user memories are shared across agents for the same user", %{
+      user: user,
+      scope: scope,
+      provider: provider
+    } do
+      first_agent = agent_fixture(user, %{provider: provider, name: "Planner"})
+      second_agent = agent_fixture(user, %{provider: provider, name: "Reviewer"})
+
+      assert {:ok, memory} =
+               Agents.set_memory(%{
+                 "organization_id" => scope.organization.id,
+                 "agent_id" => first_agent.id,
+                 "user_id" => user.id,
+                 "scope" => "user",
+                 "key" => "preferred_editor",
+                 "value" => "Neovim"
+               })
+
+      assert App.Agents.Memory.ownership(memory) == :user
+      assert memory.agent_id == nil
+      assert memory.user_id == user.id
+
+      assert %App.Agents.Memory{} =
+               fetched =
+               Agents.get_memory("user", "preferred_editor",
+                 organization_id: scope.organization.id,
+                 user_id: user.id,
+                 agent_id: second_agent.id
+               )
+
+      assert fetched.id == memory.id
+      assert fetched.value == "Neovim"
+      assert App.Agents.Memory.ownership(fetched) == :user
+    end
+
+    test "prompt memories only include agent-scoped preferences", %{
+      user: user,
+      scope: scope,
+      provider: provider
+    } do
+      agent = agent_fixture(user, %{provider: provider, name: "Planner"})
+
+      {:ok, _org_memory} =
+        Agents.set_memory(%{
+          "organization_id" => scope.organization.id,
+          "scope" => "org",
+          "key" => "team_language",
+          "value" => "English",
+          "tags" => ["preferences"]
+        })
+
+      {:ok, _user_memory} =
+        Agents.set_memory(%{
+          "organization_id" => scope.organization.id,
+          "user_id" => user.id,
+          "scope" => "user",
+          "key" => "user_timezone",
+          "value" => "UTC",
+          "tags" => ["preferences"]
+        })
+
+      {:ok, agent_memory} =
+        Agents.set_memory(%{
+          "organization_id" => scope.organization.id,
+          "agent_id" => agent.id,
+          "scope" => "agent",
+          "key" => "style_guide",
+          "value" => "Be concise",
+          "tags" => ["preferences"]
+        })
+
+      memories = Agents.list_memories_for_prompt(agent.id, organization_id: scope.organization.id)
+
+      assert Enum.map(memories, & &1.id) == [agent_memory.id]
+      assert App.Agents.Memory.ownership(agent_memory) == :agent
+    end
+  end
 end

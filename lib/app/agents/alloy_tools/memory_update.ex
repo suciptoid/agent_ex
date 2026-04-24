@@ -30,8 +30,9 @@ defmodule App.Agents.AlloyTools.MemoryUpdate do
         },
         scope: %{
           type: "string",
-          description: "Scope of the memory to update: 'org' or 'user'. Default: 'org'",
-          enum: ["org", "user"]
+          description:
+            "Ownership of the memory to update: 'org', 'user', or 'agent'. Default: 'org'",
+          enum: ["org", "user", "agent"]
         }
       },
       required: ["key"]
@@ -41,51 +42,52 @@ defmodule App.Agents.AlloyTools.MemoryUpdate do
   @impl true
   def execute(input, context) do
     agent_id = Map.get(context, :agent_id) || Map.get(context, "agent_id")
-    key = Map.get(input, :key) || Map.get(input, "key")
-    requested_scope = Map.get(input, :scope) || Map.get(input, "scope") || "org"
+    key = normalize_optional_text(Map.get(input, :key) || Map.get(input, "key"))
+    scope = normalize_optional_text(Map.get(input, :scope) || Map.get(input, "scope")) || "org"
     user_id = Map.get(context, :user_id) || Map.get(context, "user_id")
-
-    scope =
-      if requested_scope == "user" and is_nil(user_id) do
-        "org"
-      else
-        requested_scope
-      end
 
     opts =
       [
         organization_id:
           Map.get(context, :organization_id) || Map.get(context, "organization_id"),
-        user_id: user_id
+        user_id: user_id,
+        agent_id: agent_id
       ]
 
-    case App.Agents.get_memory(scope, agent_id, key, opts) do
-      %App.Agents.Memory{} = memory ->
-        update_attrs =
-          %{}
-          |> maybe_put("value", Map.get(input, :value) || Map.get(input, "value"))
-          |> maybe_put("tags", Map.get(input, :tags) || Map.get(input, "tags"))
+    if is_nil(key) do
+      {:error, "Provide a non-blank key to update"}
+    else
+      case App.Agents.get_memory(scope, key, opts) do
+        %App.Agents.Memory{} = memory ->
+          update_attrs =
+            %{}
+            |> maybe_put(
+              "value",
+              normalize_optional_text(Map.get(input, :value) || Map.get(input, "value"))
+            )
+            |> maybe_put("tags", Map.get(input, :tags) || Map.get(input, "tags"))
 
-        if map_size(update_attrs) == 0 do
-          {:error,
-           "Provide at least one field to update: 'value' or 'tags'. Use memory_set to update value and tags together."}
-        else
-          memory
-          |> App.Agents.Memory.changeset(update_attrs)
-          |> App.Repo.update()
-          |> case do
-            {:ok, updated} ->
-              {:ok,
-               "Memory updated: #{updated.key} (scope: #{updated.scope}, tags: #{inspect(updated.tags)})"}
+          if map_size(update_attrs) == 0 do
+            {:error,
+             "Provide at least one field to update: 'value' or 'tags'. Use memory_set to update value and tags together."}
+          else
+            memory
+            |> App.Agents.Memory.changeset(update_attrs)
+            |> App.Repo.update()
+            |> case do
+              {:ok, updated} ->
+                {:ok,
+                 "Memory updated: #{updated.key} (ownership: #{App.Agents.Memory.ownership(updated)}, tags: #{inspect(updated.tags)})"}
 
-            {:error, changeset} ->
-              {:error, format_errors(changeset)}
+              {:error, changeset} ->
+                {:error, format_errors(changeset)}
+            end
           end
-        end
 
-      nil ->
-        {:error,
-         "No memory found with key '#{key}' in scope '#{scope}'. Use memory_set to create a new memory."}
+        nil ->
+          {:error,
+           "No memory found with key '#{key}' in ownership '#{scope}'. Use memory_set to create a new memory."}
+      end
     end
   end
 
@@ -102,4 +104,13 @@ defmodule App.Agents.AlloyTools.MemoryUpdate do
 
     "Failed to update memory: #{inspect(errors)}"
   end
+
+  defp normalize_optional_text(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp normalize_optional_text(value), do: value
 end

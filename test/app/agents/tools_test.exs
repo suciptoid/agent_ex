@@ -24,7 +24,12 @@ defmodule App.Agents.ToolsTest do
   end
 
   test "available_tools/0 lists builtin tools" do
-    assert Tools.available_tools() == ["web_fetch", "shell", "create_tool"]
+    assert Tools.available_tools() == [
+             "web_fetch",
+             "shell",
+             "create_tool",
+             "channel_send_message"
+           ]
   end
 
   test "resolve/1 returns configured Alloy tool modules" do
@@ -39,6 +44,11 @@ defmodule App.Agents.ToolsTest do
     tools = Tools.resolve(["create_tool"], organization_id: Ecto.UUID.generate())
     assert App.Agents.AlloyTools.CreateTool in tools
     assert App.Agents.AlloyTools.MemorySet in tools
+  end
+
+  test "resolve/1 returns the channel_send_message builtin" do
+    tools = Tools.resolve(["channel_send_message"])
+    assert App.Agents.AlloyTools.ChannelSendMessage in tools
   end
 
   test "resolve/2 includes custom tools for the current user", %{user: user} do
@@ -163,5 +173,15 @@ defmodule App.Agents.ToolsTest do
 
   test "do_shell/1 executes commands" do
     assert {:ok, "hello\n"} = Tools.do_shell(%{command: "printf 'hello\\n'"})
+  end
+
+  test "memory_get rejects blank key lookups" do
+    assert {:error, message} =
+             App.Agents.AlloyTools.MemoryGet.execute(
+               %{"key" => "   ", "scope" => "org"},
+               %{"organization_id" => Ecto.UUID.generate()}
+             )
+
+    assert message =~ "Provide a non-blank key"
   end
 end

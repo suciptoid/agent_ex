@@ -13,9 +13,13 @@ defmodule App.Chat do
   alias App.Users.Scope
   alias App.Users.User
 
-  def list_chat_rooms(%Scope{} = scope) do
+  @sidebar_chat_room_types [:general]
+  @chat_room_types [:general, :archived, :task, :gateway]
+
+  def list_chat_rooms(%Scope{} = scope, opts \\ []) when is_list(opts) do
     ChatRoom
     |> where([chat_room], chat_room.organization_id == ^Scope.organization_id!(scope))
+    |> maybe_filter_chat_room_types(opts)
     |> order_by([chat_room], desc: chat_room.updated_at, desc: chat_room.inserted_at)
     |> preload(^chat_room_preloads())
     |> Repo.all()
@@ -108,6 +112,31 @@ defmodule App.Chat do
     ensure_user_owns_chat_room!(scope, chat_room)
     cancel_active_room_streams(chat_room.id)
     Repo.delete(chat_room)
+  end
+
+  def archive_chat_room(%Scope{} = scope, %ChatRoom{} = chat_room) do
+    set_chat_room_type(scope, chat_room, :archived)
+  end
+
+  def unarchive_chat_room(%Scope{} = scope, %ChatRoom{} = chat_room) do
+    set_chat_room_type(scope, chat_room, :general)
+  end
+
+  def set_chat_room_type(%Scope{} = scope, %ChatRoom{} = chat_room, type)
+      when type in @chat_room_types do
+    ensure_user_owns_chat_room!(scope, chat_room)
+
+    if chat_room.type == type do
+      {:ok, chat_room}
+    else
+      chat_room
+      |> Ecto.Changeset.change(type: type)
+      |> Repo.update()
+      |> case do
+        {:ok, chat_room} -> {:ok, preload_chat_room(chat_room)}
+        {:error, _changeset} = error -> error
+      end
+    end
   end
 
   def add_agent_to_room(%Scope{} = scope, %ChatRoom{} = chat_room, agent_id, opts \\ []) do
@@ -302,6 +331,11 @@ defmodule App.Chat do
   def send_message(%Scope{} = scope, %ChatRoom{} = chat_room, content) do
     chat_room = ensure_loaded_chat_room(scope, chat_room)
     chat_orchestrator().send_message(scope, chat_room, content)
+  end
+
+  def send_system_message(%ChatRoom{} = chat_room, content, opts \\ []) when is_list(opts) do
+    chat_room = preload_chat_room(chat_room)
+    chat_orchestrator().send_system_message(chat_room, content, opts)
   end
 
   def find_subagent_report(%ChatRoom{} = chat_room, subagent_id) when is_binary(subagent_id) do
@@ -730,12 +764,17 @@ defmodule App.Chat do
   Limited to 30 most recent.
   """
   def list_chat_rooms_for_sidebar(%Scope{} = scope) do
+    list_chat_room_summaries(scope, types: @sidebar_chat_room_types, limit: 30)
+  end
+
+  def list_chat_room_summaries(%Scope{} = scope, opts \\ []) when is_list(opts) do
     chat_rooms =
       ChatRoom
       |> where([cr], cr.organization_id == ^Scope.organization_id!(scope))
-      |> order_by([cr], desc: cr.updated_at)
-      |> select([cr], map(cr, [:id, :title, :updated_at]))
-      |> limit(30)
+      |> maybe_filter_chat_room_types(opts)
+      |> order_by([cr], desc: cr.updated_at, desc: cr.inserted_at)
+      |> maybe_limit_chat_rooms(opts)
+      |> select([cr], map(cr, [:id, :title, :type, :updated_at, :inserted_at]))
       |> Repo.all()
 
     loading_ids = sidebar_loading_chat_room_ids(chat_rooms)
@@ -828,6 +867,26 @@ defmodule App.Chat do
     )
     |> Repo.all()
     |> MapSet.new()
+  end
+
+  defp maybe_filter_chat_room_types(query, opts) do
+    case Keyword.get(opts, :types) do
+      nil ->
+        query
+
+      [] ->
+        where(query, [chat_room], false)
+
+      types when is_list(types) ->
+        where(query, [chat_room], chat_room.type in ^types)
+    end
+  end
+
+  defp maybe_limit_chat_rooms(query, opts) do
+    case Keyword.get(opts, :limit) do
+      limit when is_integer(limit) and limit > 0 -> limit(query, ^limit)
+      _other -> query
+    end
   end
 
   defp chat_orchestrator, do: Application.get_env(:app, :chat_orchestrator, App.Chat.Orchestrator)

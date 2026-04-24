@@ -331,6 +331,8 @@ defmodule AppWeb.AgentLive.FormComponent do
                       Execute local shell commands and return stdout/stderr. Use with caution.
                     <% "create_tool" -> %>
                       Create and save a reusable HTTP tool for this organization from the agent.
+                    <% "channel_send_message" -> %>
+                      Deliver a notification into the task's configured gateway-linked chat room.
                     <% _ -> %>
                       Custom API tool created from your saved tool definitions.
                   <% end %>

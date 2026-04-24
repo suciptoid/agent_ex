@@ -143,7 +143,7 @@ defmodule AppWeb.ChatLiveTest do
       assert has_element?(live_view, "#sidebar-chat-loading-#{room.id}")
     end
 
-    test "renders sidebar controls for gateway-linked rooms", %{
+    test "keeps gateway-linked rooms out of the sidebar shortcuts", %{
       conn: conn,
       user: user,
       scope: scope
@@ -171,8 +171,37 @@ defmodule AppWeb.ChatLiveTest do
 
       {:ok, live_view, _html} = live(conn, ~p"/chat/#{channel.chat_room_id}")
 
-      assert has_element?(live_view, "#sidebar-chat-gateway-icon-#{channel.chat_room_id}")
-      assert has_element?(live_view, "#sidebar-delete-chat-#{channel.chat_room_id}")
+      refute has_element?(live_view, "#sidebar-chat-gateway-icon-#{channel.chat_room_id}")
+      refute has_element?(live_view, "#sidebar-delete-chat-#{channel.chat_room_id}")
+      assert has_element?(live_view, "#sidebar-all-chats-link")
+    end
+
+    test "lists archived and task rooms on /chat/all", %{conn: conn, user: user, scope: scope} do
+      provider = provider_fixture(user)
+      agent = agent_fixture(user, %{provider: provider, name: "Archive Agent"})
+
+      archived_room =
+        chat_room_fixture(user, %{title: "Archived Room", agents: [agent], type: :archived})
+
+      {:ok, task_room} =
+        Chat.create_chat_room(scope, %{
+          title: "Task Room",
+          type: :task,
+          agent_ids: [agent.id],
+          active_agent_id: agent.id
+        })
+
+      {:ok, live_view, _html} = live(conn, ~p"/chat/all")
+
+      assert has_element?(live_view, "#chat-all-row-#{archived_room.id}")
+      assert has_element?(live_view, "#chat-all-row-#{task_room.id}")
+
+      live_view
+      |> element("#chat-all-tab-archived")
+      |> render_click()
+
+      assert has_element?(live_view, "#chat-all-row-#{archived_room.id}")
+      refute has_element?(live_view, "#chat-all-row-#{task_room.id}")
     end
 
     test "deletes the current chat room from the sidebar and navigates to /chat", %{

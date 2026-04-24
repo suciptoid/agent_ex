@@ -9,6 +9,7 @@ defmodule App.Gateways do
   alias App.Agents.Agent
   alias App.Chat.ChatRoom
   alias App.Gateways.{Channel, Gateway}
+  alias App.Gateways.Telegram.Client
   alias App.Organizations
   alias App.Repo
   alias App.Users.Scope
@@ -85,6 +86,32 @@ defmodule App.Gateways do
     |> Repo.get_by(chat_room_id: chat_room_id)
   end
 
+  def notify_chat_room(%ChatRoom{} = chat_room, content, opts \\ []) when is_binary(content) do
+    content = String.trim(content)
+
+    if content == "" do
+      {:error, :blank_content}
+    else
+      metadata =
+        opts
+        |> Keyword.get(:metadata, %{})
+        |> Map.new()
+        |> Map.put_new("notification", true)
+
+      with {:ok, message} <-
+             App.Chat.create_message(chat_room, %{
+               role: "assistant",
+               content: content,
+               agent_id: Keyword.get(opts, :agent_id),
+               metadata: metadata
+             }),
+           :ok <- relay_chat_room_notification(chat_room, content) do
+        App.Chat.broadcast_chat_room(chat_room.id, {:agent_message_created, message})
+        {:ok, message}
+      end
+    end
+  end
+
   @doc """
   Finds an existing channel or creates a new one with an associated ChatRoom.
   Returns `{:ok, channel}` or `{:error, reason}`.
@@ -117,6 +144,7 @@ defmodule App.Gateways do
     case channel.gateway do
       %Gateway{} = gateway ->
         Multi.new()
+        |> maybe_archive_channel_chat_room(channel.chat_room)
         |> gateway_chat_room_multi(gateway, channel.external_username, channel.external_chat_id)
         |> Multi.update(:channel, fn %{chat_room: chat_room} ->
           Channel.changeset(channel, %{chat_room_id: chat_room.id})
@@ -410,6 +438,28 @@ defmodule App.Gateways do
 
   defp maybe_update_chat_room_title(%Channel{} = channel), do: {:ok, channel}
 
+  defp relay_chat_room_notification(%ChatRoom{id: chat_room_id}, content) do
+    case get_channel_by_chat_room_id(chat_room_id) do
+      nil ->
+        :ok
+
+      %Channel{} = channel ->
+        relay_channel_message(channel, content)
+    end
+  end
+
+  defp relay_channel_message(
+         %Channel{gateway: %Gateway{type: :telegram, token: token}} = channel,
+         content
+       ) do
+    case Client.send_markdown_message(Client.new(token), channel.external_chat_id, content) do
+      {:ok, _response} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp relay_channel_message(%Channel{}, _content), do: {:error, :unsupported_gateway}
+
   defp gateway_chat_room_multi(multi, %Gateway{} = gateway, external_username, external_chat_id) do
     title = channel_title(external_username, external_chat_id)
     agent_ids = gateway_agent_ids(gateway.config || %{})
@@ -418,7 +468,7 @@ defmodule App.Gateways do
     multi
     |> Multi.insert(:chat_room, fn _changes ->
       %ChatRoom{organization_id: gateway.organization_id}
-      |> ChatRoom.changeset(%{title: title})
+      |> ChatRoom.changeset(%{title: title, type: :gateway})
     end)
     |> Multi.run(:chat_room_agents, fn repo, %{chat_room: chat_room} ->
       insert_gateway_chat_room_agents(
@@ -480,6 +530,12 @@ defmodule App.Gateways do
       {:ok, chat_room_agents} -> {:ok, Enum.reverse(chat_room_agents)}
       {:error, _reason} = error -> error
     end
+  end
+
+  defp maybe_archive_channel_chat_room(multi, nil), do: multi
+
+  defp maybe_archive_channel_chat_room(multi, %ChatRoom{} = chat_room) do
+    Multi.update(multi, :archived_chat_room, Ecto.Changeset.change(chat_room, type: :archived))
   end
 
   defp gateway_agent_ids(config) do

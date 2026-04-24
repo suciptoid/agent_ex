@@ -8,7 +8,7 @@ defmodule App.Agents.AlloyTools.MemorySet do
   @impl true
   def description,
     do:
-      "Save a memory for later recall across conversations. Use to store user preferences, facts, profile info, or notes. If a memory with the same key and scope already exists, it will be updated."
+      "Save a memory for later recall across conversations. Use to store user preferences, facts, profile info, or notes. If a memory with the same key and ownership already exists, it will be updated."
 
   @impl true
   def input_schema do
@@ -33,8 +33,8 @@ defmodule App.Agents.AlloyTools.MemorySet do
         scope: %{
           type: "string",
           description:
-            "Memory scope. 'org' = shared across org, 'user' = per-user. Default: 'org'",
-          enum: ["org", "user"]
+            "Memory ownership. 'org' = shared across org, 'user' = shared across agents for one user, 'agent' = private to this agent. Default: 'org'",
+          enum: ["org", "user", "agent"]
         }
       },
       required: ["key", "value"]
@@ -43,15 +43,8 @@ defmodule App.Agents.AlloyTools.MemorySet do
 
   @impl true
   def execute(input, context) do
-    requested_scope = Map.get(input, :scope) || Map.get(input, "scope") || "org"
+    scope = normalize_optional_text(Map.get(input, :scope) || Map.get(input, "scope")) || "org"
     user_id = Map.get(context, :user_id) || Map.get(context, "user_id")
-
-    scope =
-      if requested_scope == "user" and is_nil(user_id) do
-        "org"
-      else
-        requested_scope
-      end
 
     attrs =
       %{
@@ -70,7 +63,7 @@ defmodule App.Agents.AlloyTools.MemorySet do
     case App.Agents.set_memory(attrs) do
       {:ok, memory} ->
         {:ok,
-         "Memory saved: #{memory.key} (scope: #{memory.scope}, tags: #{inspect(memory.tags)})"}
+         "Memory saved: #{memory.key} (ownership: #{App.Agents.Memory.ownership(memory)}, tags: #{inspect(memory.tags)})"}
 
       {:error, changeset} ->
         {:error, format_errors(changeset)}
@@ -87,4 +80,13 @@ defmodule App.Agents.AlloyTools.MemorySet do
 
     "Failed to save memory: #{inspect(errors)}"
   end
+
+  defp normalize_optional_text(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp normalize_optional_text(value), do: value
 end

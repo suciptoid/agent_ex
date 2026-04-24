@@ -55,6 +55,8 @@ defmodule App.MixProject do
       {:phoenix_live_dashboard, "~> 0.8.3"},
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
+      {:oban, "~> 2.19"},
+      {:crontab, "~> 1.1"},
       {:heroicons,
        github: "tailwindlabs/heroicons",
        tag: "v2.2.0",

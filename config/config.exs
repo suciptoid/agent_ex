@@ -24,6 +24,17 @@ config :app,
   ecto_repos: [App.Repo],
   generators: [timestamp_type: :utc_datetime, binary_id: true]
 
+config :app, Oban,
+  repo: App.Repo,
+  plugins: [
+    {Oban.Plugins.Pruner, max_age: 86_400},
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"* * * * *", App.Tasks.ScheduleScannerWorker, queue: :scheduled_tasks}
+     ]}
+  ],
+  queues: [default: 10, scheduled_tasks: 10]
+
 config :tesla, disable_deprecated_builder_warning: true
 
 config :ueberauth, Ueberauth,

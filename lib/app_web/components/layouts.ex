@@ -375,6 +375,17 @@ defmodule AppWeb.Layouts do
             </.link>
 
             <.link
+              id="sidebar-tasks-link"
+              navigate={~p"/tasks"}
+              data-sidebar-nav-link
+              data-sidebar-match="prefix"
+              class="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium text-foreground/75 transition-colors hover:bg-accent hover:text-foreground aria-[current=page]:bg-background/80 aria-[current=page]:text-foreground aria-[current=page]:shadow-sm"
+            >
+              <.icon name="hero-clock" class="size-4.5 flex-shrink-0" />
+              <span class="[[data-sidebar-collapsed=true]_&]:hidden">Tasks</span>
+            </.link>
+
+            <.link
               id="sidebar-gateways-link"
               navigate={~p"/gateways"}
               data-sidebar-nav-link
@@ -394,14 +405,24 @@ defmodule AppWeb.Layouts do
               <h3 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Chats
               </h3>
-              <.link
-                id="sidebar-new-chat-link"
-                navigate={~p"/chat"}
-                class="inline-flex items-center justify-center size-4.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                title="New Chat"
-              >
-                <.icon name="hero-plus" class="size-3" />
-              </.link>
+              <div class="flex items-center gap-1">
+                <.link
+                  id="sidebar-all-chats-link"
+                  navigate={~p"/chat/all"}
+                  class="inline-flex items-center justify-center size-4.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  title="All chats"
+                >
+                  <.icon name="hero-queue-list" class="size-3" />
+                </.link>
+                <.link
+                  id="sidebar-new-chat-link"
+                  navigate={~p"/chat"}
+                  class="inline-flex items-center justify-center size-4.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  title="New Chat"
+                >
+                  <.icon name="hero-plus" class="size-3" />
+                </.link>
+              </div>
             </div>
             <div class="space-y-0.5">
               <div

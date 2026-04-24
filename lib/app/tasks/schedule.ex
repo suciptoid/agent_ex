@@ -40,6 +40,10 @@ defmodule App.Tasks.Schedule do
         from_datetime
       )
       when is_binary(expression) do
+    # Ensure cron schedules advance strictly forward, even when from_datetime
+    # lands exactly on a cron boundary.
+    from_datetime = DateTime.add(from_datetime, 1, :second)
+
     with {:ok, cron_expression} <- Crontab.CronExpression.Parser.parse(expression),
          {:ok, next_naive} <-
            Crontab.Scheduler.get_next_run_date(cron_expression, DateTime.to_naive(from_datetime)),

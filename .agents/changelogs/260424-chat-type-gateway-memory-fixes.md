@@ -1,0 +1,25 @@
+- Refactored chat room type naming from `general` to `chat` across schema, chat context, chat/all LiveView filters/labels, and tests.
+- Sidebar chat-room summary filter now includes both `:chat` and `:gateway` room types so gateway-linked rooms appear in the chat shortcuts.
+- Updated `/chat/all` tabs to include a dedicated `Gateway` tab with filtering and counts.
+- Gateway channel `/new` rotation now creates the fresh gateway room with `parent_id` set to the previous (archived) room, preserving room lineage.
+- Added migration `20260424040853_rename_general_chat_room_type_to_chat.exs`:
+  - updates existing rows from `general` -> `chat`
+  - changes DB default for `chat_rooms.type` to `chat`
+- Executed migration via `mix ecto.migrate` successfully.
+- Memory behavior improvements:
+  - `memory_get` now supports scope-only queries (e.g. blank key/query with `scope: "user"`) and returns scoped memory listings instead of error.
+  - Added `Agents.list_memories/1` for scoped/tagged listing.
+  - Memory middleware now injects:
+    - user profile/preferences values,
+    - agent preferences values,
+    - org memory as keys-only index (explicitly prompting use of `memory_get scope=org` for recall values).
+- Added/updated regression tests:
+  - gateway `/new` rotation now asserts new room `parent_id` and task notification retarget behavior remains covered,
+  - chat sidebar and `/chat/all` gateway visibility behavior,
+  - memory_get scope-only behavior,
+  - memory middleware injection content/visibility rules.
+- Validation:
+  - `mix format` passed
+  - `mix precommit` passed
+
+By: gpt-5.4 on OpenCode

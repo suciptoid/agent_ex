@@ -2,7 +2,7 @@ defmodule App.Agents.MemoryMiddleware do
   @moduledoc """
   Alloy middleware for active memory recall and save prompting.
 
-  On :before_completion, injects preference/profile memories into the system prompt
+  On :before_completion, injects user and agent preferences/profile memories into the system prompt
   and appends instructions for the LLM to proactively use memory tools.
   """
 
@@ -26,14 +26,20 @@ defmodule App.Agents.MemoryMiddleware do
     context = state.config.context
     agent_id = Map.get(context, :agent_id)
 
-    memories_block =
+    opts = memory_scope_opts(context)
+
+    user_memories = App.Agents.list_user_profile_memories_for_prompt(opts)
+
+    agent_memories =
       if agent_id do
-        opts = memory_scope_opts(context)
-        memories = App.Agents.list_memories_for_prompt(agent_id, opts)
-        format_memories_block(memories)
+        App.Agents.list_memories_for_prompt(agent_id, opts)
       else
-        ""
+        []
       end
+
+    org_memory_keys = App.Agents.list_org_memory_keys_for_prompt(opts)
+
+    memories_block = format_memories_block(user_memories, agent_memories, org_memory_keys)
 
     current_prompt = state.config.system_prompt || ""
 
@@ -59,22 +65,57 @@ defmodule App.Agents.MemoryMiddleware do
     |> Enum.reject(fn {_k, v} -> is_nil(v) end)
   end
 
-  defp format_memories_block([]), do: ""
+  defp format_memories_block([], [], []), do: ""
 
-  defp format_memories_block(memories) do
-    items =
-      Enum.map(memories, fn memory ->
-        tags_label =
-          case memory.tags do
-            [] -> ""
-            tags -> " [#{Enum.join(tags, ", ")}]"
-          end
+  defp format_memories_block(user_memories, agent_memories, org_memory_keys) do
+    user_block =
+      if user_memories == [] do
+        ""
+      else
+        "\n### User Profile & Preferences\n" <> memory_key_value_items(user_memories)
+      end
 
-        "- **#{memory.key}**: #{memory.value}#{tags_label}"
-      end)
-      |> Enum.join("\n")
+    agent_block =
+      if agent_memories == [] do
+        ""
+      else
+        "\n### Agent Preferences\n" <> memory_key_value_items(agent_memories)
+      end
 
-    "\n\n## Known Memories\nThe following information was previously stored and should inform your responses:\n\n#{items}\n"
+    org_block =
+      if org_memory_keys == [] do
+        ""
+      else
+        "\n### Org Memory Index (keys only)\n" <>
+          "Use `memory_get` with scope `org` when you need the value.\n" <>
+          memory_key_items(org_memory_keys)
+      end
+
+    "\n\n## Known Memories\n#{user_block}#{agent_block}#{org_block}\n"
+  end
+
+  defp memory_key_value_items(memories) do
+    Enum.map_join(memories, "\n", fn memory ->
+      tags_label =
+        case memory.tags do
+          [] -> ""
+          tags -> " [#{Enum.join(tags, ", ")}]"
+        end
+
+      "- **#{memory.key}**: #{memory.value}#{tags_label}"
+    end)
+  end
+
+  defp memory_key_items(memories) do
+    Enum.map_join(memories, "\n", fn memory ->
+      tags_label =
+        case memory.tags do
+          [] -> ""
+          tags -> " [#{Enum.join(tags, ", ")}]"
+        end
+
+      "- **#{memory.key}**#{tags_label}"
+    end)
   end
 
   defp append_memories(prompt, ""), do: prompt

@@ -155,6 +155,19 @@ defmodule App.Agents do
     end
   end
 
+  def list_memories(opts \\ []) when is_list(opts) do
+    scope = normalize_optional_text(Keyword.get(opts, :scope))
+    tags = normalize_tags(Keyword.get(opts, :tags, []))
+    limit = normalize_memory_limit(Keyword.get(opts, :limit, 50))
+
+    accessible_memories_query(opts)
+    |> maybe_filter_memory_scope(scope, opts)
+    |> maybe_filter_memory_tags(tags)
+    |> order_by([m], desc: m.updated_at)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
   def list_memories_for_prompt(agent_id, opts \\ []) do
     tags = ~w(preferences preference profile)
 
@@ -175,6 +188,44 @@ defmodule App.Agents do
         |> where([m], fragment("? && ?::varchar[]", m.tags, ^tags))
         |> order_by([m], asc: m.inserted_at)
         |> Repo.all()
+    end
+  end
+
+  def list_user_profile_memories_for_prompt(opts \\ []) when is_list(opts) do
+    organization_id = normalize_optional_text(Keyword.get(opts, :organization_id))
+    user_id = normalize_optional_text(Keyword.get(opts, :user_id))
+
+    if is_binary(organization_id) and organization_id != "" and is_binary(user_id) and
+         user_id != "" do
+      Memory
+      |> where(
+        [m],
+        m.organization_id == ^organization_id and m.user_id == ^user_id and is_nil(m.agent_id)
+      )
+      |> where([m], fragment("? && ?::varchar[]", m.tags, ^~w(preferences preference profile)))
+      |> order_by([m], asc: m.inserted_at)
+      |> Repo.all()
+    else
+      []
+    end
+  end
+
+  def list_org_memory_keys_for_prompt(opts \\ []) when is_list(opts) do
+    organization_id = normalize_optional_text(Keyword.get(opts, :organization_id))
+    limit = normalize_memory_limit(Keyword.get(opts, :limit, 30))
+
+    if is_binary(organization_id) and organization_id != "" do
+      Memory
+      |> where(
+        [m],
+        m.organization_id == ^organization_id and is_nil(m.user_id) and is_nil(m.agent_id)
+      )
+      |> order_by([m], asc: m.inserted_at)
+      |> limit(^limit)
+      |> select([m], %{key: m.key, tags: m.tags})
+      |> Repo.all()
+    else
+      []
     end
   end
 
@@ -263,6 +314,14 @@ defmodule App.Agents do
   end
 
   defp maybe_filter_memory_scope(query, scope, opts) do
+    if is_nil(scope) do
+      query
+    else
+      do_maybe_filter_memory_scope(query, scope, opts)
+    end
+  end
+
+  defp do_maybe_filter_memory_scope(query, scope, opts) do
     organization_id = Keyword.get(opts, :organization_id)
 
     if is_binary(organization_id) and organization_id != "" do
@@ -297,6 +356,15 @@ defmodule App.Agents do
       where(query, [m], false)
     end
   end
+
+  defp maybe_filter_memory_tags(query, []), do: query
+
+  defp maybe_filter_memory_tags(query, tags) do
+    where(query, [m], fragment("? && ?::varchar[]", m.tags, ^tags))
+  end
+
+  defp normalize_memory_limit(limit) when is_integer(limit) and limit > 0, do: min(limit, 200)
+  defp normalize_memory_limit(_limit), do: 50
 
   defp normalize_memory_attrs(attrs) do
     scope = normalize_optional_text(Map.get(attrs, "scope")) || "org"

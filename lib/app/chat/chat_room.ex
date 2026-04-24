@@ -3,14 +3,14 @@ defmodule App.Chat.ChatRoom do
 
   import Ecto.Changeset
 
-  @types [:general, :archived, :task, :gateway]
+  @types [:chat, :archived, :task, :gateway]
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
   schema "chat_rooms" do
     field :title, :string
-    field :type, Ecto.Enum, values: @types, default: :general
+    field :type, Ecto.Enum, values: @types, default: :chat
     field :agent_ids, {:array, :binary_id}, virtual: true, default: []
     field :active_agent_id, :binary_id, virtual: true
 

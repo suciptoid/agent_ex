@@ -1,7 +1,7 @@
 defmodule App.Tasks.Schedule do
   @moduledoc false
 
-  @every_units [:hour, :day, :week, :month]
+  @every_units [:minute, :hour, :day, :week, :month]
   @schedule_types [:once, :every, :cron]
 
   def schedule_types, do: @schedule_types
@@ -69,6 +69,9 @@ defmodule App.Tasks.Schedule do
   end
 
   def valid_cron_expression?(_expression), do: {:error, :invalid_cron_expression}
+
+  defp shift_every(datetime, interval, :minute),
+    do: DateTime.add(datetime, interval * 60, :second)
 
   defp shift_every(datetime, interval, :hour),
     do: DateTime.add(datetime, interval * 3_600, :second)

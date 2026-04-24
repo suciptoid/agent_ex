@@ -81,7 +81,7 @@ defmodule App.ChatTest do
       refute idle_entry.loading
     end
 
-    test "shows only general rooms in the sidebar and keeps gateway rooms in the management summary",
+    test "shows chat and gateway rooms in the sidebar while keeping archived rooms out",
          %{
            scope: scope,
            user: user,
@@ -120,8 +120,9 @@ defmodule App.ChatTest do
       linked_summary = Enum.find(management_rooms, &(&1.id == linked_channel.chat_room_id))
 
       assert regular_entry
-      assert regular_entry.type == :general
-      assert linked_entry == nil
+      assert regular_entry.type == :chat
+      assert linked_entry
+      assert linked_entry.gateway_linked
       assert archived_entry == nil
       assert linked_summary.gateway_linked
     end

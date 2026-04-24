@@ -12,6 +12,7 @@ defmodule App.Gateways do
   alias App.Gateways.Telegram.Client
   alias App.Organizations
   alias App.Repo
+  alias App.Tasks.Task, as: ScheduledTask
   alias App.Users.Scope
 
   # --- Gateway CRUD ---
@@ -145,7 +146,13 @@ defmodule App.Gateways do
       %Gateway{} = gateway ->
         Multi.new()
         |> maybe_archive_channel_chat_room(channel.chat_room)
-        |> gateway_chat_room_multi(gateway, channel.external_username, channel.external_chat_id)
+        |> gateway_chat_room_multi(
+          gateway,
+          channel.external_username,
+          channel.external_chat_id,
+          channel.chat_room_id
+        )
+        |> retarget_task_notifications_multi(channel.chat_room)
         |> Multi.update(:channel, fn %{chat_room: chat_room} ->
           Channel.changeset(channel, %{chat_room_id: chat_room.id})
         end)
@@ -438,6 +445,39 @@ defmodule App.Gateways do
 
   defp maybe_update_chat_room_title(%Channel{} = channel), do: {:ok, channel}
 
+  defp retarget_task_notifications_multi(
+         multi,
+         %ChatRoom{id: old_chat_room_id, organization_id: organization_id, title: title}
+       ) do
+    Multi.run(multi, :retarget_task_notifications, fn repo, %{chat_room: %ChatRoom{id: new_id}} ->
+      stale_room_task_query =
+        from(task in ScheduledTask,
+          join: room in ChatRoom,
+          on: room.id == task.notification_chat_room_id,
+          left_join: channel in Channel,
+          on: channel.chat_room_id == room.id,
+          where:
+            room.organization_id == ^organization_id and
+              room.title == ^title and
+              room.type in ^[:gateway, :archived] and is_nil(channel.id)
+        )
+
+      {count_current, _result} =
+        from(task in ScheduledTask,
+          where: task.notification_chat_room_id == ^old_chat_room_id
+        )
+        |> repo.update_all(set: [notification_chat_room_id: new_id])
+
+      {count_stale, _result} =
+        stale_room_task_query
+        |> repo.update_all(set: [notification_chat_room_id: new_id])
+
+      {:ok, count_current + count_stale}
+    end)
+  end
+
+  defp retarget_task_notifications_multi(multi, _chat_room), do: multi
+
   defp relay_chat_room_notification(%ChatRoom{id: chat_room_id}, content) do
     case get_channel_by_chat_room_id(chat_room_id) do
       nil ->
@@ -460,7 +500,13 @@ defmodule App.Gateways do
 
   defp relay_channel_message(%Channel{}, _content), do: {:error, :unsupported_gateway}
 
-  defp gateway_chat_room_multi(multi, %Gateway{} = gateway, external_username, external_chat_id) do
+  defp gateway_chat_room_multi(
+         multi,
+         %Gateway{} = gateway,
+         external_username,
+         external_chat_id,
+         parent_chat_room_id \\ nil
+       ) do
     title = channel_title(external_username, external_chat_id)
     agent_ids = gateway_agent_ids(gateway.config || %{})
     default_agent_id = gateway_default_agent_id(gateway.config || %{})
@@ -468,7 +514,7 @@ defmodule App.Gateways do
     multi
     |> Multi.insert(:chat_room, fn _changes ->
       %ChatRoom{organization_id: gateway.organization_id}
-      |> ChatRoom.changeset(%{title: title, type: :gateway})
+      |> ChatRoom.changeset(%{title: title, type: :gateway, parent_id: parent_chat_room_id})
     end)
     |> Multi.run(:chat_room_agents, fn repo, %{chat_room: chat_room} ->
       insert_gateway_chat_room_agents(

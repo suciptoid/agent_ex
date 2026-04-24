@@ -21,7 +21,7 @@ defmodule AppWeb.TaskLiveTest do
         "name" => "Daily digest",
         "prompt" => "Summarize the latest commits",
         "next_run_input" => "2026-04-24T09:00",
-        "repeat" => "false",
+        "run_mode" => "once",
         "agent_ids" => ["", agent.id],
         "main_agent_id" => agent.id,
         "notification_chat_room_id" => ""
@@ -87,8 +87,7 @@ defmodule AppWeb.TaskLiveTest do
         "task" => %{
           "name" => "Daily digest",
           "prompt" => "Summarize the latest commits",
-          "next_run_input" => "2026-04-24T09:00",
-          "repeat" => "true",
+          "run_mode" => "repeat",
           "schedule_type" => "cron",
           "cron_expression" => "0 9 * * 1-5",
           "agent_ids" => ["", agent.id],
@@ -115,6 +114,7 @@ defmodule AppWeb.TaskLiveTest do
              "#{channel.chat_room.title} (Gateway)"
            )
 
+    assert has_element?(live_view, "#task_run_mode option[value=\"repeat\"][selected]", "Repeat")
     assert has_element?(live_view, "#task_schedule_type option[value=\"cron\"][selected]")
     assert has_element?(live_view, "#task_cron_expression")
     assert html =~ ">Planner<"

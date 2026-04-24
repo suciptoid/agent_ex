@@ -25,11 +25,95 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/app"
 import {Hooks as PUIHooks} from "pui"
 
+const TaskScheduleForm = {
+  mounted() {
+    this.localInput = this.el.querySelector("#task-next-run-local")
+    this.utcInput = this.el.querySelector("#task-next-run-input")
+    this.timezoneInput = this.el.querySelector("#task-browser-timezone")
+
+    this.syncUtcValue = () => {
+      if (!this.localInput || !this.utcInput) return
+
+      if (this.timezoneInput) {
+        this.timezoneInput.value = Intl.DateTimeFormat().resolvedOptions().timeZone || "Etc/UTC"
+      }
+
+      if (this.localInput.value === "") {
+        this.utcInput.value = ""
+        return
+      }
+
+      const localDate = new Date(this.localInput.value)
+      if (Number.isNaN(localDate.getTime())) {
+        return
+      }
+
+      this.utcInput.value = this.toUtcLocalInput(localDate)
+    }
+
+    this.inputHandler = () => this.syncUtcValue()
+
+    if (this.localInput && this.utcInput) {
+      const utcValue = this.localInput.dataset.utcValue || this.utcInput.value
+
+      if (utcValue) {
+        const utcDate = this.parseUtcInput(utcValue)
+        if (utcDate) {
+          this.localInput.value = this.toLocalInputValue(utcDate)
+        }
+      }
+
+      this.localInput.addEventListener("input", this.inputHandler)
+      this.localInput.addEventListener("change", this.inputHandler)
+      this.syncUtcValue()
+    } else if (this.timezoneInput) {
+      this.timezoneInput.value = Intl.DateTimeFormat().resolvedOptions().timeZone || "Etc/UTC"
+    }
+  },
+
+  destroyed() {
+    if (this.localInput && this.inputHandler) {
+      this.localInput.removeEventListener("input", this.inputHandler)
+      this.localInput.removeEventListener("change", this.inputHandler)
+    }
+  },
+
+  parseUtcInput(value) {
+    const hasSeconds = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(value)
+    const hasMinutes = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)
+    const normalized = hasMinutes ? `${value}:00` : value
+    const utc = normalized.endsWith("Z") ? normalized : `${normalized}Z`
+    const date = new Date(utc)
+
+    if (Number.isNaN(date.getTime())) return null
+    if (!hasMinutes && !hasSeconds && !value.endsWith("Z")) return null
+    return date
+  },
+
+  toLocalInputValue(date) {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, "0")
+    const day = String(date.getDate()).padStart(2, "0")
+    const hours = String(date.getHours()).padStart(2, "0")
+    const minutes = String(date.getMinutes()).padStart(2, "0")
+    return `${year}-${month}-${day}T${hours}:${minutes}`
+  },
+
+  toUtcLocalInput(date) {
+    const year = date.getUTCFullYear()
+    const month = String(date.getUTCMonth() + 1).padStart(2, "0")
+    const day = String(date.getUTCDate()).padStart(2, "0")
+    const hours = String(date.getUTCHours()).padStart(2, "0")
+    const minutes = String(date.getUTCMinutes()).padStart(2, "0")
+    return `${year}-${month}-${day}T${hours}:${minutes}`
+  },
+}
+
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, ...PUIHooks},
+  hooks: {...colocatedHooks, ...PUIHooks, TaskScheduleForm},
 })
 
 // connect if there are any LiveViews on the page
@@ -75,4 +159,3 @@ if (process.env.NODE_ENV === "development") {
     window.liveReloader = reloader
   })
 }
-

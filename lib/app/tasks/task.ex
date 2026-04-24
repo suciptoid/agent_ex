@@ -24,6 +24,7 @@ defmodule App.Tasks.Task do
 
     field :agent_ids, {:array, :binary_id}, virtual: true, default: []
     field :next_run_input, :string, virtual: true
+    field :run_mode, :string, virtual: true, default: "once"
 
     belongs_to :organization, App.Organizations.Organization
     belongs_to :main_agent, App.Agents.Agent
@@ -42,6 +43,7 @@ defmodule App.Tasks.Task do
       :prompt,
       :next_run,
       :next_run_input,
+      :run_mode,
       :repeat,
       :schedule_type,
       :cron_expression,
@@ -56,6 +58,7 @@ defmodule App.Tasks.Task do
     |> update_change(:prompt, &normalize_text/1)
     |> update_change(:cron_expression, &normalize_optional_text/1)
     |> update_change(:agent_ids, &normalize_agent_ids/1)
+    |> normalize_run_mode()
     |> normalize_schedule_fields()
     |> put_next_run_from_input()
     |> validate_required([:name, :prompt, :main_agent_id])
@@ -80,6 +83,7 @@ defmodule App.Tasks.Task do
     cond do
       not repeat? ->
         changeset
+        |> put_change(:next_run, get_field(changeset, :next_run))
         |> put_change(:schedule_type, :once)
         |> put_change(:cron_expression, nil)
         |> put_change(:every_interval, nil)
@@ -94,7 +98,7 @@ defmodule App.Tasks.Task do
         put_change(changeset, :cron_expression, nil)
 
       true ->
-        changeset
+        put_change(changeset, :schedule_type, :every)
     end
   end
 
@@ -114,6 +118,19 @@ defmodule App.Tasks.Task do
           {:error, :invalid} ->
             add_error(changeset, :next_run_input, "must be a valid UTC datetime")
         end
+    end
+  end
+
+  defp normalize_run_mode(changeset) do
+    case get_change(changeset, :run_mode) do
+      "once" ->
+        put_change(changeset, :repeat, false)
+
+      "repeat" ->
+        put_change(changeset, :repeat, true)
+
+      _other ->
+        changeset
     end
   end
 
@@ -141,10 +158,14 @@ defmodule App.Tasks.Task do
   end
 
   defp validate_next_run(changeset) do
-    if get_field(changeset, :next_run) do
+    if get_field(changeset, :repeat, false) do
       changeset
     else
-      add_error(changeset, :next_run_input, "can't be blank")
+      if get_field(changeset, :next_run) do
+        changeset
+      else
+        add_error(changeset, :next_run_input, "can't be blank")
+      end
     end
   end
 

@@ -72,8 +72,9 @@ defmodule App.Agents.AlloyTools.MemoryGet do
         memories = App.Agents.search_memories(query, opts)
         {:ok, format_search_results(memories, query)}
 
-      is_binary(scope) and is_nil(key) ->
-        {:error, "Provide a non-blank key, tags, or query"}
+      is_binary(scope) ->
+        memories = App.Agents.list_memories(Keyword.merge(opts, scope: scope, limit: 50))
+        {:ok, format_scope_results(memories, scope)}
 
       true ->
         {:error, "Provide a non-blank key, tags, or query to search memories"}
@@ -110,6 +111,18 @@ defmodule App.Agents.AlloyTools.MemoryGet do
       |> Enum.join("\n")
 
     "Found #{length(memories)} memory(ies):\n#{items}"
+  end
+
+  defp format_scope_results([], scope), do: "No memories found in ownership '#{scope}'"
+
+  defp format_scope_results(memories, scope) do
+    items =
+      Enum.map(memories, fn memory ->
+        "- #{memory.key}: #{memory.value} [ownership: #{App.Agents.Memory.ownership(memory)}, tags: #{Enum.join(memory.tags, ", ")}]"
+      end)
+      |> Enum.join("\n")
+
+    "Found #{length(memories)} memory(ies) in ownership '#{scope}':\n#{items}"
   end
 
   defp maybe_put_opt(opts, _key, nil), do: opts

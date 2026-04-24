@@ -3,7 +3,7 @@ defmodule AppWeb.ChatLive.All do
 
   alias App.Chat
 
-  @tabs [:all, :archived, :task]
+  @tabs [:all, :archived, :task, :gateway]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -64,7 +64,7 @@ defmodule AppWeb.ChatLive.All do
        socket,
        id,
        &Chat.unarchive_chat_room/2,
-       "Conversation restored to general chats."
+       "Conversation restored to chats."
      )}
   end
 
@@ -124,11 +124,16 @@ defmodule AppWeb.ChatLive.All do
     Enum.filter(chat_rooms, &(&1.type == :task))
   end
 
+  defp filter_chat_rooms(chat_rooms, :gateway) do
+    Enum.filter(chat_rooms, &(&1.type == :gateway))
+  end
+
   defp tab_counts(chat_rooms) do
     %{
       all: length(chat_rooms),
       archived: Enum.count(chat_rooms, &(&1.type == :archived)),
-      task: Enum.count(chat_rooms, &(&1.type == :task))
+      task: Enum.count(chat_rooms, &(&1.type == :task)),
+      gateway: Enum.count(chat_rooms, &(&1.type == :gateway))
     }
   end
 
@@ -136,23 +141,24 @@ defmodule AppWeb.ChatLive.All do
     [
       %{id: :all, label: "All"},
       %{id: :archived, label: "Archived"},
-      %{id: :task, label: "Task"}
+      %{id: :task, label: "Task"},
+      %{id: :gateway, label: "Gateway"}
     ]
   end
 
-  def chat_room_type_label(:general), do: "General"
+  def chat_room_type_label(:chat), do: "Chat"
   def chat_room_type_label(:archived), do: "Archived"
   def chat_room_type_label(:task), do: "Task"
   def chat_room_type_label(:gateway), do: "Gateway"
 
-  def chat_room_type_classes(:general),
+  def chat_room_type_classes(:chat),
     do: "border-emerald-500/20 bg-emerald-500/10 text-emerald-700"
 
   def chat_room_type_classes(:archived), do: "border-border bg-muted text-muted-foreground"
   def chat_room_type_classes(:task), do: "border-violet-500/20 bg-violet-500/10 text-violet-700"
   def chat_room_type_classes(:gateway), do: "border-primary/20 bg-primary/10 text-primary"
 
-  def action_available?(:archive, %{type: type}), do: type in [:general, :gateway]
+  def action_available?(:archive, %{type: type}), do: type in [:chat, :gateway]
   def action_available?(:unarchive, %{type: :archived}), do: true
   def action_available?(_action, _chat_room), do: false
 

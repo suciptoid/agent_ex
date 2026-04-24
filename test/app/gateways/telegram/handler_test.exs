@@ -4,6 +4,7 @@ defmodule App.Gateways.Telegram.HandlerTest do
   alias App.Chat
   alias App.Gateways
   alias App.Gateways.Telegram.Handler
+  alias App.Tasks
 
   import App.AgentsFixtures
   import App.ProvidersFixtures
@@ -135,6 +136,17 @@ defmodule App.Gateways.Telegram.HandlerTest do
     original_channel = Gateways.get_channel(gateway, 1234)
     original_chat_room_id = original_channel.chat_room_id
 
+    {:ok, scheduled_task} =
+      Tasks.create_task(scope, %{
+        "name" => "Notify Ops",
+        "prompt" => "Send daily status",
+        "run_mode" => "once",
+        "next_run_input" => "2026-04-24T09:00",
+        "agent_ids" => [agent.id],
+        "main_agent_id" => agent.id,
+        "notification_chat_room_id" => original_chat_room_id
+      })
+
     assert {:ok, _response} =
              Handler.handle_update(gateway, %{
                "message" => %{
@@ -152,11 +164,15 @@ defmodule App.Gateways.Telegram.HandlerTest do
     rotated_channel = Gateways.get_channel(gateway, 1234)
     assert rotated_channel.chat_room_id != original_chat_room_id
 
+    refreshed_task = Tasks.get_task!(scope, scheduled_task.id)
+    assert refreshed_task.notification_chat_room_id == rotated_channel.chat_room_id
+
     original_chat_room = Chat.get_chat_room!(scope, original_chat_room_id)
     rotated_chat_room = Chat.get_chat_room!(scope, rotated_channel.chat_room_id)
 
     assert original_chat_room.type == :archived
     assert rotated_chat_room.type == :gateway
+    assert rotated_chat_room.parent_id == original_chat_room.id
 
     assert {:ok, _stream_pid} =
              Handler.handle_update(gateway, %{

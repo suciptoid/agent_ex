@@ -175,13 +175,13 @@ defmodule App.Agents.ToolsTest do
     assert {:ok, "hello\n"} = Tools.do_shell(%{command: "printf 'hello\\n'"})
   end
 
-  test "memory_get rejects blank key lookups" do
-    assert {:error, message} =
+  test "memory_get supports scope-only lookups" do
+    assert {:ok, message} =
              App.Agents.AlloyTools.MemoryGet.execute(
                %{"key" => "   ", "scope" => "org"},
                %{"organization_id" => Ecto.UUID.generate()}
              )
 
-    assert message =~ "Provide a non-blank key"
+    assert message =~ "No memories found in ownership 'org'"
   end
 end

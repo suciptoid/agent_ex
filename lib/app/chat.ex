@@ -13,8 +13,8 @@ defmodule App.Chat do
   alias App.Users.Scope
   alias App.Users.User
 
-  @sidebar_chat_room_types [:general]
-  @chat_room_types [:general, :archived, :task, :gateway]
+  @sidebar_chat_room_types [:chat, :gateway]
+  @chat_room_types [:chat, :archived, :task, :gateway]
 
   def list_chat_rooms(%Scope{} = scope, opts \\ []) when is_list(opts) do
     ChatRoom
@@ -119,7 +119,7 @@ defmodule App.Chat do
   end
 
   def unarchive_chat_room(%Scope{} = scope, %ChatRoom{} = chat_room) do
-    set_chat_room_type(scope, chat_room, :general)
+    set_chat_room_type(scope, chat_room, :chat)
   end
 
   def set_chat_room_type(%Scope{} = scope, %ChatRoom{} = chat_room, type)

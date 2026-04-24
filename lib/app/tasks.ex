@@ -9,7 +9,9 @@ defmodule App.Tasks do
   alias App.Agents.Agent
   alias App.Chat
   alias App.Chat.ChatRoom
+  alias App.Chat.Message
   alias App.Gateways.Channel
+  alias App.Gateways
   alias App.Organizations.Organization
   alias App.Repo
   alias App.Tasks.Schedule
@@ -66,9 +68,15 @@ defmodule App.Tasks do
         end)
         |> Repo.transaction()
         |> case do
-          {:ok, %{task: task}} -> {:ok, get_task!(scope, task.id)}
-          {:error, :task, changeset, _changes} -> {:error, changeset}
-          {:error, :task_agents, changeset, _changes} -> {:error, changeset}
+          {:ok, %{task: task}} ->
+            task = get_task!(scope, task.id)
+            {:ok, maybe_bootstrap_repeat_task(task)}
+
+          {:error, :task, changeset, _changes} ->
+            {:error, changeset}
+
+          {:error, :task_agents, changeset, _changes} ->
+            {:error, changeset}
         end
       else
         %{valid?: false} -> {:error, changeset}
@@ -101,9 +109,15 @@ defmodule App.Tasks do
         end)
         |> Repo.transaction()
         |> case do
-          {:ok, %{task: updated_task}} -> {:ok, get_task!(scope, updated_task.id)}
-          {:error, :task, changeset, _changes} -> {:error, changeset}
-          {:error, :task_agents, changeset, _changes} -> {:error, changeset}
+          {:ok, %{task: updated_task}} ->
+            task = get_task!(scope, updated_task.id)
+            {:ok, maybe_bootstrap_repeat_task(task)}
+
+          {:error, :task, changeset, _changes} ->
+            {:error, changeset}
+
+          {:error, :task_agents, changeset, _changes} ->
+            {:error, changeset}
         end
       else
         %{valid?: false} -> {:error, changeset}
@@ -158,7 +172,8 @@ defmodule App.Tasks do
           parse_scheduled_for(scheduled_for) || task.last_run_at || DateTime.utc_now()
 
         with {:ok, task_room} <- create_task_room(task, scheduled_for_datetime),
-             {:ok, _result} <- run_task_prompt(task, task_room),
+             {:ok, assistant_message} <- run_task_prompt(task, task_room),
+             :ok <- maybe_notify_task_output(task, task_room, assistant_message),
              {:ok, _task} <-
                Repo.update(Ecto.Changeset.change(task, last_run_at: DateTime.utc_now())) do
           :ok
@@ -294,7 +309,11 @@ defmodule App.Tasks do
         task
       end
 
-    %{task | next_run_input: Schedule.format_datetime_input(task.next_run)}
+    %{
+      task
+      | next_run_input: Schedule.format_datetime_input(task.next_run),
+        run_mode: if(task.repeat, do: "repeat", else: "once")
+    }
   end
 
   defp dispatch_task_run(%ScheduledTask{} = task) do
@@ -362,6 +381,86 @@ defmodule App.Tasks do
         notification_chat_room: task.notification_chat_room
       }
     )
+  end
+
+  defp maybe_notify_task_output(
+         %ScheduledTask{
+           id: task_id,
+           name: task_name,
+           notification_chat_room: %ChatRoom{} = notification_room
+         },
+         %ChatRoom{} = task_room,
+         %Message{} = assistant_message
+       ) do
+    if notification_already_sent?(task_room) do
+      :ok
+    else
+      metadata =
+        %{
+          "task_notification" => true,
+          "task_id" => task_id,
+          "task_name" => task_name,
+          "task_chat_room_id" => task_room.id
+        }
+
+      case Gateways.notify_chat_room(
+             notification_room,
+             assistant_message.content || "",
+             agent_id: assistant_message.agent_id,
+             metadata: metadata
+           ) do
+        {:ok, _message} -> :ok
+        {:error, :blank_content} -> :ok
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  defp maybe_notify_task_output(%ScheduledTask{}, %ChatRoom{}, %Message{}), do: :ok
+
+  defp notification_already_sent?(%ChatRoom{} = task_room) do
+    task_room
+    |> Chat.list_messages()
+    |> Enum.any?(fn message ->
+      message.role == "tool" and message.name == "channel_send_message" and
+        message.status != :error
+    end)
+  end
+
+  defp maybe_bootstrap_repeat_task(%ScheduledTask{repeat: true, last_run_at: nil} = task) do
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+    {:ok, locked_task} =
+      Repo.transaction(fn ->
+        locked_task =
+          ScheduledTask
+          |> where([scheduled_task], scheduled_task.id == ^task.id)
+          |> lock("FOR UPDATE")
+          |> Repo.one!()
+
+        if is_nil(locked_task.last_run_at) do
+          locked_task
+          |> Ecto.Changeset.change(next_run: now)
+          |> Repo.update!()
+        else
+          locked_task
+        end
+      end)
+
+    if is_nil(locked_task.last_run_at) do
+      _ = dispatch_task_run(locked_task)
+    end
+
+    get_task_by_id(locked_task.id) || task
+  end
+
+  defp maybe_bootstrap_repeat_task(%ScheduledTask{} = task), do: task
+
+  defp get_task_by_id(task_id) do
+    ScheduledTask
+    |> where([task], task.id == ^task_id)
+    |> preload(^@preloads)
+    |> Repo.one()
   end
 
   defp parse_scheduled_for(nil), do: nil

@@ -85,31 +85,93 @@ defmodule AppWeb.TaskLive.Form do
               phx-submit="save"
               class="space-y-8"
             >
-              <div class="grid gap-4 lg:grid-cols-2">
-                <.input
-                  field={@form[:name]}
-                  type="text"
-                  label="Task name"
-                  placeholder="Daily standup summary"
-                />
-                <div class="space-y-2">
-                  <label class="text-sm font-medium text-foreground" for="task-next-run-input">
-                    Run at (UTC)
-                  </label>
-                  <input
-                    id="task-next-run-input"
-                    name="task[next_run_input]"
-                    type="datetime-local"
-                    value={@form[:next_run_input].value}
-                    class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  />
-                  <%= if @form.source.action do %>
-                    <%= for {message, _opts} <- Keyword.get_values(@form.errors, :next_run_input) do %>
-                      <p class="text-sm text-destructive">{message}</p>
-                    <% end %>
-                  <% end %>
+              <.input
+                field={@form[:name]}
+                type="text"
+                label="Task name"
+                placeholder="Daily standup summary"
+              />
+
+              <section
+                id="task-run-mode-section"
+                phx-hook="TaskScheduleForm"
+                class="space-y-4 rounded-lg border border-border bg-card/70 p-5 shadow-sm"
+              >
+                <div class="space-y-1">
+                  <p class="text-sm font-medium text-foreground">Run mode</p>
+                  <p class="text-xs leading-5 text-muted-foreground">
+                    Choose whether this task runs once at a specific local date/time, or repeats on a schedule.
+                  </p>
                 </div>
-              </div>
+
+                <.native_select
+                  field={@form[:run_mode]}
+                  label="Run mode"
+                  options={run_mode_options()}
+                />
+
+                <%= case normalized_run_mode(@form[:run_mode].value, @form[:repeat].value) do %>
+                  <% "repeat" -> %>
+                    <div class="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+                      <.native_select
+                        field={@form[:schedule_type]}
+                        label="Repeat schedule"
+                        options={schedule_type_options()}
+                        prompt="Select repeat schedule"
+                      />
+
+                      <%= case @form[:schedule_type].value do %>
+                        <% :cron -> %>
+                          <.input
+                            field={@form[:cron_expression]}
+                            type="text"
+                            label="Cron expression"
+                            placeholder="0 9 * * 1-5"
+                          />
+                        <% _other -> %>
+                          <div class="grid gap-4 sm:grid-cols-[160px_minmax(0,1fr)]">
+                            <.input
+                              field={@form[:every_interval]}
+                              type="number"
+                              min="1"
+                              label="Every"
+                              placeholder="1"
+                            />
+                            <.native_select
+                              field={@form[:every_unit]}
+                              label="Unit"
+                              options={every_unit_options()}
+                              prompt="Select interval unit"
+                            />
+                          </div>
+                      <% end %>
+                    </div>
+                  <% _other -> %>
+                    <div class="space-y-2">
+                      <label class="text-sm font-medium text-foreground" for="task-next-run-local">
+                        Run date/time (your browser timezone)
+                      </label>
+                      <input
+                        id="task-next-run-local"
+                        type="datetime-local"
+                        data-utc-value={@form[:next_run_input].value}
+                        class="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                      <input
+                        id="task-next-run-input"
+                        name="task[next_run_input]"
+                        type="hidden"
+                        value={@form[:next_run_input].value}
+                      />
+                      <input id="task-browser-timezone" name="task[browser_timezone]" type="hidden" />
+                      <%= if @form.source.action do %>
+                        <%= for {message, _opts} <- Keyword.get_values(@form.errors, :next_run_input) do %>
+                          <p class="text-sm text-destructive">{message}</p>
+                        <% end %>
+                      <% end %>
+                    </div>
+                <% end %>
+              </section>
 
               <.input
                 field={@form[:prompt]}
@@ -174,57 +236,6 @@ defmodule AppWeb.TaskLive.Form do
                   }
                   prompt="Select the agent that should lead the task"
                 />
-              </section>
-
-              <section class="space-y-4 rounded-lg border border-border bg-card/70 p-5 shadow-sm">
-                <div class="space-y-2">
-                  <input type="hidden" name={@form[:repeat].name} value="false" />
-
-                  <.checkbox
-                    id={@form[:repeat].id}
-                    name={@form[:repeat].name}
-                    value="true"
-                    checked={Phoenix.HTML.Form.normalize_value("checkbox", @form[:repeat].value)}
-                    label="Repeat automatically"
-                  />
-                </div>
-
-                <%= if Phoenix.HTML.Form.normalize_value("checkbox", @form[:repeat].value) do %>
-                  <div class="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-                    <.native_select
-                      field={@form[:schedule_type]}
-                      label="Repeat mode"
-                      options={schedule_type_options()}
-                      prompt="Select repeat mode"
-                    />
-
-                    <%= case @form[:schedule_type].value do %>
-                      <% :cron -> %>
-                        <.input
-                          field={@form[:cron_expression]}
-                          type="text"
-                          label="Cron expression"
-                          placeholder="0 9 * * 1-5"
-                        />
-                      <% _ -> %>
-                        <div class="grid gap-4 sm:grid-cols-[160px_minmax(0,1fr)]">
-                          <.input
-                            field={@form[:every_interval]}
-                            type="number"
-                            min="1"
-                            label="Every"
-                            placeholder="1"
-                          />
-                          <.native_select
-                            field={@form[:every_unit]}
-                            label="Unit"
-                            options={every_unit_options()}
-                            prompt="Select interval unit"
-                          />
-                        </div>
-                    <% end %>
-                  </div>
-                <% end %>
               </section>
 
               <section class="space-y-4 rounded-lg border border-border bg-card/70 p-5 shadow-sm">
@@ -372,8 +383,9 @@ defmodule AppWeb.TaskLive.Form do
     Enum.map(Tasks.schedule_types(), fn
       :cron -> {"cron", "Cron expression"}
       :every -> {"every", "Every interval"}
-      type -> {to_string(type), String.capitalize(to_string(type))}
+      :once -> nil
     end)
+    |> Enum.reject(&is_nil/1)
   end
 
   defp every_unit_options do
@@ -394,4 +406,24 @@ defmodule AppWeb.TaskLive.Form do
 
   defp select_value?(current_value, option_value),
     do: to_string(current_value) == to_string(option_value)
+
+  defp run_mode_options do
+    [{"once", "Once"}, {"repeat", "Repeat"}]
+  end
+
+  defp normalized_run_mode(run_mode_value, repeat_value) do
+    case to_string(run_mode_value || "") do
+      "repeat" ->
+        "repeat"
+
+      "once" ->
+        "once"
+
+      _other ->
+        if(Phoenix.HTML.Form.normalize_value("checkbox", repeat_value),
+          do: "repeat",
+          else: "once"
+        )
+    end
+  end
 end

@@ -173,11 +173,11 @@ defmodule AppWeb.TaskLive.Form do
                 <% end %>
               </section>
 
-              <.input
+              <.textarea
                 field={@form[:prompt]}
-                type="textarea"
                 label="Prompt / instruction"
                 placeholder="Summarize yesterday's commits and notify the team channel with the key blockers."
+                class="min-h-20"
               />
 
               <section class="space-y-4 rounded-lg border border-border bg-card/70 p-5 shadow-sm">

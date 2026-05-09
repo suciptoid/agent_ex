@@ -382,18 +382,39 @@ defmodule App.Tasks do
         [App.Agents.AlloyTools.ChannelSendMessage]
       end
 
-    Chat.send_system_message(chat_room, task.prompt,
-      name: task.name,
-      extra_tools: extra_tools,
-      alloy_context: %{
+    user_id = resolve_notification_user_id(task.notification_chat_room)
+
+    alloy_context =
+      %{
         task_id: task.id,
         task_name: task.name,
         task_chat_room_id: chat_room.id,
         notification_chat_room_id: task.notification_chat_room_id,
         notification_chat_room: task.notification_chat_room
       }
+      |> maybe_put_alloy_user_id(user_id)
+
+    Chat.send_system_message(chat_room, task.prompt,
+      name: task.name,
+      extra_tools: extra_tools,
+      alloy_context: alloy_context
     )
   end
+
+  defp resolve_notification_user_id(%ChatRoom{id: chat_room_id}) do
+    case App.Gateways.get_channel_by_chat_room_id(chat_room_id) do
+      %Channel{metadata: %{"chat_type" => "private"}} = channel ->
+        App.Gateways.mapped_user_id_for_channel(channel)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp resolve_notification_user_id(nil), do: nil
+
+  defp maybe_put_alloy_user_id(context, nil), do: context
+  defp maybe_put_alloy_user_id(context, user_id), do: Map.put(context, :user_id, user_id)
 
   defp maybe_notify_task_output(
          %ScheduledTask{

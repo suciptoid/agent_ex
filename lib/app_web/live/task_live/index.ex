@@ -10,7 +10,8 @@ defmodule AppWeb.TaskLive.Index do
       {:ok,
        socket
        |> assign(:page_title, "Tasks")
-       |> assign(:tasks, Tasks.list_tasks(socket.assigns.current_scope))}
+       |> assign(:tasks, Tasks.list_tasks(socket.assigns.current_scope))
+       |> assign(:test_task_id, nil)}
     else
       {:ok,
        socket
@@ -19,6 +20,41 @@ defmodule AppWeb.TaskLive.Index do
        |> put_flash(:error, "Only organization owners and admins can manage scheduled tasks.")
        |> push_navigate(to: ~p"/dashboard")}
     end
+  end
+
+  @impl true
+  def handle_event("confirm-test-task", %{"id" => id}, socket) do
+    {:noreply, assign(socket, :test_task_id, id)}
+  end
+
+  @impl true
+  def handle_event("cancel-test-task", _params, socket) do
+    {:noreply, assign(socket, :test_task_id, nil)}
+  end
+
+  @impl true
+  def handle_event("test-task", _params, socket) do
+    socket =
+      case socket.assigns.test_task_id do
+        nil ->
+          assign(socket, :test_task_id, nil)
+
+        task_id ->
+          case Tasks.enqueue_test_run(socket.assigns.current_scope, task_id) do
+            :ok ->
+              socket
+              |> assign(:test_task_id, nil)
+              |> refresh_tasks()
+              |> put_flash(:info, "Test run queued. A new task chat room will appear shortly.")
+
+            {:error, _reason} ->
+              socket
+              |> assign(:test_task_id, nil)
+              |> put_flash(:error, "Failed to queue test run.")
+          end
+      end
+
+    {:noreply, socket}
   end
 
   @impl true
@@ -148,6 +184,17 @@ defmodule AppWeb.TaskLive.Index do
                   </div>
 
                   <div class="flex flex-wrap items-center gap-2 lg:justify-end">
+                    <.button
+                      id={"task-test-button-#{task.id}"}
+                      type="button"
+                      variant="outline"
+                      phx-click="confirm-test-task"
+                      phx-value-id={task.id}
+                      class="gap-2"
+                    >
+                      <.icon name="hero-play" class="size-4" /> Test
+                    </.button>
+
                     <.link navigate={~p"/tasks/#{task.id}/edit"}>
                       <.button id={"task-edit-button-#{task.id}"} variant="outline" class="gap-2">
                         <.icon name="hero-pencil-square" class="size-4" /> Edit
@@ -171,6 +218,36 @@ defmodule AppWeb.TaskLive.Index do
             </div>
           </div>
         </section>
+
+        <.dialog
+          id="test-task-dialog"
+          show={@test_task_id != nil}
+          on_cancel={JS.push("cancel-test-task")}
+          title="Run task now?"
+          class="sm:rounded-3xl sm:border-border/80 sm:shadow-2xl sm:shadow-black/20"
+        >
+          <div class="space-y-3 p-1">
+            <p class="text-sm text-muted-foreground">
+              This will immediately run the scheduled task and create a new task chat room with the result.
+            </p>
+            <p class="text-sm text-muted-foreground">
+              This action is the same as waiting for the schedule to trigger. The run will appear in the chat room list once complete.
+            </p>
+          </div>
+          <:footer :let={%{hide: hide}}>
+            <div class="flex justify-end gap-2">
+              <.button id="cancel-test-dialog" variant="outline" phx-click={hide}>
+                Cancel
+              </.button>
+              <.button
+                id="confirm-test-dialog"
+                phx-click="test-task"
+              >
+                <.icon name="hero-play" class="size-4" /> Run now
+              </.button>
+            </div>
+          </:footer>
+        </.dialog>
       </div>
     </Layouts.dashboard>
     """

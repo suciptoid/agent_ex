@@ -183,6 +183,18 @@ defmodule App.Tasks do
     end
   end
 
+  def enqueue_test_run(%Scope{} = scope, task_id) do
+    with %ScheduledTask{} = task <- get_task(scope, task_id) do
+      %{task_id: task.id, scheduled_for: DateTime.to_iso8601(DateTime.utc_now())}
+      |> TaskRunWorker.new(queue: :scheduled_tasks)
+      |> Oban.insert!()
+
+      :ok
+    else
+      nil -> {:error, :not_found}
+    end
+  end
+
   def task_room_title(%ScheduledTask{name: name}, %DateTime{} = scheduled_for) do
     "#{name} - #{Calendar.strftime(scheduled_for, "%Y-%m-%d %H:%M UTC")}"
   end
